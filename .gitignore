@@ -1,0 +1,92 @@
+# Build artifacts
+.build/
+*.xcodeproj
+*.xcworkspace
+
+# Swift Package Manager
+Package.resolved
+.swiftpm/
+
+# Xcode
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-aside
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Linux
+*~
+
+# temporary files which can be created if a process still has a handle open of a deleted file
+.fuse_hidden*
+
+# KDE directory preferences
+.directory
+
+# Linux trash folder which might appear on any partition or disk
+.Trash-*
+
+# .nfs files are created when an open file is removed but is still being accessed
+.nfs*
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Hirundo specific
+_site/
+.hirundo-cache/
+.hirundo-build.log
+
+# Test outputs
+test-output/
+test-results/
+
+# Coverage reports
+*.profdata
+*.profraw
+
+# Generated documentation
+docs/build/
+
+# Environment files
+.env
+.env.local
+
+# Log files
+*.log
+logs/

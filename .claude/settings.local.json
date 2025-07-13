@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(swift package init:*)",
+      "Bash(rm:*)",
+      "Bash(swift test:*)"
+    ],
+    "deny": []
+  }
+}

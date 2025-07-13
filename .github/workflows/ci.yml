@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        swift-version: ['5.9']
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Swift
+      uses: swift-actions/setup-swift@v1
+      with:
+        swift-version: ${{ matrix.swift-version }}
+    
+    - name: Cache Swift packages
+      uses: actions/cache@v3
+      with:
+        path: .build
+        key: ${{ runner.os }}-swift-${{ hashFiles('Package.resolved') }}
+        restore-keys: |
+          ${{ runner.os }}-swift-
+    
+    - name: Build
+      run: swift build -v
+    
+    - name: Run tests
+      run: swift test -v --enable-code-coverage
+    
+    - name: Generate code coverage report
+      if: matrix.os == 'macos-latest'
+      run: |
+        xcrun llvm-cov export -format="lcov" \
+          .build/debug/HirundoPackageTests.xctest/Contents/MacOS/HirundoPackageTests \
+          -instr-profile .build/debug/codecov/default.profdata > coverage.lcov
+    
+    - name: Upload coverage to Codecov
+      if: matrix.os == 'macos-latest'
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.lcov
+        flags: unittests
+        name: codecov-umbrella
+
+  lint:
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Swift
+      uses: swift-actions/setup-swift@v1
+      with:
+        swift-version: '5.9'
+    
+    - name: SwiftLint
+      run: |
+        if command -v swiftlint >/dev/null 2>&1; then
+          swiftlint
+        else
+          echo "SwiftLint not installed, skipping..."
+        fi
+
+  security-audit:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run security audit
+      run: |
+        # Check for security issues in Package.swift dependencies
+        echo "Checking for known vulnerabilities in dependencies..."
+        # This would use a security scanner if available
+        echo "No security scanner configured yet"
+    
+    - name: Check for secrets
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: main
+        head: HEAD
+
+  build-release:
+    runs-on: ${{ matrix.os }}
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Swift
+      uses: swift-actions/setup-swift@v1
+      with:
+        swift-version: '5.9'
+    
+    - name: Build Release
+      run: swift build -c release
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: hirundo-${{ matrix.os }}
+        path: .build/release/hirundo

@@ -1,0 +1,40 @@
+site:
+  title: "Test Site"
+  url: "https://example.com"
+  description: "A site built with Hirundo"
+  language: "en-US"
+  author:
+    name: "Your Name"
+    email: "your.email@example.com"
+
+build:
+  contentDirectory: "content"
+  outputDirectory: "_site"
+  staticDirectory: "static"
+  templatesDirectory: "templates"
+
+blog:
+  postsPerPage: 10
+  generateArchive: true
+  generateCategories: true
+  generateTags: true
+  rssEnabled: true
+
+plugins:
+  - name: "rss"
+    enabled: true
+    feedPath: "feed.xml"
+    itemLimit: 20
+  - name: "sitemap"
+    enabled: true
+    changefreq: "weekly"
+    priority: 0.5
+  - name: "minify"
+    enabled: true
+    minifyCSS: true
+    minifyJS: true
+  - name: "searchindex"
+    enabled: true
+    indexPath: "search.json"
+    includeContent: true
+    contentLength: 150
