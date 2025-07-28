@@ -16,7 +16,7 @@ Thank you for your interest in contributing to Hirundo! This document provides g
 1. **Fork the repository**
    ```bash
    # Fork the repo on GitHub, then clone your fork
-   git clone https://github.com/YOUR_USERNAME/hirundo.git
+   git clone https://github.com/SilentMalachite/hirundo.git
    cd hirundo
    ```
 

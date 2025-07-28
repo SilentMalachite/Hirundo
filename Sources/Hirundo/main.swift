@@ -81,6 +81,17 @@ struct InitCommand: ParsableCommand {
           staticDirectory: "static"
           templatesDirectory: "templates"
         
+        server:
+          port: 8080
+          liveReload: true
+          cors:
+            enabled: true
+            allowedOrigins: ["http://localhost:*", "https://localhost:*"]
+            allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+            allowedHeaders: ["Content-Type", "Authorization"]
+            maxAge: 3600
+            allowCredentials: false
+        
         \(blog ? """
         blog:
           postsPerPage: 10
@@ -342,12 +353,27 @@ struct ServeCommand: ParsableCommand {
             throw ExitCode.failure
         }
         
+        // Load config to get CORS settings
+        let configPath = URL(fileURLWithPath: currentDirectory).appendingPathComponent("config.yaml")
+        var corsConfig: CorsConfig? = nil
+        
+        if FileManager.default.fileExists(atPath: configPath.path) {
+            do {
+                let config = try HirundoConfig.load(from: configPath)
+                corsConfig = config.server.cors
+            } catch {
+                print("⚠️ Failed to load config for CORS settings: \(error.localizedDescription)")
+                print("Using default CORS configuration")
+            }
+        }
+        
         // Create development server
         let server = DevelopmentServer(
             projectPath: currentDirectory,
             port: port,
             host: host,
-            liveReload: !noReload
+            liveReload: !noReload,
+            corsConfig: corsConfig
         )
         
         let url = "http://\(host):\(port)"

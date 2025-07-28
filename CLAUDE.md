@@ -9,6 +9,7 @@ Swiftで構築された、モダンで高速、かつセキュアな静的サイ
 - **📝 Markdown**: Apple swift-markdownを使用したフロントマター付きCommonMarkサポート
 - **🎨 テンプレート**: カスタムフィルター付きの強力なStencilベースのテンプレートエンジン
 - **🔄 ライブリロード**: リアルタイムエラー報告機能付き自動再構築開発サーバー
+- **🌐 CORS対応**: 開発サーバーでの設定可能なCORS（Cross-Origin Resource Sharing）サポート
 - **🧩 拡張可能**: セキュア検証付きカスタム機能プラグインアーキテクチャ
 - **💾 スマートキャッシング**: 超高速再構築のためのインテリジェント無効化キャッシング
 - **📦 型安全**: 包括的検証付きの強く型付けされた設定とモデル
@@ -135,6 +136,14 @@ build:
 server:
   port: 8080
   liveReload: true
+  cors:
+    enabled: true
+    allowedOrigins: ["http://localhost:*", "https://localhost:*"]
+    allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowedHeaders: ["Content-Type", "Authorization"]
+    exposedHeaders: ["X-Response-Time"]  # オプション
+    maxAge: 3600
+    allowCredentials: false
 
 blog:
   postsPerPage: 10

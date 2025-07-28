@@ -15,6 +15,7 @@ public class DevelopmentServer {
     private let port: Int
     private let host: String
     private let liveReload: Bool
+    private let corsConfig: CorsConfig?
     private let server: HttpServer
     private let fileManager = FileManager.default
     private var hotReloadManager: HotReloadManager?
@@ -22,11 +23,12 @@ public class DevelopmentServer {
     private let sessionsQueue = DispatchQueue(label: "websocket.sessions", attributes: .concurrent)
     private var cleanupTimer: Timer?
     
-    public init(projectPath: String, port: Int, host: String, liveReload: Bool) {
+    public init(projectPath: String, port: Int, host: String, liveReload: Bool, corsConfig: CorsConfig? = nil) {
         self.projectPath = projectPath
         self.port = port
         self.host = host
         self.liveReload = liveReload
+        self.corsConfig = corsConfig ?? CorsConfig() // Use default CORS config if not provided
         self.server = HttpServer()
         
         setupRoutes()
@@ -54,23 +56,44 @@ public class DevelopmentServer {
     private func setupRoutes() {
         let outputPath = URL(fileURLWithPath: projectPath).appendingPathComponent("_site").path
         
+        // Handle CORS preflight requests
+        server["OPTIONS", "/(.*)"] = { [weak self] request in
+            guard let self = self else { return .internalServerError }
+            
+            if let corsConfig = self.corsConfig, corsConfig.enabled {
+                var headers = self.getCorsHeaders(for: request)
+                headers["Content-Length"] = "0"
+                return .raw(204, "No Content", headers) { _ in }
+            }
+            
+            return .raw(204, "No Content", [:]) { _ in }
+        }
+        
         // Serve static files
-        server["/(.*)"] = { request in
+        server["/(.*)"] = { [weak self] request in
+            guard let self = self else { return .internalServerError }
             let filePath = request.path == "/" ? "/index.html" : request.path
             let fullPath = outputPath + filePath
             
             // Try exact path first
             if self.fileManager.fileExists(atPath: fullPath) {
-                return self.serveFile(at: fullPath)
+                return self.serveFile(at: fullPath, request: request)
             }
             
             // Try as directory with index.html
             let indexPath = fullPath + "/index.html"
             if self.fileManager.fileExists(atPath: indexPath) {
-                return self.serveFile(at: indexPath)
+                return self.serveFile(at: indexPath, request: request)
             }
             
-            // 404
+            // 404 with CORS headers if enabled
+            if let corsConfig = self.corsConfig, corsConfig.enabled {
+                let headers = self.getCorsHeaders(for: request)
+                return .raw(404, "Not Found", headers) { writer in
+                    try writer.write("404 Not Found".data(using: .utf8)!)
+                }
+            }
+            
             return .notFound
         }
         
@@ -90,12 +113,73 @@ public class DevelopmentServer {
         }
     }
     
-    private func serveFile(at path: String) -> HttpResponse {
+    // Helper method to get CORS headers based on request origin
+    private func getCorsHeaders(for request: HttpRequest) -> [String: String] {
+        var headers: [String: String] = [:]
+        
+        guard let corsConfig = corsConfig, corsConfig.enabled else {
+            return headers
+        }
+        
+        // Get request origin
+        let origin = request.headers["origin"] ?? ""
+        
+        // Check if origin is allowed
+        let isAllowedOrigin = corsConfig.allowedOrigins.contains { allowedOrigin in
+            if allowedOrigin == "*" {
+                return true
+            }
+            // Support wildcard ports (e.g., http://localhost:*)
+            if allowedOrigin.contains("*") {
+                let pattern = allowedOrigin.replacingOccurrences(of: "*", with: "[0-9]+")
+                return origin.range(of: pattern, options: .regularExpression) != nil
+            }
+            return origin == allowedOrigin
+        }
+        
+        if isAllowedOrigin {
+            headers["Access-Control-Allow-Origin"] = origin
+        } else if corsConfig.allowedOrigins.contains("*") {
+            headers["Access-Control-Allow-Origin"] = "*"
+        }
+        
+        // Add other CORS headers
+        if !corsConfig.allowedMethods.isEmpty {
+            headers["Access-Control-Allow-Methods"] = corsConfig.allowedMethods.joined(separator: ", ")
+        }
+        
+        if !corsConfig.allowedHeaders.isEmpty {
+            headers["Access-Control-Allow-Headers"] = corsConfig.allowedHeaders.joined(separator: ", ")
+        }
+        
+        if let exposedHeaders = corsConfig.exposedHeaders, !exposedHeaders.isEmpty {
+            headers["Access-Control-Expose-Headers"] = exposedHeaders.joined(separator: ", ")
+        }
+        
+        if let maxAge = corsConfig.maxAge {
+            headers["Access-Control-Max-Age"] = String(maxAge)
+        }
+        
+        if corsConfig.allowCredentials {
+            headers["Access-Control-Allow-Credentials"] = "true"
+        }
+        
+        return headers
+    }
+    
+    private func serveFile(at path: String, request: HttpRequest) -> HttpResponse {
         guard let data = fileManager.contents(atPath: path) else {
             return .notFound
         }
         
         let mimeType = mimeType(for: path)
+        var headers = ["Content-Type": mimeType]
+        
+        // Add CORS headers if enabled
+        if let corsConfig = corsConfig, corsConfig.enabled {
+            let corsHeaders = getCorsHeaders(for: request)
+            headers.merge(corsHeaders) { _, new in new }
+        }
         
         // Inject live reload script for HTML files
         if liveReload && mimeType == "text/html",
@@ -124,7 +208,7 @@ public class DevelopmentServer {
             return .ok(.html(content))
         }
         
-        return .raw(200, "OK", ["Content-Type": mimeType]) { writer in
+        return .raw(200, "OK", headers) { writer in
             try writer.write(data)
         }
     }

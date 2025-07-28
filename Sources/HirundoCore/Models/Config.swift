@@ -167,10 +167,41 @@ public struct BuildConfig {
 public struct Server: Codable {
     public let port: Int
     public let liveReload: Bool
+    public let cors: CorsConfig?
     
-    public init(port: Int = 8080, liveReload: Bool = true) {
+    public init(port: Int = 8080, liveReload: Bool = true, cors: CorsConfig? = nil) {
         self.port = port
         self.liveReload = liveReload
+        self.cors = cors
+    }
+}
+
+// CORS configuration
+public struct CorsConfig: Codable {
+    public let enabled: Bool
+    public let allowedOrigins: [String]
+    public let allowedMethods: [String]
+    public let allowedHeaders: [String]
+    public let exposedHeaders: [String]?
+    public let maxAge: Int?
+    public let allowCredentials: Bool
+    
+    public init(
+        enabled: Bool = true,
+        allowedOrigins: [String] = ["http://localhost:*", "https://localhost:*"],
+        allowedMethods: [String] = ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allowedHeaders: [String] = ["Content-Type", "Authorization"],
+        exposedHeaders: [String]? = nil,
+        maxAge: Int? = 3600,
+        allowCredentials: Bool = false
+    ) {
+        self.enabled = enabled
+        self.allowedOrigins = allowedOrigins
+        self.allowedMethods = allowedMethods
+        self.allowedHeaders = allowedHeaders
+        self.exposedHeaders = exposedHeaders
+        self.maxAge = maxAge
+        self.allowCredentials = allowCredentials
     }
 }
 

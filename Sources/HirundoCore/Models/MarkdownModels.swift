@@ -19,6 +19,13 @@ public struct MarkdownParseResult {
     public var hasTables: Bool {
         !tables.isEmpty
     }
+    
+    public func renderHTML() -> String {
+        guard let document = document else {
+            return ""
+        }
+        return SimpleHTMLRenderer.render(document)
+    }
 }
 
 public enum MarkdownElement {

