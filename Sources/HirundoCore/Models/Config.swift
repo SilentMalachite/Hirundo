@@ -345,6 +345,77 @@ public struct Limits: Codable {
     }
 }
 
+// Timeout configuration for I/O operations
+public struct TimeoutConfig: Codable {
+    public let fileReadTimeout: TimeInterval
+    public let fileWriteTimeout: TimeInterval
+    public let directoryOperationTimeout: TimeInterval
+    public let httpRequestTimeout: TimeInterval
+    public let fsEventsTimeout: TimeInterval
+    public let serverStartTimeout: TimeInterval
+    
+    public init(
+        fileReadTimeout: TimeInterval = 30.0,
+        fileWriteTimeout: TimeInterval = 30.0,
+        directoryOperationTimeout: TimeInterval = 15.0,
+        httpRequestTimeout: TimeInterval = 10.0,
+        fsEventsTimeout: TimeInterval = 5.0,
+        serverStartTimeout: TimeInterval = 30.0
+    ) throws {
+        // Validate timeout values
+        let timeouts = [
+            ("fileReadTimeout", fileReadTimeout),
+            ("fileWriteTimeout", fileWriteTimeout),
+            ("directoryOperationTimeout", directoryOperationTimeout),
+            ("httpRequestTimeout", httpRequestTimeout),
+            ("fsEventsTimeout", fsEventsTimeout),
+            ("serverStartTimeout", serverStartTimeout)
+        ]
+        
+        for (name, value) in timeouts {
+            guard value > 0 else {
+                throw ConfigError.invalidValue("\(name) must be greater than 0")
+            }
+            guard value <= 600.0 else { // Maximum 10 minutes
+                throw ConfigError.invalidValue("\(name) cannot exceed 600 seconds (10 minutes)")
+            }
+        }
+        
+        self.fileReadTimeout = fileReadTimeout
+        self.fileWriteTimeout = fileWriteTimeout
+        self.directoryOperationTimeout = directoryOperationTimeout
+        self.httpRequestTimeout = httpRequestTimeout
+        self.fsEventsTimeout = fsEventsTimeout
+        self.serverStartTimeout = serverStartTimeout
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        let fileReadTimeout = try container.decodeIfPresent(TimeInterval.self, forKey: .fileReadTimeout) ?? 30.0
+        let fileWriteTimeout = try container.decodeIfPresent(TimeInterval.self, forKey: .fileWriteTimeout) ?? 30.0
+        let directoryOperationTimeout = try container.decodeIfPresent(TimeInterval.self, forKey: .directoryOperationTimeout) ?? 15.0
+        let httpRequestTimeout = try container.decodeIfPresent(TimeInterval.self, forKey: .httpRequestTimeout) ?? 10.0
+        let fsEventsTimeout = try container.decodeIfPresent(TimeInterval.self, forKey: .fsEventsTimeout) ?? 5.0
+        let serverStartTimeout = try container.decodeIfPresent(TimeInterval.self, forKey: .serverStartTimeout) ?? 30.0
+        
+        // Use the throwing initializer to validate
+        try self.init(
+            fileReadTimeout: fileReadTimeout,
+            fileWriteTimeout: fileWriteTimeout,
+            directoryOperationTimeout: directoryOperationTimeout,
+            httpRequestTimeout: httpRequestTimeout,
+            fsEventsTimeout: fsEventsTimeout,
+            serverStartTimeout: serverStartTimeout
+        )
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case fileReadTimeout, fileWriteTimeout, directoryOperationTimeout
+        case httpRequestTimeout, fsEventsTimeout, serverStartTimeout
+    }
+}
+
 public struct HirundoConfig: Codable {
     // Plugin configuration
     public struct PluginConfiguration: Codable {
@@ -422,9 +493,10 @@ public struct HirundoConfig: Codable {
     public let blog: Blog
     public let plugins: [PluginConfiguration]
     public let limits: Limits
+    public let timeouts: TimeoutConfig
     
     enum CodingKeys: String, CodingKey {
-        case site, build, server, blog, plugins, limits
+        case site, build, server, blog, plugins, limits, timeouts
     }
     
     public init(
@@ -433,7 +505,8 @@ public struct HirundoConfig: Codable {
         server: Server = Server(),
         blog: Blog = Blog(),
         plugins: [PluginConfiguration] = [],
-        limits: Limits = Limits()
+        limits: Limits = Limits(),
+        timeouts: TimeoutConfig = try! TimeoutConfig()
     ) {
         self.site = site
         self.build = build
@@ -441,6 +514,7 @@ public struct HirundoConfig: Codable {
         self.blog = blog
         self.plugins = plugins
         self.limits = limits
+        self.timeouts = timeouts
     }
     
     public init(from decoder: Decoder) throws {
@@ -452,6 +526,7 @@ public struct HirundoConfig: Codable {
         self.blog = try container.decodeIfPresent(Blog.self, forKey: .blog) ?? Blog()
         self.plugins = try container.decodeIfPresent([PluginConfiguration].self, forKey: .plugins) ?? []
         self.limits = try container.decodeIfPresent(Limits.self, forKey: .limits) ?? Limits()
+        self.timeouts = try container.decodeIfPresent(TimeoutConfig.self, forKey: .timeouts) ?? TimeoutConfig()
     }
     
     public static func parse(from yaml: String) throws -> HirundoConfig {
@@ -489,7 +564,8 @@ public struct HirundoConfig: Codable {
         }
         
         do {
-            let yaml = try String(contentsOf: url, encoding: .utf8)
+            // Use a reasonable default timeout for config loading
+            let yaml = try TimeoutFileManager.readFile(at: url.path, timeout: 10.0)
             
             // Parse config first to get limits
             let config = try parse(from: yaml)
@@ -503,6 +579,8 @@ public struct HirundoConfig: Codable {
             return config
         } catch let error as ConfigError {
             throw error
+        } catch let error as TimeoutError {
+            throw ConfigError.parseError("Configuration file read timed out: \(error.localizedDescription)")
         } catch {
             throw ConfigError.parseError(error.localizedDescription)
         }

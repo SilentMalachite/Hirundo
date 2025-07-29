@@ -58,7 +58,7 @@ public class SiteGenerator {
         }
         
         // Create output directory
-        try fileManager.createDirectory(at: outputURL, withIntermediateDirectories: true)
+        try TimeoutFileManager.createDirectory(at: outputURL.path, timeout: config.timeouts.directoryOperationTimeout)
         
         // Process content
         let contentURL = URL(fileURLWithPath: projectPath)
@@ -121,9 +121,9 @@ public class SiteGenerator {
         posts: inout [Post],
         includeDrafts: Bool
     ) throws {
-        let contents = try fileManager.contentsOfDirectory(
-            at: directoryURL,
-            includingPropertiesForKeys: nil
+        let contents = try TimeoutFileManager.listDirectory(
+            at: directoryURL.path,
+            timeout: config.timeouts.directoryOperationTimeout
         )
         
         for itemURL in contents {
@@ -157,7 +157,7 @@ public class SiteGenerator {
         posts: inout [Post],
         includeDrafts: Bool
     ) throws {
-        let content = try String(contentsOf: fileURL, encoding: .utf8)
+        let content = try TimeoutFileManager.readFile(at: fileURL.path, timeout: config.timeouts.fileReadTimeout)
         let result = try markdownParser.parse(content)
         
         // Skip drafts if not included
@@ -223,9 +223,9 @@ public class SiteGenerator {
         }
         
         // Create output directory
-        try fileManager.createDirectory(
-            at: pageOutputURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+        try TimeoutFileManager.createDirectory(
+            at: pageOutputURL.deletingLastPathComponent().path,
+            timeout: config.timeouts.directoryOperationTimeout
         )
         
         // Prepare context
@@ -287,7 +287,7 @@ public class SiteGenerator {
         // Render and write
         do {
             let html = try templateEngine.render(template: template, context: context)
-            try html.write(to: pageOutputURL, atomically: true, encoding: .utf8)
+            try TimeoutFileManager.writeFile(content: html, to: pageOutputURL.path, timeout: config.timeouts.fileWriteTimeout)
         } catch let error as TemplateError {
             throw BuildError.templateError(error.localizedDescription)
         }
@@ -327,9 +327,9 @@ public class SiteGenerator {
             .appendingPathComponent("archive")
             .appendingPathComponent("index.html")
         
-        try fileManager.createDirectory(
-            at: archiveURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+        try TimeoutFileManager.createDirectory(
+            at: archiveURL.deletingLastPathComponent().path,
+            timeout: config.timeouts.directoryOperationTimeout
         )
         
         let context: [String: Any] = [
@@ -344,11 +344,11 @@ public class SiteGenerator {
         
         do {
             let html = try templateEngine.render(template: "archive.html", context: context)
-            try html.write(to: archiveURL, atomically: true, encoding: .utf8)
+            try TimeoutFileManager.writeFile(content: html, to: archiveURL.path, timeout: config.timeouts.fileWriteTimeout)
         } catch {
             // If archive template doesn't exist, use default template
             let html = try templateEngine.render(template: "default.html", context: context)
-            try html.write(to: archiveURL, atomically: true, encoding: .utf8)
+            try TimeoutFileManager.writeFile(content: html, to: archiveURL.path, timeout: config.timeouts.fileWriteTimeout)
         }
     }
     
@@ -373,9 +373,9 @@ public class SiteGenerator {
                 .appendingPathComponent(categorySlug)
                 .appendingPathComponent("index.html")
             
-            try fileManager.createDirectory(
-                at: categoryURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
+            try TimeoutFileManager.createDirectory(
+                at: categoryURL.deletingLastPathComponent().path,
+                timeout: config.timeouts.directoryOperationTimeout
             )
             
             let context: [String: Any] = [
@@ -390,11 +390,11 @@ public class SiteGenerator {
             
             do {
                 let html = try templateEngine.render(template: "category.html", context: context)
-                try html.write(to: categoryURL, atomically: true, encoding: .utf8)
+                try TimeoutFileManager.writeFile(content: html, to: categoryURL.path, timeout: config.timeouts.fileWriteTimeout)
             } catch {
                 // If category template doesn't exist, use default template
                 let html = try templateEngine.render(template: "default.html", context: context)
-                try html.write(to: categoryURL, atomically: true, encoding: .utf8)
+                try TimeoutFileManager.writeFile(content: html, to: categoryURL.path, timeout: config.timeouts.fileWriteTimeout)
             }
         }
     }
@@ -420,9 +420,9 @@ public class SiteGenerator {
                 .appendingPathComponent(tagSlug)
                 .appendingPathComponent("index.html")
             
-            try fileManager.createDirectory(
-                at: tagURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
+            try TimeoutFileManager.createDirectory(
+                at: tagURL.deletingLastPathComponent().path,
+                timeout: config.timeouts.directoryOperationTimeout
             )
             
             let context: [String: Any] = [
@@ -437,11 +437,11 @@ public class SiteGenerator {
             
             do {
                 let html = try templateEngine.render(template: "tag.html", context: context)
-                try html.write(to: tagURL, atomically: true, encoding: .utf8)
+                try TimeoutFileManager.writeFile(content: html, to: tagURL.path, timeout: config.timeouts.fileWriteTimeout)
             } catch {
                 // If tag template doesn't exist, use default template
                 let html = try templateEngine.render(template: "default.html", context: context)
-                try html.write(to: tagURL, atomically: true, encoding: .utf8)
+                try TimeoutFileManager.writeFile(content: html, to: tagURL.path, timeout: config.timeouts.fileWriteTimeout)
             }
         }
     }

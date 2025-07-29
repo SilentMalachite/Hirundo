@@ -212,4 +212,108 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(config.server.liveReload)
         XCTAssertEqual(config.blog.postsPerPage, 10)
     }
+    
+    // MARK: - Timeout Configuration Tests
+    
+    func testDefaultTimeoutValues() throws {
+        let minimalYaml = """
+        site:
+          title: "Test Site"
+          url: "https://test.com"
+        """
+        
+        let config = try HirundoConfig.parse(from: minimalYaml)
+        
+        // Test default timeout values
+        XCTAssertEqual(config.timeouts.fileReadTimeout, 30.0)
+        XCTAssertEqual(config.timeouts.fileWriteTimeout, 30.0)
+        XCTAssertEqual(config.timeouts.directoryOperationTimeout, 15.0)
+        XCTAssertEqual(config.timeouts.httpRequestTimeout, 10.0)
+        XCTAssertEqual(config.timeouts.fsEventsTimeout, 5.0)
+        XCTAssertEqual(config.timeouts.serverStartTimeout, 30.0)
+    }
+    
+    func testCustomTimeoutValues() throws {
+        let yamlWithTimeouts = """
+        site:
+          title: "Test Site"
+          url: "https://test.com"
+        
+        timeouts:
+          fileReadTimeout: 60.0
+          fileWriteTimeout: 45.0
+          directoryOperationTimeout: 20.0
+          httpRequestTimeout: 15.0
+          fsEventsTimeout: 10.0
+          serverStartTimeout: 60.0
+        """
+        
+        let config = try HirundoConfig.parse(from: yamlWithTimeouts)
+        
+        XCTAssertEqual(config.timeouts.fileReadTimeout, 60.0)
+        XCTAssertEqual(config.timeouts.fileWriteTimeout, 45.0)
+        XCTAssertEqual(config.timeouts.directoryOperationTimeout, 20.0)
+        XCTAssertEqual(config.timeouts.httpRequestTimeout, 15.0)
+        XCTAssertEqual(config.timeouts.fsEventsTimeout, 10.0)
+        XCTAssertEqual(config.timeouts.serverStartTimeout, 60.0)
+    }
+    
+    func testInvalidTimeoutValues() throws {
+        let yamlWithInvalidTimeouts = """
+        site:
+          title: "Test Site"
+          url: "https://test.com"
+        
+        timeouts:
+          fileReadTimeout: -5.0
+          fileWriteTimeout: 0.0
+        """
+        
+        do {
+            let _ = try HirundoConfig.parse(from: yamlWithInvalidTimeouts)
+            XCTFail("Expected error for invalid timeout values")
+        } catch let error as ConfigError {
+            switch error {
+            case .invalidValue(let message):
+                XCTAssertTrue(message.contains("timeout"))
+            case .parseError:
+                // This is acceptable - the validation error is wrapped in a parse error
+                break
+            default:
+                XCTFail("Expected invalidValue or parseError, got \(error)")
+            }
+        } catch {
+            // Direct validation error from TimeoutConfig
+            XCTAssertTrue(error.localizedDescription.contains("timeout") || error.localizedDescription.contains("greater than 0"))
+        }
+    }
+    
+    func testTimeoutValidationRange() throws {
+        let yamlWithExcessiveTimeout = """
+        site:
+          title: "Test Site"
+          url: "https://test.com"
+        
+        timeouts:
+          fileReadTimeout: 3600.0
+        """
+        
+        do {
+            let _ = try HirundoConfig.parse(from: yamlWithExcessiveTimeout)
+            XCTFail("Expected error for excessive timeout value")
+        } catch let error as ConfigError {
+            switch error {
+            case .invalidValue(let message):
+                XCTAssertTrue(message.contains("600") || message.contains("maximum"))
+            case .parseError:
+                // The validation error is wrapped in a parse error
+                break
+            default:
+                XCTFail("Expected invalidValue or parseError, got \(error)")
+            }
+        } catch {
+            // Direct validation error from TimeoutConfig
+            XCTAssertTrue(error.localizedDescription.contains("600") || error.localizedDescription.contains("maximum"))
+        }
+    }
 }

@@ -15,6 +15,7 @@ Swiftで構築された、モダンで高速、かつセキュアな静的サイ
 - **📦 型安全**: 包括的検証付きの強く型付けされた設定とモデル
 - **⚡ 設定可能**: カスタマイズ可能なセキュリティ制限とパフォーマンス設定
 - **🛡️ メモリ安全**: WebSocket接続とファイル監視の高度なメモリ管理
+- **⏱️ タイムアウト保護**: すべてのI/O操作に対する設定可能なタイムアウトによるDoS攻撃防護
 
 ## 技術スタック
 
@@ -172,6 +173,15 @@ plugins:
       minifyHTML: true
       minifyCSS: true
       minifyJS: false  # 安全のため無効
+
+# タイムアウト設定（オプション）
+timeouts:
+  fileReadTimeout: 30.0              # ファイル読み込みタイムアウト（秒）
+  fileWriteTimeout: 30.0             # ファイル書き込みタイムアウト（秒）
+  directoryOperationTimeout: 15.0    # ディレクトリ操作タイムアウト（秒）
+  httpRequestTimeout: 10.0           # HTTPリクエストタイムアウト（秒）
+  fsEventsTimeout: 5.0              # ファイル監視開始タイムアウト（秒）
+  serverStartTimeout: 30.0          # サーバー起動タイムアウト（秒）
 ```
 
 ## テンプレート変数
@@ -191,6 +201,34 @@ plugins:
 - `excerpt`: 抜粋抽出
 - `absolute_url`: 絶対URL作成
 - `markdown`: Markdownレンダリング
+
+## タイムアウト設定
+
+Hirundoは、DoS攻撃や意図しないリソース消費を防ぐため、すべてのI/O操作に対してタイムアウト設定を提供します。
+
+### 設定可能なタイムアウト
+
+- **fileReadTimeout**: ファイル読み込み操作（Markdownファイル、設定ファイルなど）
+- **fileWriteTimeout**: ファイル書き込み操作（HTML出力、キャッシュファイルなど）
+- **directoryOperationTimeout**: ディレクトリ操作（ディレクトリ作成、一覧取得など）
+- **httpRequestTimeout**: HTTPリクエスト（開発サーバーでの外部API呼び出しなど）
+- **fsEventsTimeout**: ファイル監視システムの初期化
+- **serverStartTimeout**: 開発サーバーの起動
+
+### デフォルト値
+
+- ファイル操作: 30秒
+- ディレクトリ操作: 15秒
+- HTTPリクエスト: 10秒
+- ファイル監視: 5秒
+- サーバー起動: 30秒
+
+### 制限
+
+- 最小値: 0.1秒
+- 最大値: 600秒（10分）
+
+これらの制限により、システムが適切に応答し続けることが保証され、悪意あるファイルや環境の問題による無限ハング状態を防ぎます。
 
 ## 今後の拡張予定
 
