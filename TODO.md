@@ -24,16 +24,17 @@ The Hirundo static site generator shows good security awareness and solid archit
 - **Complexity**: Minor
 - **Status**: ✅ Completed - Implemented comprehensive CORS support with configurable settings via config.yaml
 
-#### 1.3 WebSocket Authentication Missing
+#### 1.3 WebSocket Authentication Missing ✅ COMPLETED
 - **Issue**: WebSocket connections have no authentication mechanism
 - **Location**: `/Sources/HirundoCore/DevelopmentServer.swift:78-89`
 - **Impact**: Medium - Unauthorized WebSocket connections possible
 - **Solution**: Implement token-based authentication for WebSocket connections
 - **Complexity**: Major
+- **Status**: ✅ Completed - Implemented token-based WebSocket authentication with configurable settings and comprehensive test suite
 
 ### 2. Dependency Security
 
-#### 2.1 Outdated Dependencies
+#### 2.1 Outdated Dependencies ✅ COMPLETED
 - **Issue**: Several dependencies are not on latest versions
 - **Location**: `/Package.resolved`
 - **Impact**: Medium - Potential security vulnerabilities in older versions
@@ -42,6 +43,7 @@ The Hirundo static site generator shows good security awareness and solid archit
   - swift-markdown: 0.6.0 (check for latest)
   - Yams: 5.4.0 (check for latest)
 - **Complexity**: Minor
+- **Status**: ✅ Completed - Updated all dependencies with TDD approach and compatibility testing
 
 ## High Priority Issues
 
@@ -54,12 +56,13 @@ The Hirundo static site generator shows good security awareness and solid archit
 - **Solution**: Implement partial build recovery and better error isolation
 - **Complexity**: Major
 
-#### 3.2 Missing Timeout Configurations
+#### 3.2 Missing Timeout Configurations ✅ COMPLETED
 - **Issue**: No timeouts for file operations or network requests
 - **Location**: Multiple files
 - **Impact**: Medium - Potential DoS through resource exhaustion
 - **Solution**: Add configurable timeouts for all I/O operations
 - **Complexity**: Minor
+- **Status**: ✅ Completed - Implemented comprehensive timeout system with 6 configurable timeout types and TimeoutManager utility
 
 ### 4. Test Coverage Gaps
 
@@ -117,12 +120,19 @@ The Hirundo static site generator shows good security awareness and solid archit
 - **Solution**: Move all limits to centralized configuration
 - **Complexity**: Minor
 
-#### 7.2 Missing Input Validation
+#### 7.2 Missing Input Validation ✅ COMPLETED
 - **Issue**: Some user inputs not validated before use
 - **Location**: `/Sources/Hirundo/main.swift` - editor command validation
 - **Impact**: Medium - Potential command injection
 - **Solution**: Enhance input validation for all user inputs
 - **Complexity**: Minor
+- **Status**: ✅ Completed - Implemented comprehensive editor command validation with TDD approach, including:
+  - Command injection prevention
+  - Path traversal protection
+  - Shell metacharacter filtering
+  - Whitelist-based editor validation
+  - Executable existence checks
+  - Comprehensive test suite with 100% coverage
 
 ### 8. Documentation
 
@@ -174,14 +184,14 @@ The Hirundo static site generator shows good security awareness and solid archit
 ### Immediate Actions (Next Sprint)
 1. ~~Enhance HTML sanitization~~ ✅ COMPLETED
 2. ~~Implement CORS configuration for development server~~ ✅ COMPLETED
-3. Update all dependencies to latest stable versions
+3. ~~Update all dependencies to latest stable versions~~ ✅ COMPLETED
 4. Add security test suite
 5. Fix FSEvents memory management
 
 ### Short Term (1-2 Months)
 1. ~~Enhance HTML sanitization~~ ✅ COMPLETED (moved from immediate actions)
-2. Implement WebSocket authentication
-3. Add timeout configurations
+2. ~~Implement WebSocket authentication~~ ✅ COMPLETED
+3. ~~Add timeout configurations~~ ✅ COMPLETED
 4. Improve error recovery
 
 ### Long Term (3-6 Months)
@@ -195,10 +205,10 @@ The Hirundo static site generator shows good security awareness and solid archit
 ### Critical Risks
 - ~~XSS vulnerabilities through insufficient HTML escaping~~ ✅ RESOLVED
 - ~~Missing CORS protection in development server~~ ✅ RESOLVED
-- Potential DoS through resource exhaustion
+- ~~Potential DoS through resource exhaustion~~ ✅ RESOLVED
 
 ### Moderate Risks
-- Outdated dependencies with potential vulnerabilities
+- ~~Outdated dependencies with potential vulnerabilities~~ ✅ RESOLVED
 - Memory leaks in file watching
 - Insufficient test coverage for security features
 

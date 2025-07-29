@@ -18,9 +18,14 @@ internal class FSEventsWrapper {
     func start() throws {
         var context = FSEventStreamContext(
             version: 0,
-            info: Unmanaged.passUnretained(self).toOpaque(),
+            info: Unmanaged.passRetained(self).toOpaque(),
             retain: nil,
-            release: nil,
+            release: { info in
+                // Release the retained reference when the stream is deallocated
+                if let info = info {
+                    Unmanaged<FSEventsWrapper>.fromOpaque(info).release()
+                }
+            },
             copyDescription: nil
         )
         

@@ -114,6 +114,123 @@ public class SiteGenerator {
         try pluginManager.executeAfterBuild(buildContext: buildContext)
     }
     
+    // New method for build with error recovery
+    public func buildWithRecovery(clean: Bool = false, includeDrafts: Bool = false) throws -> BuildResult {
+        let startTime = Date()
+        let outputURL = URL(fileURLWithPath: projectPath)
+            .appendingPathComponent(config.build.outputDirectory)
+        
+        // Create build context
+        let buildContext = BuildContext(
+            outputPath: outputURL.path,
+            isDraft: includeDrafts,
+            isClean: clean,
+            config: config
+        )
+        
+        // Execute before build hook
+        try pluginManager.executeBeforeBuild(buildContext: buildContext)
+        
+        // Clean output directory if requested
+        if clean && fileManager.fileExists(atPath: outputURL.path) {
+            try fileManager.removeItem(at: outputURL)
+        }
+        
+        // Create output directory
+        try TimeoutFileManager.createDirectory(at: outputURL.path, timeout: config.timeouts.directoryOperationTimeout)
+        
+        // Process content with error recovery
+        let contentURL = URL(fileURLWithPath: projectPath)
+            .appendingPathComponent(config.build.contentDirectory)
+        
+        var allPages: [Page] = []
+        var allPosts: [Post] = []
+        var successfulPages: [SuccessfulPage] = []
+        var failedPages: [FailedPage] = []
+        
+        // Process all markdown files with error recovery
+        processDirectoryWithRecovery(
+            contentURL,
+            outputURL: outputURL,
+            pages: &allPages,
+            posts: &allPosts,
+            successfulPages: &successfulPages,
+            failedPages: &failedPages,
+            includeDrafts: includeDrafts
+        )
+        
+        // Generate archive, category, and tag pages if configured (with error recovery)
+        if config.blog.generateArchive {
+            do {
+                try generateArchivePage(posts: allPosts, outputURL: outputURL)
+            } catch {
+                print("Warning: Failed to generate archive page: \(error.localizedDescription)")
+            }
+        }
+        
+        if config.blog.generateCategories {
+            do {
+                try generateCategoryPages(posts: allPosts, outputURL: outputURL)
+            } catch {
+                print("Warning: Failed to generate category pages: \(error.localizedDescription)")
+            }
+        }
+        
+        if config.blog.generateTags {
+            do {
+                try generateTagPages(posts: allPosts, outputURL: outputURL)
+            } catch {
+                print("Warning: Failed to generate tag pages: \(error.localizedDescription)")
+            }
+        }
+        
+        // Process static files through asset pipeline (with error recovery)
+        let staticURL = URL(fileURLWithPath: projectPath)
+            .appendingPathComponent(config.build.staticDirectory)
+        
+        if fileManager.fileExists(atPath: staticURL.path) {
+            do {
+                // Configure asset pipeline based on config
+                configureAssetPipeline()
+                
+                // Process assets through pipeline
+                let manifest = try assetPipeline.processAssets(
+                    from: staticURL.path,
+                    to: outputURL.path
+                )
+                
+                // Save manifest if fingerprinting is enabled
+                if assetPipeline.enableFingerprinting {
+                    let manifestPath = outputURL.appendingPathComponent("asset-manifest.json").path
+                    try assetPipeline.saveManifest(manifest, to: manifestPath)
+                }
+            } catch {
+                print("Warning: Failed to process static assets: \(error.localizedDescription)")
+            }
+        }
+        
+        // Execute after build hook
+        try pluginManager.executeAfterBuild(buildContext: buildContext)
+        
+        let endTime = Date()
+        
+        // Create and return build result
+        let result = BuildResult(
+            successfulPages: successfulPages,
+            failedPages: failedPages,
+            totalProcessed: successfulPages.count + failedPages.count,
+            startTime: startTime,
+            endTime: endTime
+        )
+        
+        // Print error summary if there were failures
+        if !failedPages.isEmpty {
+            print("\n\(result.errorSummary)")
+        }
+        
+        return result
+    }
+    
     private func processDirectory(
         _ directoryURL: URL,
         outputURL: URL,
@@ -607,6 +724,301 @@ extension String {
 }
 
 // MARK: - Plugin Support
+
+// MARK: - Build Result Types
+
+public extension SiteGenerator {
+    struct BuildResult {
+        public let successfulPages: [SuccessfulPage]
+        public let failedPages: [FailedPage]
+        public let totalProcessed: Int
+        public let startTime: Date
+        public let endTime: Date
+        
+        public var isCompleteSuccess: Bool {
+            return failedPages.isEmpty
+        }
+        
+        public var errorSummary: String {
+            var summary = "Build completed with errors\n"
+            summary += "========================\n\n"
+            summary += "Total files processed: \(totalProcessed)\n"
+            summary += "Successful: \(successfulPages.count)\n"
+            summary += "Failed: \(failedPages.count)\n"
+            summary += "Build time: \(String(format: "%.2f", endTime.timeIntervalSince(startTime)))s\n"
+            
+            if !failedPages.isEmpty {
+                summary += "\nErrors:\n"
+                summary += "-------\n"
+                for (index, failedPage) in failedPages.enumerated() {
+                    let filename = URL(fileURLWithPath: failedPage.path).lastPathComponent
+                    summary += "\n\(index + 1). \(filename)\n"
+                    summary += "   Error: \(failedPage.error.localizedDescription)\n"
+                    summary += "   Path: \(failedPage.path)\n"
+                }
+            }
+            
+            return summary
+        }
+    }
+    
+    struct SuccessfulPage {
+        public let path: String
+        public let outputPath: String
+        public let title: String
+    }
+    
+    struct FailedPage {
+        public let path: String
+        public let error: Error
+        public let stage: BuildStage
+    }
+    
+    enum BuildStage {
+        case reading
+        case parsing
+        case transforming
+        case rendering
+        case writing
+    }
+}
+
+extension SiteGenerator {
+    private func processDirectoryWithRecovery(
+        _ directoryURL: URL,
+        outputURL: URL,
+        pages: inout [Page],
+        posts: inout [Post],
+        successfulPages: inout [SuccessfulPage],
+        failedPages: inout [FailedPage],
+        includeDrafts: Bool
+    ) {
+        do {
+            let contents = try TimeoutFileManager.listDirectory(
+                at: directoryURL.path,
+                timeout: config.timeouts.directoryOperationTimeout
+            )
+            
+            for itemURL in contents {
+                if itemURL.pathExtension == "md" {
+                    processMarkdownFileWithRecovery(
+                        itemURL,
+                        outputURL: outputURL,
+                        pages: &pages,
+                        posts: &posts,
+                        successfulPages: &successfulPages,
+                        failedPages: &failedPages,
+                        includeDrafts: includeDrafts
+                    )
+                } else {
+                    var isDirectory: ObjCBool = false
+                    if fileManager.fileExists(atPath: itemURL.path, isDirectory: &isDirectory), isDirectory.boolValue {
+                        processDirectoryWithRecovery(
+                            itemURL,
+                            outputURL: outputURL,
+                            pages: &pages,
+                            posts: &posts,
+                            successfulPages: &successfulPages,
+                            failedPages: &failedPages,
+                            includeDrafts: includeDrafts
+                        )
+                    }
+                }
+            }
+        } catch {
+            // If we can't even read the directory, add a failure for the directory itself
+            failedPages.append(FailedPage(
+                path: directoryURL.path,
+                error: error,
+                stage: .reading
+            ))
+        }
+    }
+    
+    private func processMarkdownFileWithRecovery(
+        _ fileURL: URL,
+        outputURL: URL,
+        pages: inout [Page],
+        posts: inout [Post],
+        successfulPages: inout [SuccessfulPage],
+        failedPages: inout [FailedPage],
+        includeDrafts: Bool
+    ) {
+        var currentStage: BuildStage = .reading
+        
+        do {
+            // Stage 1: Reading
+            currentStage = .reading
+            let content = try TimeoutFileManager.readFile(at: fileURL.path, timeout: config.timeouts.fileReadTimeout)
+            
+            // Stage 2: Parsing
+            currentStage = .parsing
+            let result = try markdownParser.parse(content)
+            
+            // Skip drafts if not included
+            if let draft = result.frontMatter?["draft"] as? Bool, draft, !includeDrafts {
+                return
+            }
+            
+            // Stage 3: Transforming
+            currentStage = .transforming
+            
+            // Create content item for plugin processing
+            let contentItem = ContentItem(
+                path: fileURL.path,
+                frontMatter: result.frontMatter ?? [:],
+                content: content,
+                type: .markdown
+            )
+            
+            // Transform content through plugins
+            let transformedContent = try pluginManager.transformContent(contentItem)
+            
+            // Determine if this is a post or page
+            let isPost = fileURL.path.contains("/posts/")
+            
+            // Create output path
+            let contentURL = URL(fileURLWithPath: projectPath).appendingPathComponent(config.build.contentDirectory)
+            
+            // Calculate relative path from content directory
+            var relativePath: String
+            
+            // Get the standardized paths to handle /private prefix on macOS
+            let standardizedFileURL = fileURL.standardizedFileURL
+            let standardizedContentURL = contentURL.standardizedFileURL
+            
+            // Get the relative path from the content directory
+            if let range = standardizedFileURL.path.range(of: standardizedContentURL.path) {
+                relativePath = String(standardizedFileURL.path[range.upperBound...])
+                if relativePath.hasPrefix("/") {
+                    relativePath = String(relativePath.dropFirst())
+                }
+            } else {
+                // Fallback: use lastPathComponent
+                relativePath = fileURL.deletingPathExtension().lastPathComponent
+            }
+            
+            // Remove .md extension if still present
+            if relativePath.hasSuffix(".md") {
+                relativePath = String(relativePath.dropLast(3))
+            }
+            
+            // Clean up any remaining path issues
+            if relativePath.hasPrefix("/") {
+                relativePath = String(relativePath.dropFirst())
+            }
+            
+            // Sanitize the path to prevent path traversal attacks
+            relativePath = sanitizePath(relativePath)
+            
+            let pageOutputURL: URL
+            if relativePath == "index" {
+                pageOutputURL = outputURL.appendingPathComponent("index.html")
+            } else {
+                pageOutputURL = outputURL
+                    .appendingPathComponent(relativePath)
+                    .appendingPathComponent("index.html")
+            }
+            
+            // Create output directory
+            try TimeoutFileManager.createDirectory(
+                at: pageOutputURL.deletingLastPathComponent().path,
+                timeout: config.timeouts.directoryOperationTimeout
+            )
+            
+            // Stage 4: Rendering
+            currentStage = .rendering
+            
+            // Prepare context
+            var context: [String: Any] = [
+                "site": [
+                    "title": config.site.title,
+                    "description": config.site.description ?? "",
+                    "url": config.site.url,
+                    "language": config.site.language ?? "en-US",
+                    "author": [
+                        "name": config.site.author?.name ?? "",
+                        "email": config.site.author?.email ?? ""
+                    ]
+                ],
+                "pages": pages.map { $0.context },
+                "posts": posts.map { $0.context }
+            ]
+            
+            // Parse and format content
+            let renderedContent = renderMarkdownContent(result)
+            
+            var pageTitle = ""
+            
+            if isPost {
+                let post = try Post(
+                    url: relativePath,
+                    frontMatter: transformedContent.frontMatter,
+                    content: renderedContent
+                )
+                posts.append(post)
+                pageTitle = post.title
+                
+                context["page"] = post.context
+                context["content"] = renderedContent
+                
+                // Add categories and tags to context
+                if let categories = post.categories {
+                    context["categories"] = categories
+                }
+                if let tags = post.tags {
+                    context["tags"] = tags
+                }
+            } else {
+                let page = Page(
+                    url: relativePath,
+                    frontMatter: transformedContent.frontMatter,
+                    content: renderedContent
+                )
+                pages.append(page)
+                pageTitle = page.title
+                
+                context["page"] = page.context
+                context["content"] = renderedContent
+            }
+            
+            // Enrich template data through plugins
+            context = try pluginManager.enrichTemplateData(context)
+            
+            // Determine template
+            let layout = result.frontMatter?["layout"] as? String ?? (isPost ? "post" : "default")
+            let template = "\(layout).html"
+            
+            // Render and write
+            do {
+                let html = try templateEngine.render(template: template, context: context)
+                
+                // Stage 5: Writing
+                currentStage = .writing
+                try TimeoutFileManager.writeFile(content: html, to: pageOutputURL.path, timeout: config.timeouts.fileWriteTimeout)
+                
+                // Success! Add to successful pages
+                successfulPages.append(SuccessfulPage(
+                    path: fileURL.path,
+                    outputPath: pageOutputURL.path,
+                    title: pageTitle
+                ))
+            } catch let error as TemplateError {
+                throw BuildError.templateError(error.localizedDescription)
+            }
+        } catch {
+            // Add to failed pages with the current stage
+            failedPages.append(FailedPage(
+                path: fileURL.path,
+                error: error,
+                stage: currentStage
+            ))
+            
+            // Log the error for debugging
+            print("Error processing \(fileURL.lastPathComponent) at stage \(currentStage): \(error.localizedDescription)")
+        }
+    }
+}
 
 extension SiteGenerator {
     private func loadPlugins() throws {

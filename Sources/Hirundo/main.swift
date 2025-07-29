@@ -304,6 +304,9 @@ struct BuildCommand: ParsableCommand {
     @Flag(name: .long, help: "Clean output before building")
     var clean: Bool = false
     
+    @Flag(name: .long, help: "Continue building even if some files fail (error recovery mode)")
+    var continueOnError: Bool = false
+    
     mutating func run() throws {
         let currentDirectory = FileManager.default.currentDirectoryPath
         
@@ -311,10 +314,43 @@ struct BuildCommand: ParsableCommand {
         
         do {
             let generator = try SiteGenerator(projectPath: currentDirectory)
-            try generator.build(clean: clean, includeDrafts: drafts)
             
-            print("✅ Site built successfully!")
-            print("📁 Output directory: \(currentDirectory)/_site")
+            if continueOnError {
+                // Use build with recovery mode
+                let result = try generator.buildWithRecovery(clean: clean, includeDrafts: drafts)
+                
+                if result.isCompleteSuccess {
+                    print("✅ Site built successfully!")
+                } else {
+                    print("⚠️  Build completed with errors")
+                    print("✅ Successfully built: \(result.successfulPages.count) pages")
+                    print("❌ Failed: \(result.failedPages.count) pages")
+                    
+                    // Show brief error summary
+                    print("\nFailed files:")
+                    for (index, failure) in result.failedPages.prefix(5).enumerated() {
+                        let filename = URL(fileURLWithPath: failure.path).lastPathComponent
+                        print("  \(index + 1). \(filename): \(failure.error.localizedDescription)")
+                    }
+                    
+                    if result.failedPages.count > 5 {
+                        print("  ... and \(result.failedPages.count - 5) more")
+                    }
+                }
+                
+                print("📁 Output directory: \(currentDirectory)/_site")
+                
+                // Exit with failure if there were errors
+                if !result.isCompleteSuccess {
+                    throw ExitCode.failure
+                }
+            } else {
+                // Use standard build (fails on first error)
+                try generator.build(clean: clean, includeDrafts: drafts)
+                
+                print("✅ Site built successfully!")
+                print("📁 Output directory: \(currentDirectory)/_site")
+            }
         } catch {
             print("❌ Build failed: \(error.localizedDescription)")
             throw ExitCode.failure
@@ -501,7 +537,7 @@ struct NewPostCommand: ParsableCommand {
             let editor = ProcessInfo.processInfo.environment["EDITOR"] ?? "open"
             
             // Enhanced editor command validation
-            guard let validatedEditor = validateAndSanitizeEditorCommand(editor) else {
+            guard let validatedEditor = SecurityUtilities.validateAndSanitizeEditorCommand(editor) else {
                 print("⚠️ Editor '\(editor)' failed security validation.")
                 return
             }
@@ -588,7 +624,7 @@ struct NewPageCommand: ParsableCommand {
             let editor = ProcessInfo.processInfo.environment["EDITOR"] ?? "open"
             
             // Enhanced editor command validation
-            guard let validatedEditor = validateAndSanitizeEditorCommand(editor) else {
+            guard let validatedEditor = SecurityUtilities.validateAndSanitizeEditorCommand(editor) else {
                 print("⚠️ Editor '\(editor)' failed security validation.")
                 return
             }
@@ -659,73 +695,3 @@ struct CleanCommand: ParsableCommand {
     }
 }
 
-// MARK: - Security Utilities
-
-/// Validates and sanitizes an editor command to prevent security vulnerabilities
-/// - Parameter editorCommand: The editor command to validate
-/// - Returns: A validated editor command, or nil if validation fails
-func validateAndSanitizeEditorCommand(_ editorCommand: String) -> String? {
-    // Remove any null bytes and dangerous characters
-    let sanitized = editorCommand
-        .replacingOccurrences(of: "\0", with: "")
-        .replacingOccurrences(of: "\r", with: "")
-        .replacingOccurrences(of: "\n", with: "")
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-    
-    // Check for empty command after sanitization
-    guard !sanitized.isEmpty else {
-        return nil
-    }
-    
-    // Define allowed editors for security
-    let allowedEditors = [
-        "open", "vim", "nvim", "nano", "emacs", "code", "subl", "atom",
-        "micro", "gedit", "kate", "mousepad", "leafpad", "pluma", "vi"
-    ]
-    
-    // Extract the command name from the path
-    let editorURL = URL(fileURLWithPath: sanitized)
-    let commandName = editorURL.lastPathComponent
-    
-    // Check if the editor is in the allowed list
-    guard allowedEditors.contains(commandName) else {
-        print("⚠️ Editor '\(commandName)' is not in the allowed list for security reasons.")
-        print("Allowed editors: \(allowedEditors.joined(separator: ", "))")
-        return nil
-    }
-    
-    // Additional security checks
-    // 1. Prevent absolute paths that try to traverse outside expected directories
-    if sanitized.hasPrefix("/") {
-        // Only allow common editor paths
-        let allowedPaths = [
-            "/usr/bin/vim", "/usr/bin/nvim", "/usr/bin/nano", "/usr/bin/emacs",
-            "/usr/local/bin/vim", "/usr/local/bin/nvim", "/usr/local/bin/nano",
-            "/usr/local/bin/code", "/opt/homebrew/bin/vim", "/opt/homebrew/bin/nvim"
-        ]
-        
-        guard allowedPaths.contains(sanitized) || sanitized == "/usr/bin/open" else {
-            print("⚠️ Editor path '\(sanitized)' is not in the allowed paths for security reasons.")
-            return nil
-        }
-    }
-    
-    // 2. Prevent path traversal attempts
-    if sanitized.contains("..") || sanitized.contains("./") {
-        print("⚠️ Path traversal attempt detected in editor command: \(sanitized)")
-        return nil
-    }
-    
-    // 3. Prevent shell injection attempts
-    let dangerousChars = ["&", "|", ";", "$", "`", "(", ")", "{", "}", "[", "]", "<", ">", "\"", "'"]
-    for char in dangerousChars {
-        if sanitized.contains(char) {
-            print("⚠️ Potentially dangerous character '\(char)' detected in editor command: \(sanitized)")
-            return nil
-        }
-    }
-    
-    // Return just the command name for maximum security
-    // This forces the use of PATH resolution rather than absolute paths
-    return commandName
-}

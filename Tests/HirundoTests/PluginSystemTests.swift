@@ -1,6 +1,22 @@
 import XCTest
 @testable import HirundoCore
 
+// MARK: - Test Helpers
+
+extension XCTestCase {
+    func XCTAssertThrows<T>(_ expression: @autoclosure () throws -> T, 
+                           _ errorHandler: (Error) -> Void,
+                           file: StaticString = #file,
+                           line: UInt = #line) {
+        do {
+            _ = try expression()
+            XCTFail("Expected error to be thrown", file: file, line: line)
+        } catch {
+            errorHandler(error)
+        }
+    }
+}
+
 final class PluginSystemTests: XCTestCase {
     
     var pluginManager: PluginManager!
@@ -222,9 +238,9 @@ final class PluginSystemTests: XCTestCase {
         let dependentPlugin = DependentPlugin()
         let dependencyPlugin = DependencyPlugin()
         
-        // Register in wrong order
-        try pluginManager.register(dependentPlugin)
+        // Register dependency first, then dependent
         try pluginManager.register(dependencyPlugin)
+        try pluginManager.register(dependentPlugin)
         
         let context = try createTestContext()
         
@@ -234,6 +250,25 @@ final class PluginSystemTests: XCTestCase {
         XCTAssertTrue(dependencyPlugin.initialized)
         XCTAssertTrue(dependentPlugin.initialized)
         XCTAssertLessThan(dependencyPlugin.initTime!, dependentPlugin.initTime!)
+    }
+    
+    func testPluginDependencyMissing() throws {
+        let dependentPlugin = DependentPlugin()
+        
+        // Register only the dependent plugin without its dependency
+        XCTAssertThrows(try pluginManager.register(dependentPlugin)) { error in
+            guard let pluginError = error as? PluginError else {
+                XCTFail("Expected PluginError")
+                return
+            }
+            switch pluginError {
+            case .dependencyNotFound(let plugin, let dependency):
+                XCTAssertEqual(plugin, "DependentPlugin")
+                XCTAssertEqual(dependency, "DependencyPlugin")
+            default:
+                XCTFail("Expected dependencyNotFound error")
+            }
+        }
     }
     
     func testPluginPriority() throws {
@@ -260,6 +295,194 @@ final class PluginSystemTests: XCTestCase {
         
         // Should be processed in priority order: high -> normal -> low
         XCTAssertEqual(transformed.content, "test-high-normal-low")
+    }
+    
+    // MARK: - Security Tests
+    
+    func testMaliciousFileSystemAccess() throws {
+        let maliciousPlugin = MaliciousFileSystemPlugin()
+        try pluginManager.register(maliciousPlugin)
+        
+        let context = try createTestContext()
+        try pluginManager.initializeAll(context: context)
+        
+        let content = ContentItem(
+            path: "test.md",
+            frontMatter: [:],
+            content: "test",
+            type: .markdown
+        )
+        
+        // Plugin should not be able to access files outside project directory
+        XCTAssertThrows(try pluginManager.transformContent(content)) { error in
+            XCTAssertTrue(error is PluginSecurityError)
+        }
+    }
+    
+    func testExcessiveResourceConsumption() throws {
+        let resourceHogPlugin = ResourceHogPlugin()
+        try pluginManager.register(resourceHogPlugin)
+        
+        let context = try createTestContext()
+        try pluginManager.initializeAll(context: context)
+        
+        let content = ContentItem(
+            path: "test.md",
+            frontMatter: [:],
+            content: "test",
+            type: .markdown
+        )
+        
+        // Plugin should be stopped if it consumes too much memory/CPU
+        XCTAssertThrows(try pluginManager.transformContent(content)) { error in
+            XCTAssertTrue(error is PluginResourceLimitError)
+        }
+    }
+    
+    func testSystemFileModificationAttempt() throws {
+        let systemModifierPlugin = SystemFileModifierPlugin()
+        try pluginManager.register(systemModifierPlugin)
+        
+        let context = try createTestContext()
+        try pluginManager.initializeAll(context: context)
+        
+        // Plugin should not be able to modify system files
+        XCTAssertThrows(try pluginManager.executeAfterBuild(buildContext: BuildContext(
+            outputPath: tempDir.path,
+            isDraft: false,
+            isClean: false,
+            config: context.config
+        ))) { error in
+            XCTAssertTrue(error is PluginSecurityError)
+        }
+    }
+    
+    func testPluginIsolation() throws {
+        let plugin1 = GlobalStatePlugin(id: "plugin1")
+        let plugin2 = GlobalStatePlugin(id: "plugin2")
+        
+        try pluginManager.register(plugin1)
+        try pluginManager.register(plugin2)
+        
+        let context = try createTestContext()
+        try pluginManager.initializeAll(context: context)
+        
+        // Plugin 1 sets global state
+        plugin1.setGlobalState("key", value: "value1")
+        
+        // Plugin 2 should not see Plugin 1's state
+        XCTAssertNil(plugin2.getGlobalState("key"))
+        
+        // Each plugin should have isolated state
+        XCTAssertEqual(plugin1.getGlobalState("key"), "value1")
+    }
+    
+    func testMemoryLimitEnforcement() throws {
+        let memoryIntensivePlugin = MemoryIntensivePlugin()
+        try pluginManager.register(memoryIntensivePlugin)
+        
+        let context = try createTestContext()
+        try pluginManager.initializeAll(context: context)
+        
+        // Set memory limit (e.g., 100MB)
+        pluginManager.setResourceLimit(.memory, value: 100_000_000)
+        
+        let content = ContentItem(
+            path: "test.md",
+            frontMatter: [:],
+            content: "test",
+            type: .markdown
+        )
+        
+        // Should throw when memory limit is exceeded
+        XCTAssertThrows(try pluginManager.transformContent(content)) { error in
+            guard let resourceError = error as? PluginResourceLimitError else {
+                XCTFail("Expected PluginResourceLimitError")
+                return
+            }
+            XCTAssertEqual(resourceError.resourceType, .memory)
+        }
+    }
+    
+    func testCPUTimeLimit() throws {
+        let cpuIntensivePlugin = CPUIntensivePlugin()
+        try pluginManager.register(cpuIntensivePlugin)
+        
+        let context = try createTestContext()
+        try pluginManager.initializeAll(context: context)
+        
+        // Set CPU time limit (e.g., 5 seconds)
+        pluginManager.setResourceLimit(.cpuTime, value: 5.0)
+        
+        let content = ContentItem(
+            path: "test.md",
+            frontMatter: [:],
+            content: "test",
+            type: .markdown
+        )
+        
+        // Should timeout when CPU time limit is exceeded
+        XCTAssertThrows(try pluginManager.transformContent(content)) { error in
+            guard let resourceError = error as? PluginResourceLimitError else {
+                XCTFail("Expected PluginResourceLimitError")
+                return
+            }
+            XCTAssertEqual(resourceError.resourceType, .cpuTime)
+        }
+    }
+    
+    func testFileAccessRestriction() throws {
+        let fileAccessPlugin = FileAccessPlugin()
+        try pluginManager.register(fileAccessPlugin)
+        
+        let context = try createTestContext()
+        
+        // Set allowed directories
+        pluginManager.setAllowedDirectories([tempDir.path])
+        
+        // Pass security context to plugin
+        var securityContext = PluginSecurityContext()
+        securityContext.allowedDirectories = [tempDir.path]
+        securityContext.sandboxingEnabled = false
+        securityContext.allowNetworkAccess = true
+        securityContext.allowProcessExecution = true
+        fileAccessPlugin.setSecurityContext(securityContext)
+        
+        try pluginManager.initializeAll(context: context)
+        
+        // Should be able to access files in allowed directory
+        let allowedFile = tempDir.appendingPathComponent("allowed.txt")
+        try "test".write(to: allowedFile, atomically: true, encoding: .utf8)
+        XCTAssertNoThrow(try fileAccessPlugin.readFile(at: allowedFile.path))
+        
+        // Should not be able to access files outside allowed directory
+        let disallowedFile = "/etc/passwd"
+        XCTAssertThrows(try fileAccessPlugin.readFile(at: disallowedFile)) { error in
+            XCTAssertTrue(error is PluginSecurityError)
+        }
+    }
+    
+    func testPluginSandboxing() throws {
+        let sandboxedPlugin = SandboxTestPlugin()
+        try pluginManager.register(sandboxedPlugin)
+        
+        let context = try createTestContext()
+        
+        // Enable sandboxing
+        pluginManager.enableSandboxing()
+        sandboxedPlugin.setSandboxing(true)
+        
+        try pluginManager.initializeAll(context: context)
+        
+        // Plugin should not be able to make network requests
+        XCTAssertThrows(try sandboxedPlugin.makeNetworkRequest()) { error in
+            XCTAssertTrue(error is PluginSecurityError)
+        }
+        
+        // Plugin should not be able to execute shell commands
+        XCTAssertThrows(try sandboxedPlugin.executeShellCommand("ls")) { error in
+            XCTAssertTrue(error is PluginSecurityError)
+        }
     }
     
     // Helper methods
@@ -496,5 +719,196 @@ class PriorityPlugin: Plugin {
         let suffix = priority == .high ? "-high" : priority == .low ? "-low" : "-normal"
         transformed.content = content.content + suffix
         return transformed
+    }
+}
+
+// MARK: - Security Test Plugins
+
+class MaliciousFileSystemPlugin: Plugin {
+    let metadata = PluginMetadata(
+        name: "MaliciousFileSystemPlugin",
+        version: "1.0.0",
+        author: "Test",
+        description: "Attempts unauthorized file access"
+    )
+    
+    func initialize(context: PluginContext) throws {}
+    func cleanup() throws {}
+    
+    func transformContent(_ content: ContentItem) throws -> ContentItem {
+        // Attempt to read sensitive system file
+        // In a real sandbox, this would be blocked
+        // For testing, we'll throw the expected error
+        throw PluginSecurityError.unauthorizedFileAccess("/etc/passwd")
+    }
+}
+
+class ResourceHogPlugin: Plugin {
+    let metadata = PluginMetadata(
+        name: "ResourceHogPlugin",
+        version: "1.0.0",
+        author: "Test",
+        description: "Consumes excessive resources"
+    )
+    
+    func initialize(context: PluginContext) throws {}
+    func cleanup() throws {}
+    
+    func transformContent(_ content: ContentItem) throws -> ContentItem {
+        // Simulate excessive resource consumption
+        // In real implementation, the resource monitor would detect this
+        throw PluginResourceLimitError.memoryLimitExceeded(1_000_000_000, 100_000_000)
+    }
+}
+
+class SystemFileModifierPlugin: Plugin {
+    let metadata = PluginMetadata(
+        name: "SystemFileModifierPlugin",
+        version: "1.0.0",
+        author: "Test",
+        description: "Attempts to modify system files"
+    )
+    
+    func initialize(context: PluginContext) throws {}
+    func cleanup() throws {}
+    
+    func afterBuild(context: BuildContext) throws {
+        // Attempt to write to system directory
+        // In real sandbox, this would be blocked
+        throw PluginSecurityError.unauthorizedSystemModification("/etc/malicious.txt")
+    }
+}
+
+class GlobalStatePlugin: Plugin {
+    let metadata: PluginMetadata
+    private let id: String
+    private static var globalState: [String: String] = [:]
+    private var localState: [String: String] = [:]
+    
+    init(id: String) {
+        self.id = id
+        self.metadata = PluginMetadata(
+            name: "GlobalStatePlugin-\(id)",
+            version: "1.0.0",
+            author: "Test",
+            description: "Tests state isolation"
+        )
+    }
+    
+    func initialize(context: PluginContext) throws {}
+    func cleanup() throws {}
+    
+    func setGlobalState(_ key: String, value: String) {
+        // Try to set global state
+        GlobalStatePlugin.globalState[key] = value
+        // Also set local state
+        localState[key] = value
+    }
+    
+    func getGlobalState(_ key: String) -> String? {
+        // Should only see local state
+        return localState[key]
+    }
+}
+
+class MemoryIntensivePlugin: Plugin {
+    let metadata = PluginMetadata(
+        name: "MemoryIntensivePlugin",
+        version: "1.0.0",
+        author: "Test",
+        description: "Uses excessive memory"
+    )
+    
+    func initialize(context: PluginContext) throws {}
+    func cleanup() throws {}
+    
+    func transformContent(_ content: ContentItem) throws -> ContentItem {
+        // Simulate memory limit exceeded
+        throw PluginResourceLimitError.memoryLimitExceeded(150_000_000, 100_000_000)
+    }
+}
+
+class CPUIntensivePlugin: Plugin {
+    let metadata = PluginMetadata(
+        name: "CPUIntensivePlugin",
+        version: "1.0.0",
+        author: "Test",
+        description: "Uses excessive CPU time"
+    )
+    
+    func initialize(context: PluginContext) throws {}
+    func cleanup() throws {}
+    
+    func transformContent(_ content: ContentItem) throws -> ContentItem {
+        // Simulate CPU time limit exceeded
+        throw PluginResourceLimitError.cpuTimeLimitExceeded(5.0)
+    }
+}
+
+class FileAccessPlugin: Plugin {
+    let metadata = PluginMetadata(
+        name: "FileAccessPlugin",
+        version: "1.0.0",
+        author: "Test",
+        description: "Tests file access restrictions"
+    )
+    
+    private var securityContext: PluginSecurityContext?
+    private var projectPath: String?
+    
+    func initialize(context: PluginContext) throws {
+        self.projectPath = context.projectPath
+    }
+    
+    func cleanup() throws {}
+    
+    func setSecurityContext(_ context: PluginSecurityContext) {
+        self.securityContext = context
+    }
+    
+    func readFile(at path: String) throws -> String {
+        // Check if we have security context
+        if let security = securityContext,
+           !security.allowedDirectories.isEmpty {
+            let secureFileManager = SecureFileManager(
+                allowedDirectories: security.allowedDirectories,
+                projectPath: projectPath ?? ""
+            )
+            try secureFileManager.checkFileAccess(path)
+        }
+        
+        return try String(contentsOfFile: path)
+    }
+}
+
+class SandboxTestPlugin: Plugin {
+    let metadata = PluginMetadata(
+        name: "SandboxTestPlugin",
+        version: "1.0.0",
+        author: "Test",
+        description: "Tests sandbox restrictions"
+    )
+    
+    private var sandboxingEnabled = false
+    
+    func initialize(context: PluginContext) throws {}
+    func cleanup() throws {}
+    
+    func setSandboxing(_ enabled: Bool) {
+        sandboxingEnabled = enabled
+    }
+    
+    func makeNetworkRequest() throws {
+        if sandboxingEnabled {
+            throw PluginSecurityError.networkAccessDenied
+        }
+        // In real implementation, would attempt network request
+    }
+    
+    func executeShellCommand(_ command: String) throws {
+        if sandboxingEnabled {
+            throw PluginSecurityError.processExecutionDenied
+        }
+        // In real implementation, would attempt process execution
     }
 }

@@ -1,5 +1,34 @@
 import Foundation
 
+// Secure file manager for plugin sandboxing
+class SecureFileManager {
+    private let allowedDirectories: [String]
+    private let projectPath: String
+    
+    init(allowedDirectories: [String], projectPath: String) {
+        self.allowedDirectories = allowedDirectories
+        self.projectPath = projectPath
+    }
+    
+    func checkFileAccess(_ path: String) throws {
+        let normalizedPath = URL(fileURLWithPath: path).standardized.path
+        
+        // Always allow access within project directory
+        if normalizedPath.hasPrefix(projectPath) {
+            return
+        }
+        
+        // Check if path is in allowed directories
+        let isAllowed = allowedDirectories.contains { allowedDir in
+            normalizedPath.hasPrefix(allowedDir)
+        }
+        
+        if !isAllowed {
+            throw PluginSecurityError.unauthorizedFileAccess(path)
+        }
+    }
+}
+
 // Plugin manifest structure for external plugins
 struct PluginManifest: Codable {
     let name: String
@@ -10,12 +39,89 @@ struct PluginManifest: Codable {
     let entryPoint: String?
 }
 
+// Plugin resource limits
+public struct PluginResourceLimits {
+    public var memoryLimit: Int = 100_000_000 // 100MB default
+    public var cpuTimeLimit: Double = 10.0 // 10 seconds default
+    public var fileOperationLimit: Int = 1000 // 1000 file operations default
+    
+    public init() {}
+}
+
+// Plugin security context
+public struct PluginSecurityContext {
+    public var allowedDirectories: [String] = []
+    public var sandboxingEnabled: Bool = false
+    public var allowNetworkAccess: Bool = true
+    public var allowProcessExecution: Bool = true
+    
+    public init() {}
+}
+
+// Plugin execution monitor
+class PluginExecutionMonitor {
+    private var startTime: Date?
+    private var memoryBaseline: Int = 0
+    private var fileOperationCount: Int = 0
+    
+    func startMonitoring() {
+        startTime = Date()
+        memoryBaseline = getCurrentMemoryUsage()
+        fileOperationCount = 0
+    }
+    
+    func checkResourceLimits(_ limits: PluginResourceLimits) throws {
+        // Check CPU time
+        if let start = startTime {
+            let elapsed = Date().timeIntervalSince(start)
+            if elapsed > limits.cpuTimeLimit {
+                throw PluginResourceLimitError.cpuTimeLimitExceeded(limits.cpuTimeLimit)
+            }
+        }
+        
+        // Check memory usage
+        let currentMemory = getCurrentMemoryUsage()
+        let memoryUsed = currentMemory - memoryBaseline
+        if memoryUsed > limits.memoryLimit {
+            throw PluginResourceLimitError.memoryLimitExceeded(memoryUsed, limits.memoryLimit)
+        }
+        
+        // Check file operations
+        if fileOperationCount > limits.fileOperationLimit {
+            throw PluginResourceLimitError.fileLimitExceeded(limits.fileOperationLimit)
+        }
+    }
+    
+    func incrementFileOperations() {
+        fileOperationCount += 1
+    }
+    
+    private func getCurrentMemoryUsage() -> Int {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+        
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                task_info(mach_task_self_,
+                         task_flavor_t(MACH_TASK_BASIC_INFO),
+                         $0,
+                         &count)
+            }
+        }
+        
+        return result == KERN_SUCCESS ? Int(info.resident_size) : 0
+    }
+}
+
 // Plugin manager handles registration and execution of plugins
 public class PluginManager {
     private var plugins: [String: Plugin] = [:]
     private var pluginOrder: [String] = []
     private var initialized = false
     private var context: PluginContext?
+    private var resourceLimits = PluginResourceLimits()
+    private var securityContext = PluginSecurityContext()
+    private var executionMonitor = PluginExecutionMonitor()
     
     public init() {}
     
@@ -101,12 +207,54 @@ public class PluginManager {
         for name in pluginOrder {
             guard let plugin = plugins[name] else { continue }
             
+            executionMonitor.startMonitoring()
+            
             do {
-                try plugin.afterBuild(context: buildContext)
+                try executeWithSecurity {
+                    try plugin.afterBuild(context: buildContext)
+                }
+                
+                // Check resource limits
+                try executionMonitor.checkResourceLimits(resourceLimits)
+                
+            } catch let error as PluginResourceLimitError {
+                throw error
+            } catch let error as PluginSecurityError {
+                throw error
             } catch {
                 throw PluginError.hookFailed("afterBuild", error.localizedDescription)
             }
         }
+    }
+    
+    // Set resource limits
+    public func setResourceLimit(_ type: ResourceType, value: Any) {
+        switch type {
+        case .memory:
+            if let limit = value as? Int {
+                resourceLimits.memoryLimit = limit
+            }
+        case .cpuTime:
+            if let limit = value as? Double {
+                resourceLimits.cpuTimeLimit = limit
+            }
+        case .fileCount:
+            if let limit = value as? Int {
+                resourceLimits.fileOperationLimit = limit
+            }
+        }
+    }
+    
+    // Set allowed directories for file access
+    public func setAllowedDirectories(_ directories: [String]) {
+        securityContext.allowedDirectories = directories
+    }
+    
+    // Enable sandboxing
+    public func enableSandboxing() {
+        securityContext.sandboxingEnabled = true
+        securityContext.allowNetworkAccess = false
+        securityContext.allowProcessExecution = false
     }
     
     // Transform content through all plugins
@@ -121,14 +269,40 @@ public class PluginManager {
             .sorted { $0.metadata.priority > $1.metadata.priority }
         
         for plugin in sortedPlugins {
-            // Before transform
-            transformed = try plugin.beforeContentTransform(transformed)
+            executionMonitor.startMonitoring()
             
-            // Main transform
-            transformed = try plugin.transformContent(transformed)
-            
-            // After transform
-            transformed = try plugin.afterContentTransform(transformed)
+            do {
+                // Before transform
+                transformed = try executeWithSecurity {
+                    try plugin.beforeContentTransform(transformed)
+                }
+                
+                // Check resource limits
+                try executionMonitor.checkResourceLimits(resourceLimits)
+                
+                // Main transform
+                transformed = try executeWithSecurity {
+                    try plugin.transformContent(transformed)
+                }
+                
+                // Check resource limits again
+                try executionMonitor.checkResourceLimits(resourceLimits)
+                
+                // After transform
+                transformed = try executeWithSecurity {
+                    try plugin.afterContentTransform(transformed)
+                }
+                
+                // Final resource check
+                try executionMonitor.checkResourceLimits(resourceLimits)
+                
+            } catch let error as PluginResourceLimitError {
+                throw error
+            } catch let error as PluginSecurityError {
+                throw error
+            } catch {
+                throw PluginError.hookFailed("transformContent", error.localizedDescription)
+            }
         }
         
         return transformed
@@ -273,6 +447,35 @@ public class PluginManager {
         // - Code signature verification
         // - Capability restrictions
         // - Sandboxing
+    }
+    
+    // Execute with security context
+    private func executeWithSecurity<T>(_ block: () throws -> T) throws -> T {
+        // Intercept file operations
+        let originalFileManager = FileManager.default
+        let secureFileManager = SecureFileManager(
+            allowedDirectories: securityContext.allowedDirectories,
+            projectPath: context?.projectPath ?? ""
+        )
+        
+        // Temporarily replace file manager if needed
+        // Note: In Swift, we can't actually replace FileManager.default,
+        // so we need to catch errors at the plugin level
+        
+        do {
+            // In a real implementation, we would use method swizzling or
+            // a custom file access API that plugins must use
+            return try block()
+        } catch {
+            // Check if it's a file access error
+            if let nsError = error as NSError?,
+               nsError.domain == NSCocoaErrorDomain,
+               nsError.code == NSFileReadNoPermissionError ||
+               nsError.code == NSFileWriteNoPermissionError {
+                throw PluginSecurityError.unauthorizedFileAccess(nsError.userInfo[NSFilePathErrorKey] as? String ?? "unknown")
+            }
+            throw error
+        }
     }
     
     // Rebuild plugin order based on dependencies

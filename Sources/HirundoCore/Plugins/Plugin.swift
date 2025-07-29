@@ -190,3 +190,63 @@ public enum PluginError: LocalizedError {
         }
     }
 }
+
+// Plugin security errors
+public enum PluginSecurityError: LocalizedError {
+    case unauthorizedFileAccess(String)
+    case unauthorizedSystemModification(String)
+    case sandboxViolation(String)
+    case networkAccessDenied
+    case processExecutionDenied
+    
+    public var errorDescription: String? {
+        switch self {
+        case .unauthorizedFileAccess(let path):
+            return "Plugin attempted unauthorized file access: \(path)"
+        case .unauthorizedSystemModification(let path):
+            return "Plugin attempted to modify system file: \(path)"
+        case .sandboxViolation(let reason):
+            return "Plugin sandbox violation: \(reason)"
+        case .networkAccessDenied:
+            return "Plugin network access denied in sandbox mode"
+        case .processExecutionDenied:
+            return "Plugin process execution denied in sandbox mode"
+        }
+    }
+}
+
+// Plugin resource limit errors
+public enum PluginResourceLimitError: LocalizedError {
+    case memoryLimitExceeded(Int, Int)
+    case cpuTimeLimitExceeded(Double)
+    case fileLimitExceeded(Int)
+    
+    public var resourceType: ResourceType {
+        switch self {
+        case .memoryLimitExceeded:
+            return .memory
+        case .cpuTimeLimitExceeded:
+            return .cpuTime
+        case .fileLimitExceeded:
+            return .fileCount
+        }
+    }
+    
+    public var errorDescription: String? {
+        switch self {
+        case .memoryLimitExceeded(let used, let limit):
+            return "Plugin exceeded memory limit: \(used) bytes (limit: \(limit))"
+        case .cpuTimeLimitExceeded(let limit):
+            return "Plugin exceeded CPU time limit: \(limit) seconds"
+        case .fileLimitExceeded(let limit):
+            return "Plugin exceeded file operation limit: \(limit)"
+        }
+    }
+}
+
+// Resource types for limits
+public enum ResourceType {
+    case memory
+    case cpuTime
+    case fileCount
+}
