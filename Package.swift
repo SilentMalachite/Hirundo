@@ -20,15 +20,15 @@ let package = Package(
     ],
     dependencies: [
         // Markdown パーサー
-        .package(url: "https://github.com/apple/swift-markdown.git", from: "0.3.0"),
+        .package(url: "https://github.com/apple/swift-markdown.git", from: "0.6.0"),
         // YAML パーサー
-        .package(url: "https://github.com/jpsim/Yams.git", from: "5.0.0"),
+        .package(url: "https://github.com/jpsim/Yams.git", from: "6.0.2"),
         // テンプレートエンジン
-        .package(url: "https://github.com/stencilproject/Stencil.git", from: "0.15.0"),
+        .package(url: "https://github.com/stencilproject/Stencil.git", from: "0.15.1"),
         // HTTPサーバー
         .package(url: "https://github.com/httpswift/swifter.git", .upToNextMajor(from: "1.5.0")),
         // Argument Parser
-        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.2.0")
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.6.1")
     ],
     targets: [
         // メインの実行可能ターゲット

@@ -168,11 +168,30 @@ public struct Server: Codable {
     public let port: Int
     public let liveReload: Bool
     public let cors: CorsConfig?
+    public let websocketAuth: WebSocketAuthConfig?
     
-    public init(port: Int = 8080, liveReload: Bool = true, cors: CorsConfig? = nil) {
+    public init(port: Int = 8080, liveReload: Bool = true, cors: CorsConfig? = nil, websocketAuth: WebSocketAuthConfig? = nil) {
         self.port = port
         self.liveReload = liveReload
         self.cors = cors
+        self.websocketAuth = websocketAuth
+    }
+}
+
+// WebSocket authentication configuration
+public struct WebSocketAuthConfig: Codable {
+    public let enabled: Bool
+    public let tokenExpirationMinutes: Int
+    public let maxActiveTokens: Int
+    
+    public init(
+        enabled: Bool = true,
+        tokenExpirationMinutes: Int = 60,
+        maxActiveTokens: Int = 100
+    ) {
+        self.enabled = enabled
+        self.tokenExpirationMinutes = tokenExpirationMinutes
+        self.maxActiveTokens = maxActiveTokens
     }
 }
 
