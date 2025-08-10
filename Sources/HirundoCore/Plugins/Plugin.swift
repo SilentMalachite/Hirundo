@@ -75,9 +75,8 @@ public struct ContentItem {
     public let type: ContentType
     
     public enum ContentType: Equatable {
-        case markdown
-        case html
-        case other(String)
+        case post
+        case page
     }
     
     public init(path: String, frontMatter: [String: Any], content: String, type: ContentType) {
@@ -198,6 +197,10 @@ public enum PluginSecurityError: LocalizedError {
     case sandboxViolation(String)
     case networkAccessDenied
     case processExecutionDenied
+    case noSecurityContext
+    case executionContextLost
+    case executionTimeout(TimeInterval)
+    case memoryLimitExceeded(Int64)
     
     public var errorDescription: String? {
         switch self {
@@ -207,6 +210,14 @@ public enum PluginSecurityError: LocalizedError {
             return "Plugin attempted to modify system file: \(path)"
         case .sandboxViolation(let reason):
             return "Plugin sandbox violation: \(reason)"
+        case .noSecurityContext:
+            return "No security context configured for plugin execution"
+        case .executionContextLost:
+            return "Plugin execution context was lost"
+        case .executionTimeout(let timeout):
+            return "Plugin execution exceeded timeout limit of \(timeout) seconds"
+        case .memoryLimitExceeded(let limit):
+            return "Plugin exceeded memory limit of \(limit) bytes"
         case .networkAccessDenied:
             return "Plugin network access denied in sandbox mode"
         case .processExecutionDenied:

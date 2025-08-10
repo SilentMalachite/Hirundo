@@ -144,7 +144,7 @@ final class PluginSystemTests: XCTestCase {
             path: "test.md",
             frontMatter: ["title": "Test"],
             content: "Hello World",
-            type: .markdown
+            type: .page
         )
         
         let transformed = try pluginManager.transformContent(originalContent)
@@ -285,7 +285,7 @@ final class PluginSystemTests: XCTestCase {
             path: "test.md",
             frontMatter: [:],
             content: "test",
-            type: .markdown
+            type: .page
         )
         
         let context = try createTestContext()
@@ -310,7 +310,7 @@ final class PluginSystemTests: XCTestCase {
             path: "test.md",
             frontMatter: [:],
             content: "test",
-            type: .markdown
+            type: .page
         )
         
         // Plugin should not be able to access files outside project directory
@@ -330,7 +330,7 @@ final class PluginSystemTests: XCTestCase {
             path: "test.md",
             frontMatter: [:],
             content: "test",
-            type: .markdown
+            type: .page
         )
         
         // Plugin should be stopped if it consumes too much memory/CPU
@@ -391,7 +391,7 @@ final class PluginSystemTests: XCTestCase {
             path: "test.md",
             frontMatter: [:],
             content: "test",
-            type: .markdown
+            type: .page
         )
         
         // Should throw when memory limit is exceeded
@@ -418,7 +418,7 @@ final class PluginSystemTests: XCTestCase {
             path: "test.md",
             frontMatter: [:],
             content: "test",
-            type: .markdown
+            type: .page
         )
         
         // Should timeout when CPU time limit is exceeded

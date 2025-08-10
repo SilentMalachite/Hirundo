@@ -32,6 +32,8 @@ public enum MarkdownError: Error, LocalizedError {
     case excessiveNesting(String)
     case dangerousContent(String)
     case excessiveRepetition(String)
+    case fileNotFound(String)
+    case invalidEncoding
     
     public var errorDescription: String? {
         switch self {
@@ -51,6 +53,10 @@ public enum MarkdownError: Error, LocalizedError {
             return "Dangerous content detected: \(details)"
         case .excessiveRepetition(let details):
             return "Excessive repetition detected: \(details)"
+        case .fileNotFound(let path):
+            return "File not found: \(path)"
+        case .invalidEncoding:
+            return "Invalid file encoding (expected UTF-8)"
         }
     }
 }
@@ -139,24 +145,70 @@ public struct HirundoErrorInfo: HirundoError {
     }
     
     public var userMessage: String {
+        // Provide helpful, actionable messages without technical jargon
         switch category {
         case .configuration:
-            return "There's an issue with your configuration file."
+            return formatUserMessage(
+                "Configuration Issue",
+                "Check your config.yaml file for errors.",
+                suggestedAction: "Run 'hirundo validate' to check your configuration"
+            )
         case .markdown:
-            return "There's an issue processing your markdown content."
+            return formatUserMessage(
+                "Content Processing Issue",
+                "One of your markdown files couldn't be processed.",
+                suggestedAction: "Check the file mentioned in the error for syntax issues"
+            )
         case .template:
-            return "There's an issue with your template files."
+            return formatUserMessage(
+                "Template Issue",
+                "A template file has errors or is missing.",
+                suggestedAction: "Ensure all required templates exist in the templates directory"
+            )
         case .build:
-            return "Build failed due to an error."
+            return formatUserMessage(
+                "Build Failed",
+                "The site couldn't be built due to an error.",
+                suggestedAction: "Review the error details above and fix the mentioned issues"
+            )
         case .asset:
-            return "There's an issue processing your assets."
+            return formatUserMessage(
+                "Asset Processing Issue",
+                "Static files couldn't be processed.",
+                suggestedAction: "Check that all referenced assets exist in the static directory"
+            )
         case .plugin:
-            return "A plugin encountered an error."
+            return formatUserMessage(
+                "Plugin Error",
+                "A plugin failed to execute.",
+                suggestedAction: "Try disabling the plugin in config.yaml or check its configuration"
+            )
         case .hotReload:
-            return "File watching encountered an error."
+            return formatUserMessage(
+                "Live Reload Issue",
+                "File watching encountered a problem.",
+                suggestedAction: "Try restarting the development server"
+            )
         case .server:
-            return "Development server encountered an error."
+            return formatUserMessage(
+                "Server Error",
+                "The development server encountered an issue.",
+                suggestedAction: "Check if the port is already in use or try a different port"
+            )
         }
+    }
+    
+    private func formatUserMessage(_ title: String, _ description: String, suggestedAction: String) -> String {
+        """
+        
+        ❌ \(title)
+        
+        \(description)
+        
+        💡 Suggestion: \(suggestedAction)
+        
+        For more details, run with --verbose flag.
+        """
     }
 }
 
@@ -193,6 +245,8 @@ extension MarkdownError {
         case .excessiveNesting: code = "EXCESSIVE_NESTING"
         case .dangerousContent: code = "DANGEROUS_CONTENT"
         case .excessiveRepetition: code = "EXCESSIVE_REPETITION"
+        case .fileNotFound: code = "FILE_NOT_FOUND"
+        case .invalidEncoding: code = "INVALID_ENCODING"
         }
         
         return HirundoErrorInfo(

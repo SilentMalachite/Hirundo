@@ -5,11 +5,12 @@ public class SiteGenerator {
     private let config: HirundoConfig
     private let markdownParser: MarkdownParser
     private let templateEngine: TemplateEngine
-    private let fileManager = FileManager.default
+    private let fileManager: FileManager
     private let pluginManager: PluginManager
     private let assetPipeline: AssetPipeline
     
-    public init(projectPath: String) throws {
+    public init(projectPath: String, fileManager: FileManager = .default) throws {
+        self.fileManager = fileManager
         self.projectPath = projectPath
         
         // Load configuration
@@ -287,7 +288,7 @@ public class SiteGenerator {
             path: fileURL.path,
             frontMatter: result.frontMatter ?? [:],
             content: content,
-            type: .markdown
+            type: fileURL.path.contains("/posts/") ? .post : .page
         )
         
         // Transform content through plugins
@@ -345,16 +346,16 @@ public class SiteGenerator {
             timeout: config.timeouts.directoryOperationTimeout
         )
         
-        // Prepare context
+        // Prepare context with sanitized values to prevent XSS
         var context: [String: Any] = [
             "site": [
-                "title": config.site.title,
-                "description": config.site.description ?? "",
-                "url": config.site.url,
-                "language": config.site.language ?? "en-US",
+                "title": sanitizeForTemplate(config.site.title),
+                "description": sanitizeForTemplate(config.site.description ?? ""),
+                "url": sanitizeForTemplate(config.site.url),
+                "language": sanitizeForTemplate(config.site.language ?? "en-US"),
                 "author": [
-                    "name": config.site.author?.name ?? "",
-                    "email": config.site.author?.email ?? ""
+                    "name": sanitizeForTemplate(config.site.author?.name ?? ""),
+                    "email": sanitizeForTemplate(config.site.author?.email ?? "")
                 ]
             ],
             "pages": pages.map { $0.context },
@@ -415,8 +416,30 @@ public class SiteGenerator {
         return result.document?.htmlString ?? ""
     }
     
+    /// Sanitizes user input for safe inclusion in HTML templates
+    /// Prevents XSS attacks by escaping dangerous HTML characters
+    private func sanitizeForTemplate(_ text: String) -> String {
+        var escaped = text
+        escaped = escaped.replacingOccurrences(of: "&", with: "&amp;")
+        escaped = escaped.replacingOccurrences(of: "<", with: "&lt;")
+        escaped = escaped.replacingOccurrences(of: ">", with: "&gt;")
+        escaped = escaped.replacingOccurrences(of: "\"", with: "&quot;")
+        escaped = escaped.replacingOccurrences(of: "'", with: "&#39;")
+        escaped = escaped.replacingOccurrences(of: "/", with: "&#47;")
+        
+        // Remove any null bytes which can bypass filters
+        escaped = escaped.replacingOccurrences(of: "\0", with: "")
+        
+        // Remove any non-printable control characters except newlines and tabs
+        let allowedControlChars = CharacterSet(charactersIn: "\n\r\t")
+        let controlChars = CharacterSet.controlCharacters.subtracting(allowedControlChars)
+        escaped = escaped.components(separatedBy: controlChars).joined()
+        
+        return escaped
+    }
+    
     private func escapeHtml(_ text: String) -> String {
-        return text
+        return sanitizeForTemplate(text)
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
@@ -653,10 +676,41 @@ struct Page {
     }
     
     var context: [String: Any] {
-        var ctx = frontMatter
+        var ctx: [String: Any] = [:]
+        
+        // Sanitize all frontMatter values to prevent XSS
+        for (key, value) in frontMatter {
+            if let stringValue = value as? String {
+                ctx[key] = Page.sanitizeForTemplate(stringValue)
+            } else if let arrayValue = value as? [String] {
+                ctx[key] = arrayValue.map { Page.sanitizeForTemplate($0) }
+            } else if let dictValue = value as? [String: String] {
+                ctx[key] = dictValue.mapValues { Page.sanitizeForTemplate($0) }
+            } else {
+                ctx[key] = value
+            }
+        }
+        
         ctx["url"] = "/" + url
-        ctx["title"] = title
+        ctx["title"] = Page.sanitizeForTemplate(title)
         return ctx
+    }
+    
+    private static func sanitizeForTemplate(_ text: String) -> String {
+        var escaped = text
+        escaped = escaped.replacingOccurrences(of: "&", with: "&amp;")
+        escaped = escaped.replacingOccurrences(of: "<", with: "&lt;")
+        escaped = escaped.replacingOccurrences(of: ">", with: "&gt;")
+        escaped = escaped.replacingOccurrences(of: "\"", with: "&quot;")
+        escaped = escaped.replacingOccurrences(of: "'", with: "&#39;")
+        escaped = escaped.replacingOccurrences(of: "/", with: "&#47;")
+        escaped = escaped.replacingOccurrences(of: "\0", with: "")
+        
+        let allowedControlChars = CharacterSet(charactersIn: "\n\r\t")
+        let controlChars = CharacterSet.controlCharacters.subtracting(allowedControlChars)
+        escaped = escaped.components(separatedBy: controlChars).joined()
+        
+        return escaped
     }
 }
 
@@ -689,8 +743,35 @@ struct Post {
             self.date = nil
         }
         
-        self.categories = frontMatter["categories"] as? [String]
-        self.tags = frontMatter["tags"] as? [String]
+        // Sanitize categories and tags to prevent XSS
+        if let rawCategories = frontMatter["categories"] as? [String] {
+            self.categories = rawCategories.map { Post.sanitizeForTemplate($0) }
+        } else {
+            self.categories = nil
+        }
+        
+        if let rawTags = frontMatter["tags"] as? [String] {
+            self.tags = rawTags.map { Post.sanitizeForTemplate($0) }
+        } else {
+            self.tags = nil
+        }
+    }
+    
+    private static func sanitizeForTemplate(_ text: String) -> String {
+        var escaped = text
+        escaped = escaped.replacingOccurrences(of: "&", with: "&amp;")
+        escaped = escaped.replacingOccurrences(of: "<", with: "&lt;")
+        escaped = escaped.replacingOccurrences(of: ">", with: "&gt;")
+        escaped = escaped.replacingOccurrences(of: "\"", with: "&quot;")
+        escaped = escaped.replacingOccurrences(of: "'", with: "&#39;")
+        escaped = escaped.replacingOccurrences(of: "/", with: "&#47;")
+        escaped = escaped.replacingOccurrences(of: "\0", with: "")
+        
+        let allowedControlChars = CharacterSet(charactersIn: "\n\r\t")
+        let controlChars = CharacterSet.controlCharacters.subtracting(allowedControlChars)
+        escaped = escaped.components(separatedBy: controlChars).joined()
+        
+        return escaped
     }
     
     var slug: String {
@@ -707,11 +788,31 @@ struct Post {
     }
     
     var context: [String: Any] {
-        var ctx = frontMatter
+        var ctx: [String: Any] = [:]
+        
+        // Sanitize all frontMatter values to prevent XSS
+        for (key, value) in frontMatter {
+            if let stringValue = value as? String {
+                ctx[key] = Post.sanitizeForTemplate(stringValue)
+            } else if let arrayValue = value as? [String] {
+                ctx[key] = arrayValue.map { Post.sanitizeForTemplate($0) }
+            } else if let dictValue = value as? [String: String] {
+                ctx[key] = dictValue.mapValues { Post.sanitizeForTemplate($0) }
+            } else {
+                ctx[key] = value
+            }
+        }
+        
         ctx["url"] = "/" + url
-        ctx["title"] = title
+        ctx["title"] = Post.sanitizeForTemplate(title)
         if let date = date {
             ctx["date"] = date
+        }
+        if let categories = categories {
+            ctx["categories"] = categories  // Already sanitized in init
+        }
+        if let tags = tags {
+            ctx["tags"] = tags  // Already sanitized in init
         }
         return ctx
     }
@@ -868,7 +969,7 @@ extension SiteGenerator {
                 path: fileURL.path,
                 frontMatter: result.frontMatter ?? [:],
                 content: content,
-                type: .markdown
+                type: fileURL.path.contains("/posts/") ? .post : .page
             )
             
             // Transform content through plugins
@@ -1093,20 +1194,8 @@ extension SiteGenerator {
     /// - Parameter path: The path to sanitize
     /// - Returns: A sanitized path safe for file operations
     private func sanitizePath(_ path: String) -> String {
-        // Split path into components and filter out dangerous ones
-        let components = path.components(separatedBy: "/")
-            .filter { component in
-                // Remove empty components, current directory (.), and parent directory (..)
-                !component.isEmpty && component != "." && component != ".."
-            }
-            .map { component in
-                // Remove any null bytes and other dangerous characters
-                component.replacingOccurrences(of: "\0", with: "")
-                    .replacingOccurrences(of: "\r", with: "")
-                    .replacingOccurrences(of: "\n", with: "")
-            }
-        
-        return components.joined(separator: "/")
+        // Use centralized path sanitizer with caching
+        return PathSanitizer.sanitize(path)
     }
     
     /// Validates that a path is safe and within the expected directory
@@ -1115,11 +1204,7 @@ extension SiteGenerator {
     ///   - baseDirectory: The base directory that should contain the path
     /// - Returns: True if the path is safe, false otherwise
     private func isPathSafe(_ path: String, withinBaseDirectory baseDirectory: String) -> Bool {
-        let sanitizedPath = sanitizePath(path)
-        let fullPath = URL(fileURLWithPath: baseDirectory).appendingPathComponent(sanitizedPath).standardizedFileURL
-        let basePath = URL(fileURLWithPath: baseDirectory).standardizedFileURL
-        
-        // Ensure the resolved path is still within the base directory
-        return fullPath.path.hasPrefix(basePath.path + "/") || fullPath.path == basePath.path
+        // Use centralized path validator
+        return PathSanitizer.isPathSafe(path, withinBaseDirectory: baseDirectory)
     }
 }

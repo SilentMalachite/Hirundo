@@ -40,7 +40,8 @@ public class SearchIndexPlugin: Plugin {
     
     public func transformContent(_ content: ContentItem) throws -> ContentItem {
         // Collect search entries during content transformation
-        if content.type == .markdown || content.type == .html {
+        // All content types are searchable
+        if content.type == .post || content.type == .page {
             let entry = SearchEntry(
                 url: "/" + content.path.replacingOccurrences(of: ".md", with: ""),
                 title: content.frontMatter["title"] as? String ?? "Untitled",
