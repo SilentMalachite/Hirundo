@@ -30,11 +30,24 @@ public class HotReloadManager {
     
     private var fsEventsWrapper: FSEventsWrapper?
     private var pendingChanges: [String: FileChange] = [:]
-    private var debounceTimer: Timer?
+    private var debounceWorkItem: DispatchWorkItem?
     private let queue = DispatchQueue(label: "com.hirundo.hotreload", attributes: .concurrent)
     private let timerQueue = DispatchQueue(label: "com.hirundo.hotreload.timer")
     
-    private var isRunning = false
+    private let stateLock = NSLock()
+    private var _isRunning = false
+    private var isRunning: Bool {
+        get {
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            return _isRunning
+        }
+        set {
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            _isRunning = newValue
+        }
+    }
     
     public init(
         watchPaths: [String],
@@ -78,8 +91,8 @@ public class HotReloadManager {
         fsEventsWrapper = nil
         
         timerQueue.sync {
-            debounceTimer?.invalidate()
-            debounceTimer = nil
+            debounceWorkItem?.cancel()
+            debounceWorkItem = nil
         }
         
         queue.async(flags: .barrier) {
@@ -99,18 +112,27 @@ public class HotReloadManager {
         }
         
         // Add to pending changes
-        queue.async(flags: .barrier) {
+        queue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
             self.pendingChanges[change.path] = change
-            // Track pending change
         }
         
-        // Reset debounce timer on main queue for simplicity
-        DispatchQueue.main.async {
-            self.debounceTimer?.invalidate()
-            self.debounceTimer = Timer.scheduledTimer(withTimeInterval: self.debounceInterval, repeats: false) { _ in
-                // Flush pending changes
-                self.flushPendingChanges()
+        // Reset debounce timer using DispatchWorkItem for better thread safety
+        timerQueue.async { [weak self] in
+            guard let self = self else { return }
+            
+            // Cancel existing work item if any
+            self.debounceWorkItem?.cancel()
+            
+            // Create new work item
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.flushPendingChanges()
             }
+            
+            self.debounceWorkItem = workItem
+            
+            // Schedule work item
+            DispatchQueue.main.asyncAfter(deadline: .now() + self.debounceInterval, execute: workItem)
         }
     }
     

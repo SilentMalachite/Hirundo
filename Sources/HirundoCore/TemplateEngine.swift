@@ -45,10 +45,16 @@ extension String {
 public class TemplateEngine {
     private var environment: Environment
     private let templatesDirectory: String
-    private var cache: [String: Template] = [:]
+    private var cache: [String: (template: Template, addedAt: Date)] = [:]
     private let cacheQueue = DispatchQueue(label: "com.hirundo.templatecache", attributes: .concurrent)
     private var siteConfig: Site?
     private let environmentQueue = DispatchQueue(label: "com.hirundo.environment", attributes: .concurrent)
+    
+    // Cache management properties
+    private let maxCacheSize = 100 // Maximum number of templates to cache
+    private let cacheExpirationSeconds = 3600.0 // Cache entries expire after 1 hour
+    private var cacheCleanupTimer: DispatchSourceTimer?
+    private let cleanupQueue = DispatchQueue(label: "com.hirundo.cleanup", attributes: .concurrent)
     
     public init(templatesDirectory: String) {
         self.templatesDirectory = templatesDirectory
@@ -61,6 +67,13 @@ public class TemplateEngine {
             loader: loader,
             extensions: [ext]
         )
+        
+        // Start cache cleanup timer
+        startCacheCleanupTimer()
+    }
+    
+    deinit {
+        cacheCleanupTimer?.cancel()
     }
     
     public func configure(with siteConfig: Site) {
@@ -108,19 +121,28 @@ public class TemplateEngine {
     
     private func getTemplate(name: String) throws -> Template {
         // First, check cache with concurrent read access
-        let cachedTemplate = cacheQueue.sync {
-            return cache[name]
+        let now = Date()
+        let cachedEntry: Template? = cacheQueue.sync {
+            if let entry = cache[name] {
+                // Check if entry is expired
+                if now.timeIntervalSince(entry.addedAt) < cacheExpirationSeconds {
+                    return entry.template
+                }
+            }
+            return nil
         }
         
-        if let cached = cachedTemplate {
+        if let cached = cachedEntry {
             return cached
         }
         
-        // If not in cache, load template with barrier write access
+        // If not in cache or expired, load template with barrier write access
         return try cacheQueue.sync(flags: .barrier) {
             // Double-check pattern: another thread might have loaded it
-            if let cached = cache[name] {
-                return cached
+            if let entry = cache[name] {
+                if now.timeIntervalSince(entry.addedAt) < cacheExpirationSeconds {
+                    return entry.template
+                }
             }
             
             // Get environment safely
@@ -129,8 +151,55 @@ public class TemplateEngine {
             }
             
             let template = try env.loadTemplate(name: name)
-            cache[name] = template
+            
+            // Enforce cache size limit using LRU eviction
+            if cache.count >= maxCacheSize {
+                evictOldestCacheEntries()
+            }
+            
+            cache[name] = (template: template, addedAt: now)
             return template
+        }
+    }
+    
+    private func evictOldestCacheEntries() {
+        // Remove 20% of oldest entries when cache is full
+        let entriesToRemove = max(1, maxCacheSize / 5)
+        let sortedEntries = cache.sorted { $0.value.addedAt < $1.value.addedAt }
+        
+        for (key, _) in sortedEntries.prefix(entriesToRemove) {
+            cache.removeValue(forKey: key)
+        }
+    }
+    
+    private func startCacheCleanupTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: cleanupQueue)
+        timer.schedule(deadline: .now() + 300, repeating: 300)
+        timer.setEventHandler { [weak self] in
+            self?.cleanupExpiredCacheEntries()
+        }
+        timer.resume()
+        cacheCleanupTimer = timer
+    }
+    
+    private func cleanupExpiredCacheEntries() {
+        let now = Date()
+        // Use the same queue for timer and cache operations to prevent race conditions
+        cacheQueue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
+            
+            // Remove expired entries
+            self.cache = self.cache.filter { _, entry in
+                now.timeIntervalSince(entry.addedAt) < self.cacheExpirationSeconds
+            }
+            
+            // Also enforce max cache size using LRU eviction
+            if self.cache.count > self.maxCacheSize {
+                // Sort by access time and keep only the most recent entries
+                let sortedEntries = self.cache.sorted { $0.value.addedAt > $1.value.addedAt }
+                let entriesToKeep = Array(sortedEntries.prefix(self.maxCacheSize))
+                self.cache = Dictionary(uniqueKeysWithValues: entriesToKeep.map { ($0.key, $0.value) })
+            }
         }
     }
     

@@ -12,6 +12,7 @@ internal class FSEventsWrapper {
     
     init(paths: [String], callback: @escaping ([FileChange]) -> Void) {
         self.paths = paths
+        // Store callback directly - retain cycle prevention happens at FSEventStreamContext level
         self.callback = callback
     }
     

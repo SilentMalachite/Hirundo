@@ -684,6 +684,12 @@ public class AssetPipeline {
     /// - Parameter path: The path to sanitize
     /// - Returns: A sanitized path safe for file operations
     private func sanitizePath(_ path: String) -> String {
+        // Use centralized path sanitizer with caching
+        return PathSanitizer.sanitize(path)
+    }
+    
+    // Keep original implementation as fallback for specific asset pipeline needs
+    private func sanitizePathLegacy(_ path: String) -> String {
         // First, check for obvious path traversal attempts
         if path.contains("..") || path.contains("./") || path.hasPrefix("/") {
             return ""
@@ -736,42 +742,8 @@ public class AssetPipeline {
     ///   - baseDirectory: The base directory that should contain the path
     /// - Returns: True if the path is safe, false otherwise
     private func isPathSafe(_ path: String, withinBaseDirectory baseDirectory: String) -> Bool {
-        // First sanitize the path
-        let sanitizedPath = sanitizePath(path)
-        
-        // If sanitization resulted in empty path, it's unsafe
-        if sanitizedPath.isEmpty {
-            return false
-        }
-        
-        // Resolve all symbolic links and relative components
-        let basePath = URL(fileURLWithPath: baseDirectory).standardizedFileURL.resolvingSymlinksInPath()
-        let fullPath = basePath.appendingPathComponent(sanitizedPath).standardizedFileURL.resolvingSymlinksInPath()
-        
-        // Ensure the resolved path is still within the base directory
-        let basePathString = basePath.path
-        let fullPathString = fullPath.path
-        
-        // Check if the path is exactly the base path or is a subdirectory
-        let isWithinBase = fullPathString == basePathString || fullPathString.hasPrefix(basePathString + "/")
-        
-        // Additional check: ensure no symlinks point outside the base directory
-        if isWithinBase {
-            // Check each component to ensure no symlinks escape
-            var currentPath = basePath
-            let pathComponents = sanitizedPath.components(separatedBy: "/").filter { !$0.isEmpty }
-            
-            for component in pathComponents {
-                currentPath = currentPath.appendingPathComponent(component)
-                let resolvedPath = currentPath.resolvingSymlinksInPath()
-                
-                if !resolvedPath.path.hasPrefix(basePathString + "/") && resolvedPath.path != basePathString {
-                    return false
-                }
-            }
-        }
-        
-        return isWithinBase
+        // Use centralized path validator
+        return PathSanitizer.isPathSafe(path, withinBaseDirectory: baseDirectory)
     }
 }
 

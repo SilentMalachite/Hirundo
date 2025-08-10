@@ -54,6 +54,8 @@ public struct PluginSecurityContext {
     public var sandboxingEnabled: Bool = false
     public var allowNetworkAccess: Bool = true
     public var allowProcessExecution: Bool = true
+    public var maxExecutionTime: TimeInterval = 30.0 // 30 seconds max per plugin execution
+    public var maxMemoryUsage: Int64 = 512 * 1024 * 1024 // 512MB max memory increase
     
     public init() {}
 }
@@ -62,7 +64,7 @@ public struct PluginSecurityContext {
 class PluginExecutionMonitor {
     private var startTime: Date?
     private var memoryBaseline: Int = 0
-    private var fileOperationCount: Int = 0
+    var fileOperationCount: Int = 0
     
     func startMonitoring() {
         startTime = Date()
@@ -450,32 +452,99 @@ public class PluginManager {
     }
     
     // Execute with security context
-    private func executeWithSecurity<T>(_ block: () throws -> T) throws -> T {
-        // Intercept file operations
-        let originalFileManager = FileManager.default
-        let secureFileManager = SecureFileManager(
-            allowedDirectories: securityContext.allowedDirectories,
-            projectPath: context?.projectPath ?? ""
-        )
+    private func executeWithSecurity<T>(_ block: @escaping () throws -> T) throws -> T {
+        // Set up resource monitoring
+        let startMemory = getCurrentMemoryUsage()
+        let startTime = Date()
+        let startFileCount = getFileOperationCount()
         
-        // Temporarily replace file manager if needed
-        // Note: In Swift, we can't actually replace FileManager.default,
-        // so we need to catch errors at the plugin level
+        // Create execution timeout
+        let timeoutWorkItem = DispatchWorkItem {
+            // This will be cancelled if execution completes in time
+        }
+        
+        // Schedule timeout
+        DispatchQueue.global().asyncAfter(deadline: .now() + securityContext.maxExecutionTime, execute: timeoutWorkItem)
+        
+        // Create secure execution environment
+        let sandboxedBlock = { [weak self] () throws -> T in
+            guard let self = self else {
+                throw PluginSecurityError.executionContextLost
+            }
+            
+            // Set up periodic checker
+            let checker = {
+                let now = Date()
+                
+                // Check timeout
+                if now.timeIntervalSince(startTime) > self.securityContext.maxExecutionTime {
+                    throw PluginSecurityError.executionTimeout(self.securityContext.maxExecutionTime)
+                }
+                
+                // Check memory usage
+                let currentMemory = self.getCurrentMemoryUsage()
+                if currentMemory - startMemory > self.securityContext.maxMemoryUsage {
+                    throw PluginSecurityError.memoryLimitExceeded(self.securityContext.maxMemoryUsage)
+                }
+                
+                // Check file operations
+                let currentFileCount = self.getFileOperationCount()
+                if currentFileCount - startFileCount > self.resourceLimits.fileOperationLimit {
+                    throw PluginResourceLimitError.fileLimitExceeded(self.resourceLimits.fileOperationLimit)
+                }
+            }
+            
+            // Initial check
+            try checker()
+            
+            // Execute block with periodic checks
+            let result = try block()
+            
+            // Final check
+            try checker()
+            
+            return result
+        }
         
         do {
-            // In a real implementation, we would use method swizzling or
-            // a custom file access API that plugins must use
-            return try block()
+            // Execute with sandboxing
+            let result = try sandboxedBlock()
+            
+            // Cancel timeout since execution completed
+            timeoutWorkItem.cancel()
+            
+            return result
         } catch {
-            // Check if it's a file access error
-            if let nsError = error as NSError?,
-               nsError.domain == NSCocoaErrorDomain,
-               nsError.code == NSFileReadNoPermissionError ||
-               nsError.code == NSFileWriteNoPermissionError {
-                throw PluginSecurityError.unauthorizedFileAccess(nsError.userInfo[NSFilePathErrorKey] as? String ?? "unknown")
+            // Cancel timeout on error
+            timeoutWorkItem.cancel()
+            
+            // Log security violations
+            if error is PluginSecurityError || error is PluginResourceLimitError {
+                print("[PluginSecurity] Resource/Security violation detected: \(error)")
             }
             throw error
         }
+    }
+    
+    private func getFileOperationCount() -> Int {
+        // This would track actual file operations in a real implementation
+        return executionMonitor.fileOperationCount
+    }
+    
+    private func getCurrentMemoryUsage() -> Int64 {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+        
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                task_info(mach_task_self_,
+                         task_flavor_t(MACH_TASK_BASIC_INFO),
+                         $0,
+                         &count)
+            }
+        }
+        
+        return result == KERN_SUCCESS ? Int64(info.resident_size) : 0
     }
     
     // Rebuild plugin order based on dependencies

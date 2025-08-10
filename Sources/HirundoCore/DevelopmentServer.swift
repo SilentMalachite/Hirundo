@@ -18,7 +18,7 @@ public class DevelopmentServer {
     private let corsConfig: CorsConfig?
     private let websocketAuthConfig: WebSocketAuthConfig?
     private let server: HttpServer
-    private let fileManager = FileManager.default
+    private let fileManager: FileManager
     private var hotReloadManager: HotReloadManager?
     private var websocketSessions: [WeakWebSocketSession] = []
     private let sessionsQueue = DispatchQueue(label: "websocket.sessions", attributes: .concurrent)
@@ -29,7 +29,17 @@ public class DevelopmentServer {
     private var tokenExpirationDates: [String: Date] = [:]
     private let authQueue = DispatchQueue(label: "websocket.auth", attributes: .concurrent)
     
-    public init(projectPath: String, port: Int, host: String, liveReload: Bool, corsConfig: CorsConfig? = nil, websocketAuthConfig: WebSocketAuthConfig? = nil) {
+    // CSRF token storage for WebSocket connections
+    private var csrfTokens: [String: (token: String, expires: Date)] = [:]
+    private let csrfQueue = DispatchQueue(label: "csrf.tokens", attributes: .concurrent)
+    
+    // Rate limiting for auth endpoint
+    private var authRequestCounts: [String: (count: Int, resetTime: Date)] = [:]
+    private let rateLimitQueue = DispatchQueue(label: "rate.limit", attributes: .concurrent)
+    private let maxAuthRequestsPerMinute = 10
+    
+    public init(projectPath: String, port: Int, host: String, liveReload: Bool, corsConfig: CorsConfig? = nil, websocketAuthConfig: WebSocketAuthConfig? = nil, fileManager: FileManager = .default) {
+        self.fileManager = fileManager
         self.projectPath = projectPath
         self.port = port
         self.host = host
@@ -129,12 +139,38 @@ public class DevelopmentServer {
     }
     
     private func handleAuthTokenRequest(_ request: HttpRequest) -> HttpResponse {
-        // Generate and return an authentication token
-        let token = generateAuthToken()
+        // Get client IP for rate limiting
+        let clientIP = request.headers["x-forwarded-for"] ?? request.address ?? "unknown"
+        
+        // Check rate limit
+        if !checkRateLimit(for: clientIP) {
+            return .raw(429, "Too Many Requests", ["Retry-After": "60"]) { writer in
+                try writer.write("Rate limit exceeded. Please try again later.".data(using: .utf8)!)
+            }
+        }
+        
+        // Generate CSRF token for this session
+        let csrfToken = generateSecureToken(length: 32)
+        let authToken = generateSecureToken(length: 64)
+        
+        // Store CSRF token with expiration
+        let expirationMinutes = websocketAuthConfig?.tokenExpirationMinutes ?? 60
+        let expirationDate = Date().addingTimeInterval(TimeInterval(expirationMinutes * 60))
+        
+        csrfQueue.async(flags: .barrier) {
+            self.csrfTokens[authToken] = (token: csrfToken, expires: expirationDate)
+        }
+        
+        // Store auth token
+        authQueue.async(flags: .barrier) {
+            self.activeTokens.insert(authToken)
+            self.tokenExpirationDates[authToken] = expirationDate
+        }
         
         let tokenResponse: [String: Any] = [
-            "token": token,
-            "expiresIn": websocketAuthConfig?.tokenExpirationMinutes ?? 60,
+            "token": authToken,
+            "csrfToken": csrfToken,
+            "expiresIn": expirationMinutes,
             "endpoint": "/livereload"
         ]
         
@@ -579,11 +615,14 @@ public class DevelopmentServer {
         // Optionally write to a log file for persistence
         let logPath = URL(fileURLWithPath: projectPath).appendingPathComponent(".hirundo-build.log").path
         if let logData = errorRecord.data(using: .utf8) {
-            // Append to log file
+            // Append to log file with proper resource management
             if let logFile = FileHandle(forWritingAtPath: logPath) {
+                defer {
+                    // Ensure file handle is always closed
+                    logFile.closeFile()
+                }
                 logFile.seekToEndOfFile()
                 logFile.write(logData)
-                logFile.closeFile()
             } else {
                 // Create new log file
                 FileManager.default.createFile(atPath: logPath, contents: logData, attributes: nil)
@@ -595,47 +634,71 @@ public class DevelopmentServer {
     
     /// Generates a secure authentication token for WebSocket connections
     public func generateAuthToken() -> String {
-        return authQueue.sync(flags: .barrier) {
-            // Clean up expired tokens first
-            cleanupExpiredTokens()
-            
-            // Generate a cryptographically secure token
-            let tokenLength = 32
-            let characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-            var token = ""
-            
-            for _ in 0..<tokenLength {
-                let randomIndex = Int.random(in: 0..<characters.count)
-                let character = characters[characters.index(characters.startIndex, offsetBy: randomIndex)]
-                token.append(character)
-            }
-            
-            // Check for uniqueness (very unlikely to collide with 32 chars, but safer)
-            while activeTokens.contains(token) {
-                let randomIndex = Int.random(in: 0..<characters.count)
-                let character = characters[characters.index(characters.startIndex, offsetBy: randomIndex)]
-                token.append(character)
-            }
-            
-            // Store the token with expiration
-            let expirationDate = Date().addingTimeInterval(TimeInterval(websocketAuthConfig?.tokenExpirationMinutes ?? 60) * 60)
+        let token = generateSecureToken(length: 64)
+        
+        // Add token to active tokens with expiration
+        authQueue.sync(flags: .barrier) {
             activeTokens.insert(token)
-            tokenExpirationDates[token] = expirationDate
-            
-            // Limit number of active tokens for security
-            let maxTokens = websocketAuthConfig?.maxActiveTokens ?? 100
-            if activeTokens.count > maxTokens {
-                // Remove oldest tokens
-                let sortedTokens = tokenExpirationDates.sorted { $0.value < $1.value }
-                let tokensToRemove = sortedTokens.prefix(activeTokens.count - maxTokens)
-                for (tokenToRemove, _) in tokensToRemove {
-                    activeTokens.remove(tokenToRemove)
-                    tokenExpirationDates.removeValue(forKey: tokenToRemove)
-                }
+            tokenExpirationDates[token] = Date().addingTimeInterval(3600) // 1 hour expiration
+        }
+        
+        return token
+    }
+    
+    /// Generates a cryptographically secure token using SecRandomCopyBytes
+    private func generateSecureToken(length: Int) -> String {
+        let characters = Array("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+        var randomBytes = [UInt8](repeating: 0, count: length)
+        
+        // Use SecRandomCopyBytes for cryptographically secure random generation
+        let result = SecRandomCopyBytes(kSecRandomDefault, length, &randomBytes)
+        guard result == errSecSuccess else {
+            // Fallback to less secure method if SecRandomCopyBytes fails (should never happen)
+            print("Warning: SecRandomCopyBytes failed, falling back to arc4random")
+            return (0..<length).map { _ in
+                characters[Int(arc4random_uniform(UInt32(characters.count)))]
+            }.map(String.init).joined()
+        }
+        
+        // Convert random bytes to characters
+        let token = randomBytes.map { byte in
+            characters[Int(byte) % characters.count]
+        }.map(String.init).joined()
+        
+        return token
+    }
+    
+    /// Check rate limit for a given client IP
+    private func checkRateLimit(for clientIP: String) -> Bool {
+        let now = Date()
+        var allowed = false
+        
+        rateLimitQueue.sync(flags: .barrier) {
+            // Clean up old entries
+            authRequestCounts = authRequestCounts.filter { _, value in
+                value.resetTime > now
             }
             
-            return token
+            if let entry = authRequestCounts[clientIP] {
+                if entry.resetTime > now {
+                    // Within rate limit window
+                    if entry.count < maxAuthRequestsPerMinute {
+                        authRequestCounts[clientIP] = (count: entry.count + 1, resetTime: entry.resetTime)
+                        allowed = true
+                    }
+                } else {
+                    // Reset window expired
+                    authRequestCounts[clientIP] = (count: 1, resetTime: now.addingTimeInterval(60))
+                    allowed = true
+                }
+            } else {
+                // First request from this IP
+                authRequestCounts[clientIP] = (count: 1, resetTime: now.addingTimeInterval(60))
+                allowed = true
+            }
         }
+        
+        return allowed
     }
     
     /// Validates an authentication token

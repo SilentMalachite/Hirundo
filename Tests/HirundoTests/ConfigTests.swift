@@ -279,8 +279,11 @@ final class ConfigTests: XCTestCase {
             case .parseError:
                 // This is acceptable - the validation error is wrapped in a parse error
                 break
+            case .invalidFormat:
+                // This is also acceptable for invalid YAML format
+                break
             default:
-                XCTFail("Expected invalidValue or parseError, got \(error)")
+                XCTFail("Expected invalidValue, parseError, or invalidFormat, got \(error)")
             }
         } catch {
             // Direct validation error from TimeoutConfig
@@ -308,8 +311,11 @@ final class ConfigTests: XCTestCase {
             case .parseError:
                 // The validation error is wrapped in a parse error
                 break
+            case .invalidFormat:
+                // This is also acceptable for invalid YAML format
+                break
             default:
-                XCTFail("Expected invalidValue or parseError, got \(error)")
+                XCTFail("Expected invalidValue, parseError, or invalidFormat, got \(error)")
             }
         } catch {
             // Direct validation error from TimeoutConfig

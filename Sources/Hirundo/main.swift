@@ -5,6 +5,45 @@ import Foundation
 import AppKit
 #endif
 
+// Error handling helper function
+func handleError(_ error: Error, context: String, verbose: Bool = false) {
+    if let hirundoError = error as? HirundoErrorInfo {
+        print(hirundoError.userMessage)
+        if verbose {
+            print("\nDebug Details:")
+            print("  Error Code: \(hirundoError.category.rawValue)-\(hirundoError.code)")
+            print("  Details: \(hirundoError.details)")
+            if !hirundoError.debugInfo.isEmpty {
+                print("  Debug Info: \(hirundoError.debugInfo)")
+            }
+        }
+    } else if let configError = error as? ConfigError {
+        let hirundoError = configError.toHirundoError()
+        print(hirundoError.userMessage)
+        print("\n📍 Specific issue: \(configError.localizedDescription)")
+    } else if let markdownError = error as? MarkdownError {
+        let hirundoError = markdownError.toHirundoError()
+        print(hirundoError.userMessage)
+        print("\n📍 Specific issue: \(markdownError.localizedDescription)")
+    } else if let templateError = error as? TemplateError {
+        let hirundoError = templateError.toHirundoError()
+        print(hirundoError.userMessage)
+        print("\n📍 Specific issue: \(templateError.localizedDescription)")
+    } else if let buildError = error as? BuildError {
+        let hirundoError = buildError.toHirundoError()
+        print(hirundoError.userMessage)
+        print("\n📍 Specific issue: \(buildError.localizedDescription)")
+    } else {
+        // Generic error handling
+        print("\n❌ \(context) failed")
+        print("\n📍 Error: \(error.localizedDescription)")
+        print("\n💡 Suggestion: Check the error message above for details")
+        if verbose {
+            print("\nFull error: \(error)")
+        }
+    }
+}
+
 @main
 struct HirundoCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
@@ -352,7 +391,7 @@ struct BuildCommand: ParsableCommand {
                 print("📁 Output directory: \(currentDirectory)/_site")
             }
         } catch {
-            print("❌ Build failed: \(error.localizedDescription)")
+            handleError(error, context: "Build")
             throw ExitCode.failure
         }
     }
@@ -385,7 +424,7 @@ struct ServeCommand: ParsableCommand {
             let generator = try SiteGenerator(projectPath: currentDirectory)
             try generator.build()
         } catch {
-            print("❌ Build failed: \(error.localizedDescription)")
+            handleError(error, context: "Build")
             throw ExitCode.failure
         }
         
@@ -398,7 +437,8 @@ struct ServeCommand: ParsableCommand {
                 let config = try HirundoConfig.load(from: configPath)
                 corsConfig = config.server.cors
             } catch {
-                print("⚠️ Failed to load config for CORS settings: \(error.localizedDescription)")
+                // Don't show stack trace for config loading during serve
+                print("⚠️ Could not load CORS settings from config.yaml")
                 print("Using default CORS configuration")
             }
         }
@@ -431,7 +471,7 @@ struct ServeCommand: ParsableCommand {
         do {
             try server.start()
         } catch {
-            print("❌ Failed to start server: \(error.localizedDescription)")
+            handleError(error, context: "Server start")
             throw ExitCode.failure
         }
     }

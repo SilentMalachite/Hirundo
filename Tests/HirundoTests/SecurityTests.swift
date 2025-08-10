@@ -39,6 +39,7 @@ final class SecurityTests: XCTestCase {
           contentDirectory: content
           outputDirectory: _site
           templatesDirectory: templates
+          staticDirectory: static
         """
         
         let configPath = tempDir.appendingPathComponent("config.yaml")
@@ -186,6 +187,7 @@ final class SecurityTests: XCTestCase {
           contentDirectory: content
           outputDirectory: _site
           templatesDirectory: templates
+          staticDirectory: static
         """
         
         let configPath = tempDir.appendingPathComponent("config.yaml")
@@ -238,6 +240,7 @@ final class SecurityTests: XCTestCase {
           contentDirectory: content
           outputDirectory: _site
           templatesDirectory: templates
+          staticDirectory: static
         """
         
         let configPath = tempDir.appendingPathComponent("config.yaml")
@@ -285,15 +288,149 @@ final class SecurityTests: XCTestCase {
     // MARK: - XSS Payload Tests
     
     func testXSSInMarkdownContent() throws {
-        // Skip this test for now - YAML parsing error needs investigation
-        print("Note: XSS markdown content test temporarily disabled due to YAML parsing issues")
-        // TODO: Fix YAML parsing and re-enable this test
+        let contentDir = tempDir.appendingPathComponent("content")
+        let templatesDir = tempDir.appendingPathComponent("templates")
+        let outputDir = tempDir.appendingPathComponent("_site")
+        
+        try FileManager.default.createDirectory(at: contentDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: templatesDir, withIntermediateDirectories: true)
+        
+        // Create config.yaml
+        let configYAML = """
+        site:
+          title: Test Site
+          description: Test Description
+          url: https://example.com
+          language: en-US
+        
+        build:
+          contentDirectory: content
+          outputDirectory: _site
+          templatesDirectory: templates
+          staticDirectory: static
+        """
+        
+        let configPath = tempDir.appendingPathComponent("config.yaml")
+        try configYAML.write(to: configPath, atomically: true, encoding: .utf8)
+        
+        // Create a default template
+        let template = """
+        <!DOCTYPE html>
+        <html>
+        <head><title>{{ page.title }}</title></head>
+        <body>{{ content }}</body>
+        </html>
+        """
+        try template.write(to: templatesDir.appendingPathComponent("default.html"), 
+                          atomically: true, encoding: .utf8)
+        
+        // Create content with XSS payload
+        let xssContent = """
+        ---
+        title: XSS Test Page
+        ---
+        
+        # Test Content
+        
+        <script>alert('XSS')</script>
+        <img src=x onerror="alert('XSS')">
+        <a href="javascript:alert('XSS')">Click me</a>
+        """
+        
+        try xssContent.write(to: contentDir.appendingPathComponent("xss-test.md"), 
+                           atomically: true, encoding: .utf8)
+        
+        // Build the site
+        let generator = try SiteGenerator(projectPath: tempDir.path)
+        try generator.build()
+        
+        // Check the output
+        let outputFile = outputDir.appendingPathComponent("xss-test.html")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outputFile.path))
+        
+        let outputContent = try String(contentsOf: outputFile)
+        
+        // Verify XSS payloads are escaped or removed
+        XCTAssertFalse(outputContent.contains("<script>alert('XSS')</script>"),
+                      "Script tags should be escaped or removed")
+        XCTAssertFalse(outputContent.contains("onerror=\"alert('XSS')\""),
+                      "Event handlers should be escaped or removed")
+        XCTAssertFalse(outputContent.contains("javascript:alert"),
+                      "JavaScript URLs should be escaped or removed")
     }
     
     func testXSSInFrontMatter() throws {
-        // Skip this test for now - YAML parsing error needs investigation
-        print("Note: XSS front matter test temporarily disabled due to YAML parsing issues")
-        // TODO: Fix YAML parsing and re-enable this test
+        let contentDir = tempDir.appendingPathComponent("content")
+        let templatesDir = tempDir.appendingPathComponent("templates")
+        let outputDir = tempDir.appendingPathComponent("_site")
+        
+        try FileManager.default.createDirectory(at: contentDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: templatesDir, withIntermediateDirectories: true)
+        
+        // Create config.yaml
+        let configYAML = """
+        site:
+          title: Test Site
+          description: Test Description
+          url: https://example.com
+          language: en-US
+        
+        build:
+          contentDirectory: content
+          outputDirectory: _site
+          templatesDirectory: templates
+          staticDirectory: static
+        """
+        
+        let configPath = tempDir.appendingPathComponent("config.yaml")
+        try configYAML.write(to: configPath, atomically: true, encoding: .utf8)
+        
+        // Create a template that uses front matter
+        let template = """
+        <!DOCTYPE html>
+        <html>
+        <head><title>{{ page.title }}</title></head>
+        <body>
+            <h1>{{ page.title }}</h1>
+            <p>{{ page.description }}</p>
+            {{ content }}
+        </body>
+        </html>
+        """
+        try template.write(to: templatesDir.appendingPathComponent("default.html"), 
+                          atomically: true, encoding: .utf8)
+        
+        // Create content with XSS in front matter
+        let xssContent = """
+        ---
+        title: <script>alert('XSS in title')</script>
+        description: <img src=x onerror="alert('XSS in description')">
+        ---
+        
+        Regular content here.
+        """
+        
+        try xssContent.write(to: contentDir.appendingPathComponent("xss-frontmatter.md"), 
+                           atomically: true, encoding: .utf8)
+        
+        // Build the site
+        let generator = try SiteGenerator(projectPath: tempDir.path)
+        try generator.build()
+        
+        // Check the output
+        let outputFile = outputDir.appendingPathComponent("xss-frontmatter.html")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outputFile.path))
+        
+        let outputContent = try String(contentsOf: outputFile)
+        
+        // Verify XSS payloads in front matter are escaped
+        XCTAssertFalse(outputContent.contains("<script>alert('XSS in title')</script>"),
+                      "Script tags in front matter should be escaped")
+        XCTAssertTrue(outputContent.contains("&lt;script&gt;") || 
+                     outputContent.contains("&amp;lt;script&amp;gt;"),
+                     "Script tags should be HTML-escaped")
+        XCTAssertFalse(outputContent.contains("onerror=\"alert"),
+                      "Event handlers in front matter should be escaped")
     }
     
     // MARK: - YAML Bomb Tests
@@ -317,6 +454,7 @@ final class SecurityTests: XCTestCase {
           contentDirectory: content
           outputDirectory: _site
           templatesDirectory: templates
+          staticDirectory: static
         """
         
         let configPath = tempDir.appendingPathComponent("config.yaml")
@@ -424,6 +562,7 @@ final class SecurityTests: XCTestCase {
           contentDirectory: content
           outputDirectory: _site
           templatesDirectory: templates
+          staticDirectory: static
           
         limits:
           maxMarkdownFileSize: 1000  # 1KB for testing

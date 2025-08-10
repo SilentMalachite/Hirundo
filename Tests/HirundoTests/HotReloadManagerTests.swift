@@ -40,7 +40,10 @@ final class HotReloadManagerTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
         
         XCTAssertEqual(detectedChanges.count, 1)
-        XCTAssertEqual(detectedChanges[0].path, testFile.path)
+        // Normalize paths to handle /private/var vs /var symlink differences
+        let expectedPath = URL(fileURLWithPath: testFile.path).standardizedFileURL.path
+        let actualPath = URL(fileURLWithPath: detectedChanges[0].path).standardizedFileURL.path
+        XCTAssertEqual(actualPath, expectedPath)
         XCTAssertEqual(detectedChanges[0].type, .created)
     }
     
@@ -98,7 +101,12 @@ final class HotReloadManagerTests: XCTestCase {
         
         wait(for: [expectation], timeout: 1.0)
         
-        XCTAssertEqual(detectedChange?.path, testFile.path)
+        // Normalize paths to handle /private/var vs /var symlink differences
+        if let detectedPath = detectedChange?.path {
+            let expectedPath = URL(fileURLWithPath: testFile.path).standardizedFileURL.path
+            let actualPath = URL(fileURLWithPath: detectedPath).standardizedFileURL.path
+            XCTAssertEqual(actualPath, expectedPath)
+        }
         XCTAssertEqual(detectedChange?.type, .modified)
     }
     
@@ -127,7 +135,12 @@ final class HotReloadManagerTests: XCTestCase {
         
         wait(for: [expectation], timeout: 1.0)
         
-        XCTAssertEqual(detectedChange?.path, testFile.path)
+        // Normalize paths to handle /private/var vs /var symlink differences
+        if let detectedPath = detectedChange?.path {
+            let expectedPath = URL(fileURLWithPath: testFile.path).standardizedFileURL.path
+            let actualPath = URL(fileURLWithPath: detectedPath).standardizedFileURL.path
+            XCTAssertEqual(actualPath, expectedPath)
+        }
         XCTAssertEqual(detectedChange?.type, .deleted)
     }
     
@@ -154,7 +167,10 @@ final class HotReloadManagerTests: XCTestCase {
         
         wait(for: [expectation], timeout: 1.0)
         
-        XCTAssertEqual(detectedPath, subFile.path)
+        // Normalize paths to handle /private/var vs /var symlink differences
+        let expectedPath = URL(fileURLWithPath: subFile.path).standardizedFileURL.path
+        let actualPath = URL(fileURLWithPath: detectedPath).standardizedFileURL.path
+        XCTAssertEqual(actualPath, expectedPath)
     }
     
     func testIgnorePatterns() throws {

@@ -5,14 +5,22 @@ import Yams
 public class MarkdownParser {
     private let limits: Limits
     private let skipContentValidation: Bool
+    private let streamingParser: StreamingMarkdownParser
+    private let enableStreaming: Bool
     
     /// Initialize a new MarkdownParser
     /// - Parameters:
     ///   - limits: Security and resource limits for parsing
     ///   - skipContentValidation: Skip dangerous content validation (for testing only - DO NOT use in production)
-    public init(limits: Limits = Limits(), skipContentValidation: Bool = false) {
+    ///   - enableStreaming: Enable streaming parser for large files
+    public init(limits: Limits = Limits(), skipContentValidation: Bool = false, enableStreaming: Bool = true) {
         self.limits = limits
         self.skipContentValidation = skipContentValidation
+        self.enableStreaming = enableStreaming
+        self.streamingParser = StreamingMarkdownParser(
+            chunkSize: 65536,
+            maxMetadataSize: Int(limits.maxFrontMatterSize)
+        )
     }
     
     public func parse(_ content: String) throws -> MarkdownParseResult {
@@ -103,6 +111,37 @@ public class MarkdownParser {
             codeBlocks: codeBlocks,
             tables: tables,
             excerpt: excerpt
+        )
+    }
+    
+    /// Parse a markdown file using streaming for better memory efficiency
+    /// - Parameters:
+    ///   - path: Path to the markdown file
+    ///   - extractOnly: If true, only extracts metadata and excerpt (faster)
+    /// - Returns: Parsed content item
+    public func parseFile(at path: String, extractOnly: Bool = false) throws -> ContentItem {
+        // Check file size first
+        let fileURL = URL(fileURLWithPath: path)
+        let fileAttributes = try FileManager.default.attributesOfItem(atPath: path)
+        let fileSize = fileAttributes[.size] as? Int ?? 0
+        
+        // Use streaming parser for large files or if explicitly enabled
+        if enableStreaming && (fileSize > 1_048_576 || extractOnly) { // 1MB threshold
+            return try streamingParser.parseFile(at: path, extractOnly: extractOnly)
+        }
+        
+        // For smaller files, use regular parser
+        let content = try String(contentsOf: fileURL, encoding: .utf8)
+        let result = try parse(content)
+        
+        // Convert to ContentItem
+        let type: ContentType = fileURL.pathComponents.contains("posts") ? .post : .page
+        
+        return ContentItem(
+            path: path,
+            frontMatter: result.frontMatter ?? [:],
+            content: result.renderHTML(),
+            type: type
         )
     }
     

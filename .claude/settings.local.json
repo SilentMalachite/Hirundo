@@ -4,7 +4,16 @@
       "Bash(mkdir:*)",
       "Bash(swift package init:*)",
       "Bash(rm:*)",
-      "Bash(swift test:*)"
+      "Bash(swift test:*)",
+      "Bash(.build/debug/hirundo:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(./build.sh)",
+      "Bash(swift build:*)",
+      "Bash(/Users/hiro/Documents/GitHub/Hirundo/.build/release/hirundo init)",
+      "Bash(EDITOR=vim /Users/hiro/Documents/GitHub/Hirundo/.build/release/hirundo new post \"Test Post\" --open)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": []
   }
