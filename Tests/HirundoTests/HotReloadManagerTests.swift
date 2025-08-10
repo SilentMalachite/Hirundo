@@ -168,9 +168,12 @@ final class HotReloadManagerTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
         
         // Normalize paths to handle /private/var vs /var symlink differences
-        let expectedPath = URL(fileURLWithPath: subFile.path).standardizedFileURL.path
-        let actualPath = URL(fileURLWithPath: detectedPath).standardizedFileURL.path
-        XCTAssertEqual(actualPath, expectedPath)
+        XCTAssertNotNil(detectedPath, "Should have detected subdirectory file change")
+        if let detectedPath = detectedPath {
+            let expectedPath = URL(fileURLWithPath: subFile.path).standardizedFileURL.path
+            let actualPath = URL(fileURLWithPath: detectedPath).standardizedFileURL.path
+            XCTAssertEqual(actualPath, expectedPath)
+        }
     }
     
     func testIgnorePatterns() throws {
