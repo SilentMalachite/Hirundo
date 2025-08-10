@@ -503,7 +503,7 @@ final class PluginSystemTests: XCTestCase {
 
 // Test plugin implementations
 
-class TestPlugin: Plugin {
+final class TestPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "TestPlugin",
         version: "1.0.0",
@@ -517,7 +517,7 @@ class TestPlugin: Plugin {
     func cleanup() throws {}
 }
 
-class LifecycleTestPlugin: Plugin {
+final class LifecycleTestPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "LifecycleTestPlugin",
         version: "1.0.0",
@@ -525,19 +525,30 @@ class LifecycleTestPlugin: Plugin {
         description: "Tests lifecycle"
     )
     
-    var initialized = false
-    var cleanedUp = false
+    private let lock = NSLock()
+    private var _initialized = false
+    private var _cleanedUp = false
+    
+    var initialized: Bool {
+        get { lock.withLock { _initialized } }
+        set { lock.withLock { _initialized = newValue } }
+    }
+    
+    var cleanedUp: Bool {
+        get { lock.withLock { _cleanedUp } }
+        set { lock.withLock { _cleanedUp = newValue } }
+    }
     
     func initialize(context: PluginContext) throws {
-        initialized = true
+        lock.withLock { _initialized = true }
     }
     
     func cleanup() throws {
-        cleanedUp = true
+        lock.withLock { _cleanedUp = true }
     }
 }
 
-class HookTestPlugin: Plugin {
+final class HookTestPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "HookTestPlugin",
         version: "1.0.0",
@@ -545,25 +556,45 @@ class HookTestPlugin: Plugin {
         description: "Tests hooks"
     )
     
-    var beforeBuildCalled = false
-    var afterBuildCalled = false
-    var lastBuildContext: BuildContext?
+    private let lock = NSLock()
+    private var _beforeBuildCalled = false
+    private var _afterBuildCalled = false
+    private var _lastBuildContext: BuildContext?
+    
+    var beforeBuildCalled: Bool {
+        get { lock.withLock { _beforeBuildCalled } }
+        set { lock.withLock { _beforeBuildCalled = newValue } }
+    }
+    
+    var afterBuildCalled: Bool {
+        get { lock.withLock { _afterBuildCalled } }
+        set { lock.withLock { _afterBuildCalled = newValue } }
+    }
+    
+    var lastBuildContext: BuildContext? {
+        get { lock.withLock { _lastBuildContext } }
+        set { lock.withLock { _lastBuildContext = newValue } }
+    }
     
     func initialize(context: PluginContext) throws {}
     func cleanup() throws {}
     
     func beforeBuild(context: BuildContext) throws {
-        beforeBuildCalled = true
-        lastBuildContext = context
+        lock.withLock {
+            _beforeBuildCalled = true
+            _lastBuildContext = context
+        }
     }
     
     func afterBuild(context: BuildContext) throws {
-        afterBuildCalled = true
-        lastBuildContext = context
+        lock.withLock {
+            _afterBuildCalled = true
+            _lastBuildContext = context
+        }
     }
 }
 
-class ContentTransformPlugin: Plugin {
+final class ContentTransformPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "ContentTransformPlugin",
         version: "1.0.0",
@@ -577,12 +608,12 @@ class ContentTransformPlugin: Plugin {
     func transformContent(_ content: ContentItem) throws -> ContentItem {
         var transformed = content
         transformed.content = content.content.uppercased()
-        transformed.frontMatter["transformed"] = true
+        transformed.frontMatter["transformed"] = AnyCodable(true)
         return transformed
     }
 }
 
-class DataInjectionPlugin: Plugin {
+final class DataInjectionPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "DataInjectionPlugin",
         version: "1.0.0",
@@ -601,7 +632,7 @@ class DataInjectionPlugin: Plugin {
     }
 }
 
-class AssetProcessingPlugin: Plugin {
+final class AssetProcessingPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "AssetProcessingPlugin",
         version: "1.0.0",
@@ -615,12 +646,12 @@ class AssetProcessingPlugin: Plugin {
     func processAsset(_ asset: AssetItem) throws -> AssetItem {
         var processed = asset
         processed.processed = true
-        processed.metadata["minified"] = true
+        processed.metadata["minified"] = AnyCodable(true)
         return processed
     }
 }
 
-class ConfigurablePlugin: Plugin {
+final class ConfigurablePlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "ConfigurablePlugin",
         version: "1.0.0",
@@ -640,7 +671,7 @@ class ConfigurablePlugin: Plugin {
     }
 }
 
-class ErrorThrowingPlugin: Plugin {
+final class ErrorThrowingPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "ErrorThrowingPlugin",
         version: "1.0.0",
@@ -655,7 +686,7 @@ class ErrorThrowingPlugin: Plugin {
     func cleanup() throws {}
 }
 
-class DependencyPlugin: Plugin {
+final class DependencyPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "DependencyPlugin",
         version: "1.0.0",
@@ -664,19 +695,32 @@ class DependencyPlugin: Plugin {
         dependencies: []
     )
     
-    var initialized = false
-    var initTime: Date?
+    private let lock = NSLock()
+    private var _initialized = false
+    private var _initTime: Date?
+    
+    var initialized: Bool {
+        get { lock.withLock { _initialized } }
+        set { lock.withLock { _initialized = newValue } }
+    }
+    
+    var initTime: Date? {
+        get { lock.withLock { _initTime } }
+        set { lock.withLock { _initTime = newValue } }
+    }
     
     func initialize(context: PluginContext) throws {
-        initialized = true
-        initTime = Date()
+        lock.withLock {
+            _initialized = true
+            _initTime = Date()
+        }
         Thread.sleep(forTimeInterval: 0.01)
     }
     
     func cleanup() throws {}
 }
 
-class DependentPlugin: Plugin {
+final class DependentPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "DependentPlugin",
         version: "1.0.0",
@@ -685,18 +729,31 @@ class DependentPlugin: Plugin {
         dependencies: ["DependencyPlugin"]
     )
     
-    var initialized = false
-    var initTime: Date?
+    private let lock = NSLock()
+    private var _initialized = false
+    private var _initTime: Date?
+    
+    var initialized: Bool {
+        get { lock.withLock { _initialized } }
+        set { lock.withLock { _initialized = newValue } }
+    }
+    
+    var initTime: Date? {
+        get { lock.withLock { _initTime } }
+        set { lock.withLock { _initTime = newValue } }
+    }
     
     func initialize(context: PluginContext) throws {
-        initialized = true
-        initTime = Date()
+        lock.withLock {
+            _initialized = true
+            _initTime = Date()
+        }
     }
     
     func cleanup() throws {}
 }
 
-class PriorityPlugin: Plugin {
+final class PriorityPlugin: @unchecked Sendable, Plugin {
     let metadata: PluginMetadata
     let priority: PluginPriority
     
@@ -724,7 +781,7 @@ class PriorityPlugin: Plugin {
 
 // MARK: - Security Test Plugins
 
-class MaliciousFileSystemPlugin: Plugin {
+final class MaliciousFileSystemPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "MaliciousFileSystemPlugin",
         version: "1.0.0",
@@ -743,7 +800,7 @@ class MaliciousFileSystemPlugin: Plugin {
     }
 }
 
-class ResourceHogPlugin: Plugin {
+final class ResourceHogPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "ResourceHogPlugin",
         version: "1.0.0",
@@ -761,7 +818,7 @@ class ResourceHogPlugin: Plugin {
     }
 }
 
-class SystemFileModifierPlugin: Plugin {
+final class SystemFileModifierPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "SystemFileModifierPlugin",
         version: "1.0.0",
@@ -779,10 +836,12 @@ class SystemFileModifierPlugin: Plugin {
     }
 }
 
-class GlobalStatePlugin: Plugin {
+final class GlobalStatePlugin: @unchecked Sendable, Plugin {
     let metadata: PluginMetadata
     private let id: String
-    private static var globalState: [String: String] = [:]
+    private static let globalLock = NSLock()
+    nonisolated(unsafe) private static var globalState: [String: String] = [:]
+    private let localLock = NSLock()
     private var localState: [String: String] = [:]
     
     init(id: String) {
@@ -800,18 +859,24 @@ class GlobalStatePlugin: Plugin {
     
     func setGlobalState(_ key: String, value: String) {
         // Try to set global state
-        GlobalStatePlugin.globalState[key] = value
+        GlobalStatePlugin.globalLock.withLock {
+            GlobalStatePlugin.globalState[key] = value
+        }
         // Also set local state
-        localState[key] = value
+        localLock.withLock {
+            localState[key] = value
+        }
     }
     
     func getGlobalState(_ key: String) -> String? {
         // Should only see local state
-        return localState[key]
+        return localLock.withLock {
+            localState[key]
+        }
     }
 }
 
-class MemoryIntensivePlugin: Plugin {
+final class MemoryIntensivePlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "MemoryIntensivePlugin",
         version: "1.0.0",
@@ -828,7 +893,7 @@ class MemoryIntensivePlugin: Plugin {
     }
 }
 
-class CPUIntensivePlugin: Plugin {
+final class CPUIntensivePlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "CPUIntensivePlugin",
         version: "1.0.0",
@@ -845,7 +910,7 @@ class CPUIntensivePlugin: Plugin {
     }
 }
 
-class FileAccessPlugin: Plugin {
+final class FileAccessPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "FileAccessPlugin",
         version: "1.0.0",
@@ -881,7 +946,7 @@ class FileAccessPlugin: Plugin {
     }
 }
 
-class SandboxTestPlugin: Plugin {
+final class SandboxTestPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "SandboxTestPlugin",
         version: "1.0.0",
@@ -889,18 +954,24 @@ class SandboxTestPlugin: Plugin {
         description: "Tests sandbox restrictions"
     )
     
-    private var sandboxingEnabled = false
+    private let lock = NSLock()
+    private var _sandboxingEnabled = false
+    
+    private var sandboxingEnabled: Bool {
+        get { lock.withLock { _sandboxingEnabled } }
+        set { lock.withLock { _sandboxingEnabled = newValue } }
+    }
     
     func initialize(context: PluginContext) throws {}
     func cleanup() throws {}
     
     func setSandboxing(_ enabled: Bool) {
-        sandboxingEnabled = enabled
+        lock.withLock { _sandboxingEnabled = enabled }
     }
     
     func makeNetworkRequest() throws {
         if sandboxingEnabled {
-            throw PluginSecurityError.networkAccessDenied
+            throw PluginSecurityError.networkAccessDenied("https://example.com")
         }
         // In real implementation, would attempt network request
     }

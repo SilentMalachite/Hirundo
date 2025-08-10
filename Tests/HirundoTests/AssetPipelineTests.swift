@@ -296,7 +296,7 @@ final class AssetPipelineTests: XCTestCase {
 
 // Test plugin implementations
 
-class TestMinifyPlugin: Plugin {
+final class TestMinifyPlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "TestMinifyPlugin",
         version: "1.0.0",
@@ -304,7 +304,17 @@ class TestMinifyPlugin: Plugin {
         description: "Test minification"
     )
     
-    var processedAssets: [String] = []
+    private let lock = NSLock()
+    private var _processedAssets: [String] = []
+    
+    var processedAssets: [String] {
+        get {
+            lock.withLock { _processedAssets }
+        }
+        set {
+            lock.withLock { _processedAssets = newValue }
+        }
+    }
     
     required init() {}
     
@@ -312,7 +322,7 @@ class TestMinifyPlugin: Plugin {
     func cleanup() throws {}
     
     func processAsset(_ asset: AssetItem) throws -> AssetItem {
-        processedAssets.append(asset.sourcePath)
+        lock.withLock { _processedAssets.append(asset.sourcePath) }
         
         var processed = asset
         
@@ -327,14 +337,14 @@ class TestMinifyPlugin: Plugin {
             
             try minified.write(toFile: asset.outputPath, atomically: true, encoding: .utf8)
             processed.processed = true
-            processed.metadata["minified"] = true
+            processed.metadata["minified"] = AnyCodable(true)
         }
         
         return processed
     }
 }
 
-class TestOptimizePlugin: Plugin {
+final class TestOptimizePlugin: @unchecked Sendable, Plugin {
     let metadata = PluginMetadata(
         name: "TestOptimizePlugin",
         version: "1.0.0",
@@ -342,7 +352,17 @@ class TestOptimizePlugin: Plugin {
         description: "Test optimization"
     )
     
-    var processedAssets: [String] = []
+    private let lock = NSLock()
+    private var _processedAssets: [String] = []
+    
+    var processedAssets: [String] {
+        get {
+            lock.withLock { _processedAssets }
+        }
+        set {
+            lock.withLock { _processedAssets = newValue }
+        }
+    }
     
     required init() {}
     
@@ -350,7 +370,7 @@ class TestOptimizePlugin: Plugin {
     func cleanup() throws {}
     
     func processAsset(_ asset: AssetItem) throws -> AssetItem {
-        processedAssets.append(asset.sourcePath)
+        lock.withLock { _processedAssets.append(asset.sourcePath) }
         return asset
     }
 }
