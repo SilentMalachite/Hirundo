@@ -1,7 +1,7 @@
 import Foundation
 
 // Sitemap generation plugin
-public class SitemapPlugin: Plugin {
+public final class SitemapPlugin: @unchecked Sendable, Plugin {
     public let metadata = PluginMetadata(
         name: "SitemapPlugin",
         version: "1.0.0",
@@ -9,10 +9,63 @@ public class SitemapPlugin: Plugin {
         description: "Generates XML sitemap for SEO"
     )
     
-    private var context: PluginContext?
-    private var excludePatterns: [String] = []
-    private var changeFrequency: String = "weekly"
-    private var priority: Double = 0.5
+    private let lock = NSLock()
+    private var _context: PluginContext?
+    private var _excludePatterns: [String] = []
+    private var _changeFrequency: String = "weekly"
+    private var _priority: Double = 0.5
+    
+    private var context: PluginContext? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _context
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _context = newValue
+        }
+    }
+    
+    private var excludePatterns: [String] {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _excludePatterns
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _excludePatterns = newValue
+        }
+    }
+    
+    private var changeFrequency: String {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _changeFrequency
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _changeFrequency = newValue
+        }
+    }
+    
+    private var priority: Double {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _priority
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _priority = newValue
+        }
+    }
     
     public init() {}
     
@@ -25,13 +78,13 @@ public class SitemapPlugin: Plugin {
     }
     
     public func configure(with config: PluginConfig) throws {
-        if let patterns = config.settings["exclude"] as? [String] {
+        if let patterns = config.settings["exclude"]?.value as? [String] {
             excludePatterns = patterns
         }
-        if let freq = config.settings["changefreq"] as? String {
+        if let freq = config.settings["changefreq"]?.value as? String {
             changeFrequency = freq
         }
-        if let prio = config.settings["priority"] as? Double {
+        if let prio = config.settings["priority"]?.value as? Double {
             priority = prio
         }
     }

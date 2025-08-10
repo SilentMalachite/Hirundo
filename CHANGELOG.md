@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-level caching system with intelligent invalidation
 - Plugin system security validation and safe loading
 - Template engine thread safety improvements
+- Comprehensive timeout configuration for all I/O operations
+- CORS (Cross-Origin Resource Sharing) support for development server
+- WebSocket authentication for secure live reload connections
+- Swift 6.0 and macOS 14+ support with modern concurrency features
 
 ### Changed
 - **BREAKING**: JavaScript transpilation disabled by default for security reasons
@@ -44,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Memory-safe resource management
 - Secure plugin loading with validation
 - XSS prevention in HTML rendering
+- DoS attack prevention through configurable timeouts
+- WebSocket authentication and session management
+- CORS policy enforcement for secure cross-origin requests
 
 ## [1.0.0] - TBD
 

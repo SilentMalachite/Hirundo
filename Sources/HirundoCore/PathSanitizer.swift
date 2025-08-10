@@ -1,8 +1,8 @@
 import Foundation
 
 /// Thread-safe path sanitization with caching for performance optimization
-public final class PathSanitizer {
-    private static let shared = PathSanitizer()
+public final class PathSanitizer: @unchecked Sendable {
+    public static let shared = PathSanitizer()
     
     // Cache for sanitized paths with LRU eviction
     private var cache = [String: String]()

@@ -1,7 +1,7 @@
 import Foundation
 
 // Asset minification plugin
-public class MinifyPlugin: Plugin {
+public final class MinifyPlugin: @unchecked Sendable, Plugin {
     public let metadata = PluginMetadata(
         name: "MinifyPlugin",
         version: "1.0.0",
@@ -10,9 +10,49 @@ public class MinifyPlugin: Plugin {
         priority: .high // Run before other asset processors
     )
     
-    private var minifyCSS: Bool = true
-    private var minifyJS: Bool = true
-    private var removeComments: Bool = true
+    private let lock = NSLock()
+    private var _minifyCSS: Bool = true
+    private var _minifyJS: Bool = true
+    private var _removeComments: Bool = true
+    
+    private var minifyCSS: Bool {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _minifyCSS
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _minifyCSS = newValue
+        }
+    }
+    
+    private var minifyJS: Bool {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _minifyJS
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _minifyJS = newValue
+        }
+    }
+    
+    private var removeComments: Bool {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _removeComments
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _removeComments = newValue
+        }
+    }
     
     public init() {}
     
@@ -21,13 +61,13 @@ public class MinifyPlugin: Plugin {
     public func cleanup() throws {}
     
     public func configure(with config: PluginConfig) throws {
-        if let css = config.settings["minifyCSS"] as? Bool {
+        if let css = config.settings["minifyCSS"]?.value as? Bool {
             minifyCSS = css
         }
-        if let js = config.settings["minifyJS"] as? Bool {
+        if let js = config.settings["minifyJS"]?.value as? Bool {
             minifyJS = js
         }
-        if let comments = config.settings["removeComments"] as? Bool {
+        if let comments = config.settings["removeComments"]?.value as? Bool {
             removeComments = comments
         }
     }
@@ -44,9 +84,9 @@ public class MinifyPlugin: Plugin {
             try minified.write(toFile: asset.outputPath, atomically: true, encoding: .utf8)
             
             processed.processed = true
-            processed.metadata["minified"] = true
-            processed.metadata["originalSize"] = content.count
-            processed.metadata["minifiedSize"] = minified.count
+            processed.metadata["minified"] = AnyCodable(true)
+            processed.metadata["originalSize"] = AnyCodable(content.count)
+            processed.metadata["minifiedSize"] = AnyCodable(minified.count)
             
         case .javascript where minifyJS:
             let content = try String(contentsOfFile: asset.sourcePath, encoding: .utf8)
@@ -56,9 +96,9 @@ public class MinifyPlugin: Plugin {
             try minified.write(toFile: asset.outputPath, atomically: true, encoding: .utf8)
             
             processed.processed = true
-            processed.metadata["minified"] = true
-            processed.metadata["originalSize"] = content.count
-            processed.metadata["minifiedSize"] = minified.count
+            processed.metadata["minified"] = AnyCodable(true)
+            processed.metadata["originalSize"] = AnyCodable(content.count)
+            processed.metadata["minifiedSize"] = AnyCodable(minified.count)
             
         default:
             // Copy file as-is

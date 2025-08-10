@@ -1,5 +1,23 @@
 import Foundation
 
+// Helper class for thread-safe result storage
+private final class ResultBox<T: Sendable>: @unchecked Sendable {
+    private var result: Result<T, Error>?
+    private let lock = NSLock()
+    
+    func set(_ result: Result<T, Error>) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.result = result
+    }
+    
+    func get() -> Result<T, Error>? {
+        lock.lock()
+        defer { lock.unlock() }
+        return result
+    }
+}
+
 // MARK: - Timeout Error Type
 
 public enum TimeoutError: Error, LocalizedError {
@@ -24,10 +42,10 @@ public class TimeoutManager {
     ///   - work: The work to perform
     /// - Returns: The result of the work
     /// - Throws: TimeoutError if the operation times out, or the original error if the work fails
-    public static func withTimeout<T>(
+    public static func withTimeout<T: Sendable>(
         _ timeout: TimeInterval,
         operation: String,
-        work: @escaping () async throws -> T
+        work: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         return try await withThrowingTaskGroup(of: T.self) { group in
             // Add the work task
@@ -55,20 +73,20 @@ public class TimeoutManager {
     ///   - work: The synchronous work to perform
     /// - Returns: The result of the work
     /// - Throws: TimeoutError if the operation times out, or the original error if the work fails
-    public static func withTimeoutSync<T>(
+    public static func withTimeoutSync<T: Sendable>(
         _ timeout: TimeInterval,
         operation: String,
-        work: @escaping () throws -> T
+        work: @escaping @Sendable () throws -> T
     ) throws -> T {
         let semaphore = DispatchSemaphore(value: 0)
-        var result: Result<T, Error>?
+        let resultBox = ResultBox<T>()
         
         DispatchQueue.global().async {
             do {
                 let value = try work()
-                result = .success(value)
+                resultBox.set(.success(value))
             } catch {
-                result = .failure(error)
+                resultBox.set(.failure(error))
             }
             semaphore.signal()
         }
@@ -77,7 +95,10 @@ public class TimeoutManager {
         
         switch timeoutResult {
         case .success:
-            switch result! {
+            guard let result = resultBox.get() else {
+                throw TimeoutError.operationTimedOut(operation: operation, duration: timeout)
+            }
+            switch result {
             case .success(let value):
                 return value
             case .failure(let error):
@@ -169,7 +190,7 @@ public class TimeoutDevelopmentServer {
     ///   - timeout: Maximum time to wait for server startup
     /// - Returns: The started server instance
     /// - Throws: TimeoutError if startup times out
-    public static func start(projectPath: String, port: Int, timeout: TimeInterval) throws -> Any {
+    public static func start(projectPath: String, port: Int, timeout: TimeInterval) throws -> String {
         return try TimeoutManager.withTimeoutSync(timeout, operation: "serverStart") {
             // Simulate server startup
             Thread.sleep(forTimeInterval: 0.1) // Simulate some startup time

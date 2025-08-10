@@ -4,6 +4,18 @@ import Foundation
 class SecureFileManager {
     private let allowedDirectories: [String]
     private let projectPath: String
+    private let deniedPaths: Set<String> = [
+        "/etc/passwd",
+        "/etc/shadow",
+        "/System",
+        "/usr/bin",
+        "/usr/sbin",
+        "/bin",
+        "/sbin",
+        "~/.ssh",
+        "~/.aws",
+        "~/.config"
+    ]
     
     init(allowedDirectories: [String], projectPath: String) {
         self.allowedDirectories = allowedDirectories
@@ -12,6 +24,24 @@ class SecureFileManager {
     
     func checkFileAccess(_ path: String) throws {
         let normalizedPath = URL(fileURLWithPath: path).standardized.path
+        
+        // Check for denied paths first
+        for deniedPath in deniedPaths {
+            let expandedPath = (deniedPath as NSString).expandingTildeInPath
+            if normalizedPath.hasPrefix(expandedPath) {
+                throw PluginSecurityError.unauthorizedFileAccess(path)
+            }
+        }
+        
+        // Check for symlinks to prevent symlink attacks
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+           let fileType = attributes[.type] as? FileAttributeType,
+           fileType == .typeSymbolicLink {
+            // Resolve symlink and check destination
+            let resolvedPath = try FileManager.default.destinationOfSymbolicLink(atPath: path)
+            try checkFileAccess(resolvedPath)
+            return
+        }
         
         // Always allow access within project directory
         if normalizedPath.hasPrefix(projectPath) {
@@ -26,6 +56,93 @@ class SecureFileManager {
         if !isAllowed {
             throw PluginSecurityError.unauthorizedFileAccess(path)
         }
+    }
+    
+    // Sandboxed file operations with full validation
+    func readFile(at path: String) throws -> Data {
+        try checkFileAccess(path)
+        
+        // Additional validation using FileSecurityUtilities
+        let validatedPath = try FileSecurityUtilities.validatePath(
+            path,
+            allowSymlinks: false,
+            basePath: projectPath
+        )
+        
+        // Read with size limit
+        let attributes = try FileManager.default.attributesOfItem(atPath: validatedPath)
+        let fileSize = attributes[.size] as? Int64 ?? 0
+        
+        guard fileSize <= 50_000_000 else { // 50MB limit for plugin file reads
+            throw PluginSecurityError.fileTooLarge(path, fileSize)
+        }
+        
+        return try Data(contentsOf: URL(fileURLWithPath: validatedPath))
+    }
+    
+    func writeFile(_ data: Data, to path: String) throws {
+        try checkFileAccess(path)
+        
+        // Size limit for writes
+        guard data.count <= 10_000_000 else { // 10MB limit for plugin file writes
+            throw PluginSecurityError.writeTooLarge(path, data.count)
+        }
+        
+        // Use FileSecurityUtilities for safe write
+        try FileSecurityUtilities.writeData(
+            data,
+            toPath: path,
+            basePath: projectPath
+        )
+    }
+    
+    func fileExists(at path: String) -> Bool {
+        do {
+            try checkFileAccess(path)
+            let validatedPath = try FileSecurityUtilities.validatePath(
+                path,
+                allowSymlinks: false,
+                basePath: projectPath
+            )
+            return FileManager.default.fileExists(atPath: validatedPath)
+        } catch {
+            return false
+        }
+    }
+    
+    func createDirectory(at path: String) throws {
+        try checkFileAccess(path)
+        
+        // Use FileSecurityUtilities for safe directory creation
+        try FileSecurityUtilities.createDirectory(
+            at: path,
+            withIntermediateDirectories: true,
+            basePath: projectPath
+        )
+    }
+    
+    // List directory contents with sandboxing
+    func listDirectory(at path: String) throws -> [String] {
+        try checkFileAccess(path)
+        
+        let validatedPath = try FileSecurityUtilities.validatePath(
+            path,
+            allowSymlinks: false,
+            basePath: projectPath
+        )
+        
+        let contents = try FileManager.default.contentsOfDirectory(atPath: validatedPath)
+        return contents.filter { !$0.hasPrefix(".") } // Hide hidden files
+    }
+    
+    // Execute shell command with restrictions (disabled by default)
+    func executeCommand(_ command: String) throws {
+        throw PluginSecurityError.commandExecutionDenied(command)
+    }
+    
+    // Network access control (disabled by default)
+    func fetchURL(_ url: URL) throws -> Data {
+        throw PluginSecurityError.networkAccessDenied(url.absoluteString)
     }
 }
 
@@ -212,7 +329,7 @@ public class PluginManager {
             executionMonitor.startMonitoring()
             
             do {
-                try executeWithSecurity {
+                try executeWithSecurity { [buildContext, plugin] in
                     try plugin.afterBuild(context: buildContext)
                 }
                 
@@ -275,24 +392,27 @@ public class PluginManager {
             
             do {
                 // Before transform
-                transformed = try executeWithSecurity {
-                    try plugin.beforeContentTransform(transformed)
+                let beforeTransformed = transformed
+                transformed = try executeWithSecurity { [beforeTransformed, plugin] in
+                    try plugin.beforeContentTransform(beforeTransformed)
                 }
                 
                 // Check resource limits
                 try executionMonitor.checkResourceLimits(resourceLimits)
                 
                 // Main transform
-                transformed = try executeWithSecurity {
-                    try plugin.transformContent(transformed)
+                let mainTransformed = transformed
+                transformed = try executeWithSecurity { [mainTransformed, plugin] in
+                    try plugin.transformContent(mainTransformed)
                 }
                 
                 // Check resource limits again
                 try executionMonitor.checkResourceLimits(resourceLimits)
                 
                 // After transform
-                transformed = try executeWithSecurity {
-                    try plugin.afterContentTransform(transformed)
+                let afterTransformed = transformed
+                transformed = try executeWithSecurity { [afterTransformed, plugin] in
+                    try plugin.afterContentTransform(afterTransformed)
                 }
                 
                 // Final resource check
@@ -452,72 +572,90 @@ public class PluginManager {
     }
     
     // Execute with security context
-    private func executeWithSecurity<T>(_ block: @escaping () throws -> T) throws -> T {
+    private func executeWithSecurity<T>(_ block: @escaping @Sendable () throws -> T) throws -> T {
         // Set up resource monitoring
         let startMemory = getCurrentMemoryUsage()
         let startTime = Date()
         let startFileCount = getFileOperationCount()
+        let startCPUTime = getCurrentCPUTime()
         
-        // Create execution timeout
-        let timeoutWorkItem = DispatchWorkItem {
-            // This will be cancelled if execution completes in time
-        }
+        // Create semaphore for timeout handling
+        let semaphore = DispatchSemaphore(value: 0)
+        var executionResult: Result<T, Error>?
         
-        // Schedule timeout
-        DispatchQueue.global().asyncAfter(deadline: .now() + securityContext.maxExecutionTime, execute: timeoutWorkItem)
+        // Create execution queue
+        let executionQueue = DispatchQueue(label: "plugin.execution.\(UUID().uuidString)")
         
-        // Create secure execution environment
-        let sandboxedBlock = { [weak self] () throws -> T in
-            guard let self = self else {
-                throw PluginSecurityError.executionContextLost
+        // Create monitoring timer
+        let monitoringTimer = DispatchSource.makeTimerSource(queue: .global())
+        monitoringTimer.schedule(deadline: .now(), repeating: 0.1) // Check every 100ms
+        
+        monitoringTimer.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            
+            let now = Date()
+            
+            // Check timeout
+            if now.timeIntervalSince(startTime) > self.securityContext.maxExecutionTime {
+                executionResult = .failure(PluginSecurityError.executionTimeout(self.securityContext.maxExecutionTime))
+                semaphore.signal()
+                return
             }
             
-            // Set up periodic checker
-            let checker = {
-                let now = Date()
-                
-                // Check timeout
-                if now.timeIntervalSince(startTime) > self.securityContext.maxExecutionTime {
-                    throw PluginSecurityError.executionTimeout(self.securityContext.maxExecutionTime)
-                }
-                
-                // Check memory usage
-                let currentMemory = self.getCurrentMemoryUsage()
-                if currentMemory - startMemory > self.securityContext.maxMemoryUsage {
-                    throw PluginSecurityError.memoryLimitExceeded(self.securityContext.maxMemoryUsage)
-                }
-                
-                // Check file operations
-                let currentFileCount = self.getFileOperationCount()
-                if currentFileCount - startFileCount > self.resourceLimits.fileOperationLimit {
-                    throw PluginResourceLimitError.fileLimitExceeded(self.resourceLimits.fileOperationLimit)
-                }
+            // Check CPU time
+            let currentCPUTime = self.getCurrentCPUTime()
+            if currentCPUTime - startCPUTime > self.resourceLimits.cpuTimeLimit {
+                executionResult = .failure(PluginResourceLimitError.cpuTimeLimitExceeded(self.resourceLimits.cpuTimeLimit))
+                semaphore.signal()
+                return
             }
             
-            // Initial check
-            try checker()
+            // Check memory usage
+            let currentMemory = self.getCurrentMemoryUsage()
+            let memoryDelta = currentMemory - startMemory
+            if memoryDelta > self.securityContext.maxMemoryUsage {
+                executionResult = .failure(PluginSecurityError.memoryLimitExceeded(self.securityContext.maxMemoryUsage))
+                semaphore.signal()
+                return
+            }
             
-            // Execute block with periodic checks
-            let result = try block()
-            
-            // Final check
-            try checker()
-            
-            return result
+            // Check file operations
+            let currentFileCount = self.getFileOperationCount()
+            if currentFileCount - startFileCount > self.resourceLimits.fileOperationLimit {
+                executionResult = .failure(PluginResourceLimitError.fileLimitExceeded(self.resourceLimits.fileOperationLimit))
+                semaphore.signal()
+                return
+            }
         }
         
-        do {
-            // Execute with sandboxing
-            let result = try sandboxedBlock()
-            
-            // Cancel timeout since execution completed
-            timeoutWorkItem.cancel()
-            
-            return result
-        } catch {
-            // Cancel timeout on error
-            timeoutWorkItem.cancel()
-            
+        monitoringTimer.resume()
+        
+        // Execute block in separate queue
+        executionQueue.async {
+            do {
+                let result = try block()
+                executionResult = .success(result)
+            } catch {
+                executionResult = .failure(error)
+            }
+            semaphore.signal()
+        }
+        
+        // Wait for completion or timeout
+        _ = semaphore.wait(timeout: .now() + securityContext.maxExecutionTime)
+        
+        // Stop monitoring
+        monitoringTimer.cancel()
+        
+        // Check result
+        guard let result = executionResult else {
+            throw PluginSecurityError.executionTimeout(securityContext.maxExecutionTime)
+        }
+        
+        switch result {
+        case .success(let value):
+            return value
+        case .failure(let error):
             // Log security violations
             if error is PluginSecurityError || error is PluginResourceLimitError {
                 print("[PluginSecurity] Resource/Security violation detected: \(error)")
@@ -545,6 +683,26 @@ public class PluginManager {
         }
         
         return result == KERN_SUCCESS ? Int64(info.resident_size) : 0
+    }
+    
+    private func getCurrentCPUTime() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+        
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                task_info(mach_task_self_,
+                         task_flavor_t(MACH_TASK_BASIC_INFO),
+                         $0,
+                         &count)
+            }
+        }
+        
+        if result == KERN_SUCCESS {
+            return Double(info.user_time.seconds) + Double(info.user_time.microseconds) / 1_000_000.0 +
+                   Double(info.system_time.seconds) + Double(info.system_time.microseconds) / 1_000_000.0
+        }
+        return 0.0
     }
     
     // Rebuild plugin order based on dependencies
@@ -591,9 +749,9 @@ public class PluginManager {
 }
 
 // Plugin loader for built-in plugins
-public class PluginLoader {
-    private static var builtInPlugins: [String: () -> Plugin] = {
-        var plugins: [String: () -> Plugin] = [:]
+public final class PluginLoader: Sendable {
+    private static let builtInPlugins: [String: @Sendable () -> Plugin] = {
+        var plugins: [String: @Sendable () -> Plugin] = [:]
         // Register built-in plugins here
         plugins["sitemap"] = { SitemapPlugin() }
         plugins["rss"] = { RSSPlugin() }
@@ -602,19 +760,37 @@ public class PluginLoader {
         return plugins
     }()
     
+    // Additional plugins can be registered through this thread-safe mechanism
+    private static let additionalPluginsLock = NSLock()
+    nonisolated(unsafe) private static var additionalPlugins: [String: @Sendable () -> Plugin] = [:]
+    
     // Register a built-in plugin type
-    public static func registerBuiltIn(name: String, factory: @escaping () -> Plugin) {
-        builtInPlugins[name] = factory
+    public static func registerBuiltIn(name: String, factory: @escaping @Sendable () -> Plugin) {
+        additionalPluginsLock.lock()
+        defer { additionalPluginsLock.unlock() }
+        additionalPlugins[name] = factory
     }
     
     // Load a built-in plugin
     public static func loadBuiltIn(named name: String) -> Plugin? {
-        return builtInPlugins[name]?()
+        // Check built-in plugins first
+        if let factory = builtInPlugins[name] {
+            return factory()
+        }
+        
+        // Check additional plugins
+        additionalPluginsLock.lock()
+        defer { additionalPluginsLock.unlock() }
+        return additionalPlugins[name]?()
     }
     
     // Get available built-in plugins
     public static var availableBuiltIns: [String] {
-        return Array(builtInPlugins.keys).sorted()
+        additionalPluginsLock.lock()
+        defer { additionalPluginsLock.unlock() }
+        let builtInKeys = Array(builtInPlugins.keys)
+        let additionalKeys = Array(additionalPlugins.keys)
+        return (builtInKeys + additionalKeys).sorted()
     }
     
     // Load all enabled built-in plugins into manager

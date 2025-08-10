@@ -358,29 +358,29 @@ struct BuildCommand: ParsableCommand {
                 // Use build with recovery mode
                 let result = try generator.buildWithRecovery(clean: clean, includeDrafts: drafts)
                 
-                if result.isCompleteSuccess {
+                if result.success {
                     print("✅ Site built successfully!")
                 } else {
                     print("⚠️  Build completed with errors")
-                    print("✅ Successfully built: \(result.successfulPages.count) pages")
-                    print("❌ Failed: \(result.failedPages.count) pages")
+                    print("✅ Successfully built: \(result.successCount) files")
+                    print("❌ Failed: \(result.failCount) files")
                     
                     // Show brief error summary
                     print("\nFailed files:")
-                    for (index, failure) in result.failedPages.prefix(5).enumerated() {
-                        let filename = URL(fileURLWithPath: failure.path).lastPathComponent
-                        print("  \(index + 1). \(filename): \(failure.error.localizedDescription)")
+                    for (index, error) in result.errors.prefix(5).enumerated() {
+                        let filename = URL(fileURLWithPath: error.file).lastPathComponent
+                        print("  \(index + 1). \(filename): \(error.error.localizedDescription)")
                     }
                     
-                    if result.failedPages.count > 5 {
-                        print("  ... and \(result.failedPages.count - 5) more")
+                    if result.errors.count > 5 {
+                        print("  ... and \(result.errors.count - 5) more")
                     }
                 }
                 
                 print("📁 Output directory: \(currentDirectory)/_site")
                 
                 // Exit with failure if there were errors
-                if !result.isCompleteSuccess {
+                if !result.success {
                     throw ExitCode.failure
                 }
             } else {

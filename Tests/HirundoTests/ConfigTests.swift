@@ -95,8 +95,8 @@ final class ConfigTests: XCTestCase {
         let minifyPlugin = config.plugins[1]
         XCTAssertEqual(minifyPlugin.name, "minify")
         XCTAssertTrue(minifyPlugin.enabled)
-        XCTAssertTrue(minifyPlugin.settings["removeComments"] as? Bool ?? false)
-        XCTAssertFalse(minifyPlugin.settings["removeWhitespace"] as? Bool ?? true)
+        XCTAssertTrue(minifyPlugin.settings["removeComments"]?.value as? Bool ?? false)
+        XCTAssertFalse(minifyPlugin.settings["removeWhitespace"]?.value as? Bool ?? true)
     }
     
     func testCompleteConfigParsing() throws {

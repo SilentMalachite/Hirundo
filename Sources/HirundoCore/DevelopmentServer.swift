@@ -1,5 +1,5 @@
 import Foundation
-import Swifter
+@preconcurrency import Swifter
 
 // Weak wrapper for WebSocket sessions to prevent memory leaks
 private class WeakWebSocketSession {
@@ -10,7 +10,7 @@ private class WeakWebSocketSession {
     }
 }
 
-public class DevelopmentServer {
+public final class DevelopmentServer: @unchecked Sendable {
     private let projectPath: String
     private let port: Int
     private let host: String
@@ -508,10 +508,12 @@ public class DevelopmentServer {
             }
         }
         
-        do {
-            try hotReloadManager?.start()
-        } catch {
-            print("⚠️ Failed to start file watcher: \(error.localizedDescription)")
+        Task {
+            do {
+                try await hotReloadManager?.start()
+            } catch {
+                print("⚠️ Failed to start file watcher: \(error.localizedDescription)")
+            }
         }
     }
     
@@ -624,8 +626,18 @@ public class DevelopmentServer {
                 logFile.seekToEndOfFile()
                 logFile.write(logData)
             } else {
-                // Create new log file
-                FileManager.default.createFile(atPath: logPath, contents: logData, attributes: nil)
+                // Create new log file with security validation
+                do {
+                    try FileSecurityUtilities.createFile(
+                        atPath: logPath,
+                        contents: logData,
+                        attributes: nil,
+                        basePath: projectPath
+                    )
+                } catch {
+                    // If unable to create log file, just log to stderr
+                    fputs("Warning: Unable to create log file: \(error)\n", stderr)
+                }
             }
         }
     }
@@ -647,7 +659,7 @@ public class DevelopmentServer {
     
     /// Generates a cryptographically secure token using SecRandomCopyBytes
     private func generateSecureToken(length: Int) -> String {
-        let characters = Array("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+        let characters = Array("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
         var randomBytes = [UInt8](repeating: 0, count: length)
         
         // Use SecRandomCopyBytes for cryptographically secure random generation
@@ -758,7 +770,8 @@ public class DevelopmentServer {
     }
     
     deinit {
-        hotReloadManager?.stop()
+        // Note: We can't use async operations in deinit
+        // The HotReloadManager will clean up its resources in its own deinit
         cleanupTimer?.invalidate()
         cleanupTimer = nil
     }

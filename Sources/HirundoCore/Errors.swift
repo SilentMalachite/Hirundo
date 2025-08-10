@@ -105,10 +105,10 @@ public protocol HirundoError: Error, LocalizedError {
     var details: String { get }
     var underlyingError: Error? { get }
     var userMessage: String { get }
-    var debugInfo: [String: Any] { get }
+    var debugInfo: [String: AnyCodable] { get }
 }
 
-public enum ErrorCategory: String, CaseIterable {
+public enum ErrorCategory: String, CaseIterable, Sendable {
     case configuration = "CONFIG"
     case markdown = "MARKDOWN"
     case template = "TEMPLATE"
@@ -124,14 +124,14 @@ public struct HirundoErrorInfo: HirundoError {
     public let code: String
     public let details: String
     public let underlyingError: Error?
-    public let debugInfo: [String: Any]
+    public let debugInfo: [String: AnyCodable]
     
     public init(
         category: ErrorCategory,
         code: String,
         details: String,
         underlyingError: Error? = nil,
-        debugInfo: [String: Any] = [:]
+        debugInfo: [String: AnyCodable] = [:]
     ) {
         self.category = category
         self.code = code

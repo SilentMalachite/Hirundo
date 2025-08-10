@@ -1,7 +1,7 @@
 import Foundation
 import Yams
 
-public struct Author: Codable {
+public struct Author: Codable, Sendable {
     public let name: String
     public let email: String?
     
@@ -29,7 +29,7 @@ public struct Author: Codable {
     }
 }
 
-public struct Site: Codable {
+public struct Site: Codable, Sendable {
     public let title: String
     public let description: String?
     public let url: String
@@ -112,7 +112,7 @@ public struct SiteConfig {
     }
 }
 
-public struct Build: Codable {
+public struct Build: Codable, Sendable {
     public let contentDirectory: String
     public let outputDirectory: String
     public let staticDirectory: String
@@ -164,7 +164,7 @@ public struct BuildConfig {
     }
 }
 
-public struct Server: Codable {
+public struct Server: Codable, Sendable {
     public let port: Int
     public let liveReload: Bool
     public let cors: CorsConfig?
@@ -179,7 +179,7 @@ public struct Server: Codable {
 }
 
 // WebSocket authentication configuration
-public struct WebSocketAuthConfig: Codable {
+public struct WebSocketAuthConfig: Codable, Sendable {
     public let enabled: Bool
     public let tokenExpirationMinutes: Int
     public let maxActiveTokens: Int
@@ -196,7 +196,7 @@ public struct WebSocketAuthConfig: Codable {
 }
 
 // CORS configuration
-public struct CorsConfig: Codable {
+public struct CorsConfig: Codable, Sendable {
     public let enabled: Bool
     public let allowedOrigins: [String]
     public let allowedMethods: [String]
@@ -261,7 +261,7 @@ public struct ServerConfig {
     }
 }
 
-public struct Blog: Codable {
+public struct Blog: Codable, Sendable {
     public let postsPerPage: Int
     public let generateArchive: Bool
     public let generateCategories: Bool
@@ -324,7 +324,7 @@ public struct PluginsConfig {
 }
 
 // Security and performance limits configuration
-public struct Limits: Codable {
+public struct Limits: Codable, Sendable {
     public let maxMarkdownFileSize: Int
     public let maxConfigFileSize: Int
     public let maxFrontMatterSize: Int
@@ -362,7 +362,7 @@ public struct Limits: Codable {
 }
 
 // Timeout configuration for I/O operations
-public struct TimeoutConfig: Codable {
+public struct TimeoutConfig: Codable, Sendable {
     public let fileReadTimeout: TimeInterval
     public let fileWriteTimeout: TimeInterval
     public let directoryOperationTimeout: TimeInterval
@@ -432,12 +432,12 @@ public struct TimeoutConfig: Codable {
     }
 }
 
-public struct HirundoConfig: Codable {
+public struct HirundoConfig: Codable, Sendable {
     // Plugin configuration
-    public struct PluginConfiguration: Codable {
+    public struct PluginConfiguration: Codable, Sendable {
         public let name: String
         public let enabled: Bool
-        public let settings: [String: Any]
+        public let settings: [String: AnyCodable]
         
         private struct DynamicCodingKeys: CodingKey {
             var stringValue: String
@@ -471,10 +471,10 @@ public struct HirundoConfig: Codable {
             }
             
             // Collect all other fields as settings
-            var settings: [String: Any] = [:]
+            var settings: [String: AnyCodable] = [:]
             for key in container.allKeys {
                 if key.stringValue != "name" && key.stringValue != "enabled" {
-                    settings[key.stringValue] = try container.decode(AnyCodable.self, forKey: key).value
+                    settings[key.stringValue] = try container.decode(AnyCodable.self, forKey: key)
                 }
             }
             self.settings = settings

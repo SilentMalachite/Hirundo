@@ -13,13 +13,13 @@ final class HotReloadIntegrationTest: XCTestCase {
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
     }
     
-    override func tearDown() {
-        manager?.stop()
+    override func tearDown() async throws {
+        await manager?.stop()
         try? FileManager.default.removeItem(at: tempDir)
-        super.tearDown()
+        try await super.tearDown()
     }
     
-    func testBasicHotReload() throws {
+    func testBasicHotReload() async throws {
         // Create a simple directory structure
         let contentDir = tempDir.appendingPathComponent("content")
         let templatesDir = tempDir.appendingPathComponent("templates")
@@ -27,20 +27,20 @@ final class HotReloadIntegrationTest: XCTestCase {
         try FileManager.default.createDirectory(at: templatesDir, withIntermediateDirectories: true)
         
         let expectation = self.expectation(description: "File changes detected")
-        var detectedChanges = 0
+        let detectedChanges = ThreadSafeBox<Int>(0)
         
         manager = HotReloadManager(
             watchPaths: [contentDir.path, templatesDir.path],
             debounceInterval: 0.3
         ) { changes in
-            detectedChanges = changes.count
+            detectedChanges.set(changes.count)
             expectation.fulfill()
         }
         
-        try manager.start()
+        try await manager.start()
         
         // Give the watcher time to start
-        Thread.sleep(forTimeInterval: 0.1)
+        try await Task.sleep(nanoseconds: 100_000_000)
         
         // Create files
         let file1 = contentDir.appendingPathComponent("test.md")
@@ -49,14 +49,15 @@ final class HotReloadIntegrationTest: XCTestCase {
         try "# Test Content".write(to: file1, atomically: true, encoding: .utf8)
         try "<h1>Test Template</h1>".write(to: file2, atomically: true, encoding: .utf8)
         
-        wait(for: [expectation], timeout: 2.0)
+        await fulfillment(of: [expectation], timeout: 2.0)
         
+        let changes = detectedChanges.get()
         // FSEvents may batch these changes together
-        XCTAssertGreaterThan(detectedChanges, 0)
-        print("Detected \(detectedChanges) changes")
+        XCTAssertGreaterThan(changes, 0)
+        print("Detected \(changes) changes")
     }
     
-    func testRealWorldScenario() throws {
+    func testRealWorldScenario() async throws {
         // Simulate a real Hirundo project
         let projectStructure = [
             "content/index.md",
@@ -82,7 +83,7 @@ final class HotReloadIntegrationTest: XCTestCase {
         }
         
         let expectation = self.expectation(description: "Changes detected")
-        var changeCount = 0
+        let changeCount = ThreadSafeBox<Int>(0)
         
         manager = HotReloadManager(
             watchPaths: [
@@ -92,7 +93,9 @@ final class HotReloadIntegrationTest: XCTestCase {
             debounceInterval: 0.5,
             ignorePatterns: ["*.tmp", ".*"]
         ) { changes in
-            changeCount += changes.count
+            changeCount.modify { count in
+                count += changes.count
+            }
             
             for change in changes {
                 let fileName = URL(fileURLWithPath: change.path).lastPathComponent
@@ -102,37 +105,37 @@ final class HotReloadIntegrationTest: XCTestCase {
             expectation.fulfill()
         }
         
-        try manager.start()
+        try await manager.start()
         
         // Give the watcher time to start
-        Thread.sleep(forTimeInterval: 0.2)
+        try await Task.sleep(nanoseconds: 200_000_000)
         
         // Modify a markdown file
         let postFile = tempDir.appendingPathComponent("content/posts/first-post.md")
         try "# Updated Post\n\nNew content here.".write(to: postFile, atomically: true, encoding: .utf8)
         
-        wait(for: [expectation], timeout: 2.0)
+        await fulfillment(of: [expectation], timeout: 2.0)
         
-        XCTAssertGreaterThan(changeCount, 0)
+        XCTAssertGreaterThan(changeCount.get(), 0)
     }
     
-    func testIgnorePatterns() throws {
+    func testIgnorePatterns() async throws {
         let expectation = self.expectation(description: "Should only detect non-ignored files")
-        var detectedFiles: [String] = []
+        let detectedFiles = ThreadSafeBox<[String]>([])
         
         manager = HotReloadManager(
             watchPaths: [tempDir.path],
             debounceInterval: 0.3,
             ignorePatterns: ["*.tmp", ".*", "_*"]
         ) { changes in
-            detectedFiles = changes.map { URL(fileURLWithPath: $0.path).lastPathComponent }
+            detectedFiles.set(changes.map { URL(fileURLWithPath: $0.path).lastPathComponent })
             expectation.fulfill()
         }
         
-        try manager.start()
+        try await manager.start()
         
         // Give the watcher time to start
-        Thread.sleep(forTimeInterval: 0.1)
+        try await Task.sleep(nanoseconds: 100_000_000)
         
         // Create various files
         let normalFile = tempDir.appendingPathComponent("normal.md")
@@ -145,13 +148,14 @@ final class HotReloadIntegrationTest: XCTestCase {
         try "hidden".write(to: hiddenFile, atomically: true, encoding: .utf8)
         try "draft".write(to: underscoreFile, atomically: true, encoding: .utf8)
         
-        wait(for: [expectation], timeout: 2.0)
+        await fulfillment(of: [expectation], timeout: 2.0)
         
+        let files = detectedFiles.get()
         // Should only detect the normal file
-        XCTAssertTrue(detectedFiles.contains("normal.md") || detectedFiles.isEmpty,
-                     "Expected normal.md to be detected or no files due to directory-level reporting. Got: \(detectedFiles)")
-        XCTAssertFalse(detectedFiles.contains("temp.tmp"))
-        XCTAssertFalse(detectedFiles.contains(".hidden"))
-        XCTAssertFalse(detectedFiles.contains("_draft.md"))
+        XCTAssertTrue(files.contains("normal.md") || files.isEmpty,
+                     "Expected normal.md to be detected or no files due to directory-level reporting. Got: \(files)")
+        XCTAssertFalse(files.contains("temp.tmp"))
+        XCTAssertFalse(files.contains(".hidden"))
+        XCTAssertFalse(files.contains("_draft.md"))
     }
 }

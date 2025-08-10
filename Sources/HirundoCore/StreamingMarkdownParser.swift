@@ -51,7 +51,7 @@ public final class StreamingMarkdownParser {
         let content = try streamParseContent(from: fileHandle)
         
         // Create content item
-        let type: ContentType = url.pathComponents.contains("posts") ? .post : .page
+        let type: ContentItem.ContentType = url.pathComponents.contains("posts") ? .post : .page
         
         return ContentItem(
             path: path,

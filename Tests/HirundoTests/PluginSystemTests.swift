@@ -150,7 +150,7 @@ final class PluginSystemTests: XCTestCase {
         let transformed = try pluginManager.transformContent(originalContent)
         
         XCTAssertEqual(transformed.content, "HELLO WORLD")
-        XCTAssertEqual(transformed.frontMatter["transformed"] as? Bool, true)
+        XCTAssertEqual(transformed.frontMatter["transformed"]?.value as? Bool, true)
     }
     
     func testTemplateDataInjection() throws {
@@ -666,8 +666,8 @@ final class ConfigurablePlugin: @unchecked Sendable, Plugin {
     func cleanup() throws {}
     
     func configure(with config: PluginConfig) throws {
-        apiKey = config.settings["apiKey"] as? String
-        endpoint = config.settings["endpoint"] as? String
+        apiKey = config.settings["apiKey"]?.value as? String
+        endpoint = config.settings["endpoint"]?.value as? String
     }
 }
 

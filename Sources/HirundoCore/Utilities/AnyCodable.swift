@@ -1,6 +1,6 @@
 import Foundation
 
-public struct AnyCodable: Codable {
+public struct AnyCodable: Codable, @unchecked Sendable {
     public let value: Any
     
     public init(_ value: Any) {

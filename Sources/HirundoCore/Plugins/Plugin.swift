@@ -1,7 +1,7 @@
 import Foundation
 
 // Plugin priority levels
-public enum PluginPriority: Int, Comparable {
+public enum PluginPriority: Int, Comparable, Sendable {
     case low = 0
     case normal = 1
     case high = 2
@@ -12,7 +12,7 @@ public enum PluginPriority: Int, Comparable {
 }
 
 // Plugin metadata
-public struct PluginMetadata {
+public struct PluginMetadata: Sendable {
     public let name: String
     public let version: String
     public let author: String
@@ -38,12 +38,12 @@ public struct PluginMetadata {
 }
 
 // Plugin context passed to plugins
-public struct PluginContext {
+public struct PluginContext: Sendable {
     public let projectPath: String
     public let config: HirundoConfig
-    public var data: [String: Any]
+    public var data: [String: AnyCodable]
     
-    public init(projectPath: String, config: HirundoConfig, data: [String: Any] = [:]) {
+    public init(projectPath: String, config: HirundoConfig, data: [String: AnyCodable] = [:]) {
         self.projectPath = projectPath
         self.config = config
         self.data = data
@@ -51,7 +51,7 @@ public struct PluginContext {
 }
 
 // Build context for build hooks
-public struct BuildContext {
+public struct BuildContext: Sendable {
     public let outputPath: String
     public let isDraft: Bool
     public let isClean: Bool
@@ -68,18 +68,25 @@ public struct BuildContext {
 }
 
 // Content item for transformation
-public struct ContentItem {
+public struct ContentItem: Sendable {
     public var path: String
-    public var frontMatter: [String: Any]
+    public var frontMatter: [String: AnyCodable]
     public var content: String
     public let type: ContentType
     
-    public enum ContentType: Equatable {
+    public enum ContentType: Equatable, Sendable {
         case post
         case page
     }
     
     public init(path: String, frontMatter: [String: Any], content: String, type: ContentType) {
+        self.path = path
+        self.frontMatter = frontMatter.mapValues { AnyCodable($0) }
+        self.content = content
+        self.type = type
+    }
+    
+    public init(path: String, frontMatter: [String: AnyCodable], content: String, type: ContentType) {
         self.path = path
         self.frontMatter = frontMatter
         self.content = content
@@ -88,14 +95,14 @@ public struct ContentItem {
 }
 
 // Asset item for processing
-public struct AssetItem {
+public struct AssetItem: Sendable {
     public let sourcePath: String
     public let outputPath: String
     public let type: AssetType
     public var processed: Bool = false
-    public var metadata: [String: Any] = [:]
+    public var metadata: [String: AnyCodable] = [:]
     
-    public enum AssetType: Equatable {
+    public enum AssetType: Equatable, Sendable {
         case css
         case javascript
         case image(String) // extension
@@ -113,17 +120,24 @@ public struct AssetItem {
 public struct PluginConfig {
     public let name: String
     public let enabled: Bool
-    public let settings: [String: Any]
+    public let settings: [String: AnyCodable]
     
-    public init(name: String, enabled: Bool = true, settings: [String: Any] = [:]) {
+    public init(name: String, enabled: Bool = true, settings: [String: AnyCodable] = [:]) {
         self.name = name
         self.enabled = enabled
         self.settings = settings
     }
+    
+    // Convenience initializer for backward compatibility
+    public init(name: String, enabled: Bool = true, settings: [String: Any]) {
+        self.name = name
+        self.enabled = enabled
+        self.settings = settings.mapValues { AnyCodable($0) }
+    }
 }
 
 // Main plugin protocol
-public protocol Plugin: AnyObject {
+public protocol Plugin: AnyObject, Sendable {
     var metadata: PluginMetadata { get }
     
     // Lifecycle
@@ -195,12 +209,15 @@ public enum PluginSecurityError: LocalizedError {
     case unauthorizedFileAccess(String)
     case unauthorizedSystemModification(String)
     case sandboxViolation(String)
-    case networkAccessDenied
+    case networkAccessDenied(String)
     case processExecutionDenied
     case noSecurityContext
     case executionContextLost
     case executionTimeout(TimeInterval)
     case memoryLimitExceeded(Int64)
+    case fileTooLarge(String, Int64)
+    case writeTooLarge(String, Int)
+    case commandExecutionDenied(String)
     
     public var errorDescription: String? {
         switch self {
@@ -218,10 +235,16 @@ public enum PluginSecurityError: LocalizedError {
             return "Plugin execution exceeded timeout limit of \(timeout) seconds"
         case .memoryLimitExceeded(let limit):
             return "Plugin exceeded memory limit of \(limit) bytes"
-        case .networkAccessDenied:
-            return "Plugin network access denied in sandbox mode"
+        case .networkAccessDenied(let url):
+            return "Plugin network access denied in sandbox mode: \(url)"
         case .processExecutionDenied:
             return "Plugin process execution denied in sandbox mode"
+        case .fileTooLarge(let path, let size):
+            return "File too large for plugin access: \(path) (\(size) bytes)"
+        case .writeTooLarge(let path, let size):
+            return "Write too large for plugin: \(path) (\(size) bytes)"
+        case .commandExecutionDenied(let command):
+            return "Command execution denied: \(command)"
         }
     }
 }

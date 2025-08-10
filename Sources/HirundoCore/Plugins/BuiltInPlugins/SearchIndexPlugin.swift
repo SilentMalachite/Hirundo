@@ -1,7 +1,7 @@
 import Foundation
 
 // Search index generation plugin
-public class SearchIndexPlugin: Plugin {
+public final class SearchIndexPlugin: @unchecked Sendable, Plugin {
     public let metadata = PluginMetadata(
         name: "SearchIndexPlugin",
         version: "1.0.0",
@@ -9,10 +9,63 @@ public class SearchIndexPlugin: Plugin {
         description: "Generates search index for client-side search"
     )
     
-    private var context: PluginContext?
-    private var indexPath: String = "search-index.json"
-    private var includeContent: Bool = true
-    private var contentLength: Int = 200
+    private let lock = NSLock()
+    private var _context: PluginContext?
+    private var _indexPath: String = "search-index.json"
+    private var _includeContent: Bool = true
+    private var _contentLength: Int = 200
+    
+    private var context: PluginContext? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _context
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _context = newValue
+        }
+    }
+    
+    private var indexPath: String {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _indexPath
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _indexPath = newValue
+        }
+    }
+    
+    private var includeContent: Bool {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _includeContent
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _includeContent = newValue
+        }
+    }
+    
+    private var contentLength: Int {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _contentLength
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _contentLength = newValue
+        }
+    }
     
     public init() {}
     
@@ -25,18 +78,31 @@ public class SearchIndexPlugin: Plugin {
     }
     
     public func configure(with config: PluginConfig) throws {
-        if let path = config.settings["indexPath"] as? String {
+        if let path = config.settings["indexPath"]?.value as? String {
             indexPath = path
         }
-        if let include = config.settings["includeContent"] as? Bool {
+        if let include = config.settings["includeContent"]?.value as? Bool {
             includeContent = include
         }
-        if let length = config.settings["contentLength"] as? Int {
+        if let length = config.settings["contentLength"]?.value as? Int {
             contentLength = length
         }
     }
     
-    private var searchEntries: [SearchEntry] = []
+    private var _searchEntries: [SearchEntry] = []
+    
+    private var searchEntries: [SearchEntry] {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _searchEntries
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _searchEntries = newValue
+        }
+    }
     
     public func transformContent(_ content: ContentItem) throws -> ContentItem {
         // Collect search entries during content transformation
@@ -44,12 +110,14 @@ public class SearchIndexPlugin: Plugin {
         if content.type == .post || content.type == .page {
             let entry = SearchEntry(
                 url: "/" + content.path.replacingOccurrences(of: ".md", with: ""),
-                title: content.frontMatter["title"] as? String ?? "Untitled",
+                title: content.frontMatter["title"]?.value as? String ?? "Untitled",
                 content: includeContent ? extractText(from: content.content).prefix(contentLength) : "",
                 tags: extractTags(from: content.frontMatter),
-                date: content.frontMatter["date"] as? Date
+                date: content.frontMatter["date"]?.value as? Date
             )
-            searchEntries.append(entry)
+            lock.lock()
+            _searchEntries.append(entry)
+            lock.unlock()
         }
         
         return content
@@ -64,7 +132,9 @@ public class SearchIndexPlugin: Plugin {
         try indexData.write(to: outputURL)
         
         // Clear entries for next build
-        searchEntries.removeAll()
+        lock.lock()
+        _searchEntries.removeAll()
+        lock.unlock()
     }
     
     private func extractText(from content: String) -> String {
@@ -95,14 +165,14 @@ public class SearchIndexPlugin: Plugin {
         return text
     }
     
-    private func extractTags(from frontMatter: [String: Any]) -> [String] {
+    private func extractTags(from frontMatter: [String: AnyCodable]) -> [String] {
         var tags: [String] = []
         
-        if let categories = frontMatter["categories"] as? [String] {
+        if let categories = frontMatter["categories"]?.value as? [String] {
             tags.append(contentsOf: categories)
         }
         
-        if let blogTags = frontMatter["tags"] as? [String] {
+        if let blogTags = frontMatter["tags"]?.value as? [String] {
             tags.append(contentsOf: blogTags)
         }
         

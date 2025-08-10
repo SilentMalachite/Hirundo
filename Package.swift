@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "Hirundo",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v14)  // Updated for Swift 6 support
     ],
     products: [
         .executable(
@@ -37,6 +37,9 @@ let package = Package(
             dependencies: [
                 "HirundoCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6)
             ]
         ),
         // コアライブラリターゲット
@@ -47,13 +50,19 @@ let package = Package(
                 .product(name: "Yams", package: "Yams"),
                 .product(name: "Stencil", package: "Stencil"),
                 .product(name: "Swifter", package: "swifter")
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6)
             ]
         ),
         // テストターゲット
         .testTarget(
             name: "HirundoTests",
             dependencies: ["HirundoCore"],
-            exclude: ["Pending"]
+            exclude: ["Pending"],
+            swiftSettings: [
+                .swiftLanguageMode(.v6)
+            ]
         )
     ]
 )

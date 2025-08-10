@@ -135,7 +135,7 @@ public class MarkdownParser {
         let result = try parse(content)
         
         // Convert to ContentItem
-        let type: ContentType = fileURL.pathComponents.contains("posts") ? .post : .page
+        let type: ContentItem.ContentType = fileURL.pathComponents.contains("posts") ? .post : .page
         
         return ContentItem(
             path: path,

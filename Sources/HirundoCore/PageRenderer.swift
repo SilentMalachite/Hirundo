@@ -22,7 +22,7 @@ public final class PageRenderer {
         template: String? = nil
     ) throws -> String {
         // Determine template to use
-        let templateName = template ?? item.frontMatter["template"] as? String ?? {
+        let templateName = template ?? (item.frontMatter["template"]?.value as? String) ?? {
             switch item.type {
             case .post:
                 return "post.html"
@@ -33,7 +33,7 @@ public final class PageRenderer {
         
         // Build rendering context
         var renderContext = context
-        let title = item.frontMatter["title"] as? String ?? URL(fileURLWithPath: item.path).deletingPathExtension().lastPathComponent
+        let title = (item.frontMatter["title"]?.value as? String) ?? URL(fileURLWithPath: item.path).deletingPathExtension().lastPathComponent
         let url = "/" + URL(fileURLWithPath: item.path).deletingPathExtension().lastPathComponent
         
         renderContext["page"] = [
@@ -41,9 +41,9 @@ public final class PageRenderer {
             "content": item.content,
             "excerpt": String(item.content.prefix(200)),
             "url": url,
-            "date": item.frontMatter["date"] ?? Date(),
-            "tags": item.frontMatter["tags"] ?? [],
-            "categories": item.frontMatter["categories"] ?? []
+            "date": AnyCodable(item.frontMatter["date"]?.value ?? Date()),
+            "tags": item.frontMatter["tags"]?.value ?? [],
+            "categories": item.frontMatter["categories"]?.value ?? []
         ]
         renderContext["content"] = item.content
         

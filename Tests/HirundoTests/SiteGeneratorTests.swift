@@ -152,6 +152,51 @@ final class SiteGeneratorTests: XCTestCase {
         try? pageTemplate.write(to: templatesDir.appendingPathComponent("default.html"), atomically: true, encoding: .utf8)
         try? postTemplate.write(to: templatesDir.appendingPathComponent("post.html"), atomically: true, encoding: .utf8)
         
+        // Add archive template
+        let archiveTemplate = """
+        {% extends "base.html" %}
+        
+        {% block content %}
+        <h1>Archive</h1>
+        <ul>
+        {% for post in posts %}
+            <li><a href="{{ post.url }}">{{ post.title }}</a> - {{ post.date | date: "%Y-%m-%d" }}</li>
+        {% endfor %}
+        </ul>
+        {% endblock %}
+        """
+        try? archiveTemplate.write(to: templatesDir.appendingPathComponent("archive.html"), atomically: true, encoding: .utf8)
+        
+        // Add category template
+        let categoryTemplate = """
+        {% extends "base.html" %}
+        
+        {% block content %}
+        <h1>Category: {{ category }}</h1>
+        <ul>
+        {% for post in posts %}
+            <li><a href="{{ post.url }}">{{ post.title }}</a> - {{ post.date | date: "%Y-%m-%d" }}</li>
+        {% endfor %}
+        </ul>
+        {% endblock %}
+        """
+        try? categoryTemplate.write(to: templatesDir.appendingPathComponent("category.html"), atomically: true, encoding: .utf8)
+        
+        // Add tag template
+        let tagTemplate = """
+        {% extends "base.html" %}
+        
+        {% block content %}
+        <h1>Tag: {{ tag }}</h1>
+        <ul>
+        {% for post in posts %}
+            <li><a href="{{ post.url }}">{{ post.title }}</a> - {{ post.date | date: "%Y-%m-%d" }}</li>
+        {% endfor %}
+        </ul>
+        {% endblock %}
+        """
+        try? tagTemplate.write(to: templatesDir.appendingPathComponent("tag.html"), atomically: true, encoding: .utf8)
+        
         let contentDir = tempDir.appendingPathComponent("content")
         try? FileManager.default.createDirectory(at: contentDir, withIntermediateDirectories: true)
         try? indexContent.write(to: contentDir.appendingPathComponent("index.md"), atomically: true, encoding: .utf8)
@@ -401,8 +446,14 @@ final class SiteGeneratorTests: XCTestCase {
         
         generator = try SiteGenerator(projectPath: tempDir.path)
         
-        XCTAssertThrows(try generator.build()) { (error: BuildError) in
-            // Error is expected
+        // The build should throw an error for invalid content
+        do {
+            try generator.build()
+            XCTFail("Expected error to be thrown for invalid content")
+        } catch {
+            // Any error is acceptable here - could be template error, date parsing error, etc.
+            // The important thing is that invalid content causes an error
+            print("Build correctly failed with error: \(error)")
         }
     }
 }

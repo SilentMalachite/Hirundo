@@ -2,8 +2,8 @@
 
 A modern, fast, and secure static site generator built with Swift.
 
-[![Swift Version](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
-[![Platform](https://img.shields.io/badge/Platform-macOS%2013%2B%20%7C%20Linux-blue.svg)](https://github.com/SilentMalachite/hirundo)
+[![Swift Version](https://img.shields.io/badge/Swift-6.0+-orange.svg)](https://swift.org)
+[![Platform](https://img.shields.io/badge/Platform-macOS%2014%2B-blue.svg)](https://github.com/SilentMalachite/hirundo)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/SilentMalachite/hirundo/actions)
 
@@ -19,6 +19,8 @@ A modern, fast, and secure static site generator built with Swift.
 - **📦 Type Safe**: Strongly typed configuration and models with comprehensive validation
 - **⚡ Configurable**: Customizable security limits and performance settings
 - **🛡️ Memory Safe**: Advanced memory management for WebSocket connections and file watching
+- **⏱️ Timeout Protection**: Configurable timeouts for all I/O operations to prevent DoS attacks
+- **🌐 CORS Ready**: Configurable Cross-Origin Resource Sharing support for development
 
 ## Quick Start
 
@@ -159,6 +161,13 @@ build:
 server:
   port: 8080
   liveReload: true
+  cors:
+    enabled: true
+    allowedOrigins: ["http://localhost:*", "https://localhost:*"]
+    allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowedHeaders: ["Content-Type", "Authorization"]
+    maxAge: 3600
+    allowCredentials: false
 
 blog:
   postsPerPage: 10
@@ -188,6 +197,15 @@ plugins:
       minifyHTML: true
       minifyCSS: true
       minifyJS: false  # Disabled for safety
+
+# Timeout configuration (optional)
+timeouts:
+  fileReadTimeout: 30.0              # File read operations (seconds)
+  fileWriteTimeout: 30.0             # File write operations (seconds)
+  directoryOperationTimeout: 15.0    # Directory operations (seconds)
+  httpRequestTimeout: 10.0           # HTTP requests (seconds)
+  fsEventsTimeout: 5.0              # File system events startup (seconds)
+  serverStartTimeout: 30.0          # Server startup (seconds)
 ```
 
 ## Frontmatter
@@ -276,7 +294,9 @@ Hirundo prioritizes security with comprehensive protection measures:
 - **Path Sanitization**: Comprehensive path cleaning with security checks
 
 ### Development Server Security
-- **WebSocket Protection**: Memory-safe WebSocket session management
+- **WebSocket Protection**: Memory-safe WebSocket session management with authentication
+- **CORS Configuration**: Flexible Cross-Origin Resource Sharing controls
+- **Timeout Protection**: Configurable timeouts for all I/O operations to prevent DoS attacks
 - **Error Isolation**: Secure error reporting without information leakage
 - **File Watching**: Safe file system monitoring with cleanup
 
@@ -284,9 +304,9 @@ Hirundo prioritizes security with comprehensive protection measures:
 
 ### Requirements
 
-- Swift 5.9+
-- macOS 13+ or Linux
-- Xcode 15+ (for macOS development)
+- Swift 6.0+
+- macOS 14+
+- Xcode 16+ (for macOS development)
 
 ### Building from Source
 
@@ -328,6 +348,8 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 - **Memory Management**: Advanced WebSocket session cleanup and file handle management
 - **Configurable Limits**: Tunable performance and security limits
 - **Hot Reload**: Fast file system monitoring with FSEvents on macOS and fallback on Linux
+- **Timeout Management**: Comprehensive timeout controls for all operations (0.1s to 600s range)
+- **Resource Protection**: CPU time and memory limits to prevent resource exhaustion
 
 ## Contributing
 

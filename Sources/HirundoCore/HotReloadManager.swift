@@ -1,7 +1,10 @@
 import Foundation
+#if canImport(os)
+import os
+#endif
 
 // File change types
-public enum FileChangeType {
+public enum FileChangeType: Sendable {
     case created
     case modified
     case deleted
@@ -9,7 +12,7 @@ public enum FileChangeType {
 }
 
 // Represents a file change event
-public struct FileChange {
+public struct FileChange: Sendable {
     public let path: String
     public let type: FileChangeType
     public let timestamp: Date
@@ -21,43 +24,73 @@ public struct FileChange {
     }
 }
 
+// Actor-based state management for thread safety
+actor HotReloadState {
+    private var pendingChanges: [String: FileChange] = [:]
+    private var knownFiles: Set<String> = []
+    private var isRunning = false
+    
+    func setRunning(_ value: Bool) {
+        isRunning = value
+    }
+    
+    func getRunning() -> Bool {
+        return isRunning
+    }
+    
+    func addKnownFile(_ path: String) {
+        knownFiles.insert(path)
+    }
+    
+    func removeKnownFile(_ path: String) {
+        knownFiles.remove(path)
+    }
+    
+    func isKnownFile(_ path: String) -> Bool {
+        return knownFiles.contains(path)
+    }
+    
+    func setKnownFiles(_ files: Set<String>) {
+        knownFiles = files
+    }
+    
+    func addPendingChange(_ path: String, change: FileChange) {
+        pendingChanges[path] = change
+    }
+    
+    func takePendingChanges() -> [FileChange] {
+        let result = Array(pendingChanges.values).sorted { $0.timestamp < $1.timestamp }
+        pendingChanges.removeAll()
+        return result
+    }
+    
+    func clearPendingChanges() {
+        pendingChanges.removeAll()
+    }
+}
+
 // Hot reload manager for watching file changes
-public class HotReloadManager {
+public final class HotReloadManager: @unchecked Sendable {
     private let watchPaths: [String]
     private let debounceInterval: TimeInterval
     private let ignorePatterns: [String]
-    private let callback: ([FileChange]) -> Void
+    private let callback: @Sendable ([FileChange]) -> Void
     
     private var fsEventsWrapper: FSEventsWrapper?
-    private var pendingChanges: [String: FileChange] = [:]
     private var debounceWorkItem: DispatchWorkItem?
-    private let queue = DispatchQueue(label: "com.hirundo.hotreload", attributes: .concurrent)
     private let timerQueue = DispatchQueue(label: "com.hirundo.hotreload.timer")
     
-    // Track known files to better determine change types
-    private var knownFiles: Set<String> = []
-    private let knownFilesLock = NSLock()
+    // Use actor for thread-safe state management
+    private let state = HotReloadState()
     
-    private let stateLock = NSLock()
-    private var _isRunning = false
-    private var isRunning: Bool {
-        get {
-            stateLock.lock()
-            defer { stateLock.unlock() }
-            return _isRunning
-        }
-        set {
-            stateLock.lock()
-            defer { stateLock.unlock() }
-            _isRunning = newValue
-        }
-    }
+    // Queue for synchronizing non-actor properties
+    private let syncQueue = DispatchQueue(label: "com.hirundo.hotreload.sync")
     
     public init(
         watchPaths: [String],
         debounceInterval: TimeInterval = 0.5,
         ignorePatterns: [String] = [],
-        callback: @escaping ([FileChange]) -> Void
+        callback: @escaping @Sendable ([FileChange]) -> Void
     ) {
         self.watchPaths = watchPaths
         self.debounceInterval = debounceInterval
@@ -72,65 +105,86 @@ public class HotReloadManager {
         self.callback = callback
     }
     
-    public func start() throws {
-        guard !isRunning else { return }
+    public func start() async throws {
+        guard await !state.getRunning() else { return }
         
-        isRunning = true
+        await state.setRunning(true)
         
         // Scan existing files to populate knownFiles
-        scanExistingFiles()
+        await scanExistingFiles()
         
-        fsEventsWrapper = FSEventsWrapper(paths: watchPaths) { [weak self] changes in
-            guard let self = self else { return }
-            
-            for change in changes {
-                self.handleFileChange(change)
-            }
-        }
-        
-        try fsEventsWrapper?.start()
-    }
-    
-    private func scanExistingFiles() {
-        let fileManager = FileManager.default
-        
-        knownFilesLock.lock()
-        defer { knownFilesLock.unlock() }
-        
-        for watchPath in watchPaths {
-            guard let enumerator = fileManager.enumerator(atPath: watchPath) else { continue }
-            
-            for case let filePath as String in enumerator {
-                let fullPath = (watchPath as NSString).appendingPathComponent(filePath)
-                
-                var isDirectory: ObjCBool = false
-                if fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) && !isDirectory.boolValue {
-                    if !shouldIgnore(path: fullPath) {
-                        knownFiles.insert(fullPath)
+        // Create FSEventsWrapper synchronously
+        let wrapper = await withCheckedContinuation { continuation in
+            syncQueue.sync {
+                self.fsEventsWrapper = FSEventsWrapper(paths: watchPaths) { [weak self] changes in
+                    guard let self = self else { return }
+                    
+                    Task {
+                        for change in changes {
+                            await self.handleFileChange(change)
+                        }
                     }
                 }
+                continuation.resume(returning: self.fsEventsWrapper)
             }
         }
+        
+        try wrapper?.start()
     }
     
-    public func stop() {
-        isRunning = false
+    private func scanExistingFiles() async {
+        let files = await withCheckedContinuation { continuation in
+            syncQueue.async {
+                let fileManager = FileManager.default
+                var collectedFiles = Set<String>()
+                
+                for watchPath in self.watchPaths {
+                    guard let enumerator = fileManager.enumerator(atPath: watchPath) else { continue }
+                    
+                    // Convert enumerator to array to avoid async iteration issues
+                    let allPaths = enumerator.allObjects.compactMap { $0 as? String }
+                    
+                    for filePath in allPaths {
+                        let fullPath = (watchPath as NSString).appendingPathComponent(filePath)
+                        
+                        var isDirectory: ObjCBool = false
+                        if fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) && !isDirectory.boolValue {
+                            if !self.shouldIgnore(path: fullPath) {
+                                collectedFiles.insert(fullPath)
+                            }
+                        }
+                    }
+                }
+                
+                continuation.resume(returning: collectedFiles)
+            }
+        }
         
-        fsEventsWrapper?.stop()
-        fsEventsWrapper = nil
+        await state.setKnownFiles(files)
+    }
+    
+    public func stop() async {
+        await state.setRunning(false)
+        
+        // Stop FSEventsWrapper synchronously
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            syncQueue.sync {
+                self.fsEventsWrapper?.stop()
+                self.fsEventsWrapper = nil
+                continuation.resume()
+            }
+        }
         
         timerQueue.sync {
             debounceWorkItem?.cancel()
             debounceWorkItem = nil
         }
         
-        queue.async(flags: .barrier) {
-            self.pendingChanges.removeAll()
-        }
+        await state.clearPendingChanges()
     }
     
-    private func handleFileChange(_ change: FileChange) {
-        guard isRunning else { return }
+    private func handleFileChange(_ change: FileChange) async {
+        guard await state.getRunning() else { return }
         
         // Check if file should be ignored
         if shouldIgnore(path: change.path) {
@@ -139,9 +193,7 @@ public class HotReloadManager {
         
         // Refine the change type based on known file state
         var refinedChange = change
-        
-        knownFilesLock.lock()
-        let wasKnown = knownFiles.contains(change.path)
+        let wasKnown = await state.isKnownFile(change.path)
         
         switch change.type {
         case .created:
@@ -149,37 +201,33 @@ public class HotReloadManager {
                 // File was already known, this is likely a modification
                 refinedChange = FileChange(path: change.path, type: .modified, timestamp: change.timestamp)
             } else {
-                knownFiles.insert(change.path)
+                await state.addKnownFile(change.path)
             }
         case .deleted:
-            knownFiles.remove(change.path)
+            await state.removeKnownFile(change.path)
         case .modified:
             if !wasKnown {
                 // File wasn't known, this is likely a creation
                 refinedChange = FileChange(path: change.path, type: .created, timestamp: change.timestamp)
-                knownFiles.insert(change.path)
+                await state.addKnownFile(change.path)
             }
         case .renamed:
             // Handle renamed as appropriate
             if FileManager.default.fileExists(atPath: change.path) {
                 if !wasKnown {
                     refinedChange = FileChange(path: change.path, type: .created, timestamp: change.timestamp)
-                    knownFiles.insert(change.path)
+                    await state.addKnownFile(change.path)
                 }
             } else {
                 if wasKnown {
                     refinedChange = FileChange(path: change.path, type: .deleted, timestamp: change.timestamp)
-                    knownFiles.remove(change.path)
+                    await state.removeKnownFile(change.path)
                 }
             }
         }
-        knownFilesLock.unlock()
         
         // Add to pending changes
-        queue.async(flags: .barrier) { [weak self] in
-            guard let self = self else { return }
-            self.pendingChanges[refinedChange.path] = refinedChange
-        }
+        await state.addPendingChange(refinedChange.path, change: refinedChange)
         
         // Reset debounce timer using DispatchWorkItem for better thread safety
         timerQueue.async { [weak self] in
@@ -190,7 +238,9 @@ public class HotReloadManager {
             
             // Create new work item
             let workItem = DispatchWorkItem { [weak self] in
-                self?.flushPendingChanges()
+                Task { [weak self] in
+                    await self?.flushPendingChanges()
+                }
             }
             
             self.debounceWorkItem = workItem
@@ -200,12 +250,8 @@ public class HotReloadManager {
         }
     }
     
-    private func flushPendingChanges() {
-        let changes = queue.sync { () -> [FileChange] in
-            let result = Array(pendingChanges.values).sorted { $0.timestamp < $1.timestamp }
-            pendingChanges.removeAll()
-            return result
-        }
+    private func flushPendingChanges() async {
+        let changes = await state.takePendingChanges()
         
         if !changes.isEmpty {
             DispatchQueue.main.async {

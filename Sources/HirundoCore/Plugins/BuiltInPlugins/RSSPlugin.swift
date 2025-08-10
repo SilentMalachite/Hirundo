@@ -1,7 +1,7 @@
 import Foundation
 
 // RSS feed generation plugin
-public class RSSPlugin: Plugin {
+public final class RSSPlugin: @unchecked Sendable, Plugin {
     public let metadata = PluginMetadata(
         name: "RSSPlugin",
         version: "1.0.0",
@@ -9,9 +9,49 @@ public class RSSPlugin: Plugin {
         description: "Generates RSS feeds for blog posts"
     )
     
-    private var context: PluginContext?
-    private var feedPath: String = "rss.xml"
-    private var itemLimit: Int = 20
+    private let lock = NSLock()
+    private var _context: PluginContext?
+    private var _feedPath: String = "rss.xml"
+    private var _itemLimit: Int = 20
+    
+    private var context: PluginContext? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _context
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _context = newValue
+        }
+    }
+    
+    private var feedPath: String {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _feedPath
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _feedPath = newValue
+        }
+    }
+    
+    private var itemLimit: Int {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _itemLimit
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _itemLimit = newValue
+        }
+    }
     
     public init() {}
     
@@ -24,10 +64,10 @@ public class RSSPlugin: Plugin {
     }
     
     public func configure(with config: PluginConfig) throws {
-        if let path = config.settings["feedPath"] as? String {
+        if let path = config.settings["feedPath"]?.value as? String {
             feedPath = path
         }
-        if let limit = config.settings["itemLimit"] as? Int {
+        if let limit = config.settings["itemLimit"]?.value as? Int {
             itemLimit = limit
         }
     }
@@ -51,18 +91,18 @@ public class RSSPlugin: Plugin {
         // Extract posts from build context
         return context.pages.compactMap { page in
             // Only include posts (pages with dates)
-            guard let dateString = page.frontMatter["date"] as? String,
+            guard let dateString = page.frontMatter["date"]?.value as? String,
                   let date = parseDate(dateString),
-                  let title = page.frontMatter["title"] as? String else {
+                  let title = page.frontMatter["title"]?.value as? String else {
                 return nil
             }
             
-            let description = page.frontMatter["excerpt"] as? String 
-                           ?? page.frontMatter["description"] as? String 
+            let description = page.frontMatter["excerpt"]?.value as? String 
+                           ?? page.frontMatter["description"]?.value as? String 
                            ?? String(page.content.prefix(200))
             
             // Generate URL for the post
-            let slug = page.frontMatter["slug"] as? String ?? slugify(title)
+            let slug = page.frontMatter["slug"]?.value as? String ?? slugify(title)
             let link = "\(context.config.site.url)/posts/\(slug)/"
             
             return RSSItem(

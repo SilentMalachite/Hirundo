@@ -16,6 +16,10 @@ internal class FSEventsWrapper {
         self.callback = callback
     }
     
+    deinit {
+        stop()
+    }
+    
     func start() throws {
         var context = FSEventStreamContext(
             version: 0,
@@ -178,6 +182,10 @@ internal class FSEventsWrapper {
     init(paths: [String], callback: @escaping ([FileChange]) -> Void) {
         self.paths = paths
         self.callback = callback
+    }
+    
+    deinit {
+        stop()
     }
     
     func start() throws {

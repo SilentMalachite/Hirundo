@@ -183,7 +183,8 @@ public class TemplateEngine {
     }
     
     private func startCacheCleanupTimer() {
-        let timer = DispatchSource.makeTimerSource(queue: cleanupQueue)
+        // Use cacheQueue for timer to ensure proper synchronization
+        let timer = DispatchSource.makeTimerSource(queue: cacheQueue)
         timer.schedule(deadline: .now() + 300, repeating: 300)
         timer.setEventHandler { [weak self] in
             self?.cleanupExpiredCacheEntries()
@@ -194,22 +195,21 @@ public class TemplateEngine {
     
     private func cleanupExpiredCacheEntries() {
         let now = Date()
-        // Use the same queue for timer and cache operations to prevent race conditions
-        cacheQueue.async(flags: .barrier) { [weak self] in
-            guard let self = self else { return }
-            
-            // Remove expired entries
-            self.cache = self.cache.filter { _, entry in
-                now.timeIntervalSince(entry.addedAt) < self.cacheExpirationSeconds
-            }
-            
-            // Also enforce max cache size using LRU eviction
-            if self.cache.count > self.maxCacheSize {
-                // Sort by access time and keep only the most recent entries
-                let sortedEntries = self.cache.sorted { $0.value.addedAt > $1.value.addedAt }
-                let entriesToKeep = Array(sortedEntries.prefix(self.maxCacheSize))
-                self.cache = Dictionary(uniqueKeysWithValues: entriesToKeep.map { ($0.key, $0.value) })
-            }
+        // Since timer now runs on cacheQueue, we're already in the queue context
+        // No need for async - directly operate with proper synchronization
+        guard !cache.isEmpty else { return }
+        
+        // Remove expired entries
+        cache = cache.filter { _, entry in
+            now.timeIntervalSince(entry.addedAt) < cacheExpirationSeconds
+        }
+        
+        // Also enforce max cache size using LRU eviction
+        if cache.count > maxCacheSize {
+            // Sort by access time and keep only the most recent entries
+            let sortedEntries = cache.sorted { $0.value.addedAt > $1.value.addedAt }
+            let entriesToKeep = Array(sortedEntries.prefix(maxCacheSize))
+            cache = Dictionary(uniqueKeysWithValues: entriesToKeep.map { ($0.key, $0.value) })
         }
     }
     
