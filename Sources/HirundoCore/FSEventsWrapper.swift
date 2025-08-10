@@ -93,25 +93,67 @@ internal class FSEventsWrapper {
         // Process events
         
         var changes: [FileChange] = []
+        let fileManager = FileManager.default
         
         for i in 0..<numEvents {
             let path = paths[i]
             let flags = eventFlags[i]
             
-            // Process event
+            // Skip directory events (we only care about files)
+            if flags & UInt32(kFSEventStreamEventFlagItemIsDir) != 0 {
+                continue
+            }
             
+            // Skip events that are not file-related
+            if flags & UInt32(kFSEventStreamEventFlagItemIsFile) == 0 && 
+               flags & UInt32(kFSEventStreamEventFlagItemCreated) == 0 &&
+               flags & UInt32(kFSEventStreamEventFlagItemRemoved) == 0 &&
+               flags & UInt32(kFSEventStreamEventFlagItemRenamed) == 0 &&
+               flags & UInt32(kFSEventStreamEventFlagItemModified) == 0 {
+                continue
+            }
+            
+            // Determine the change type based on flags
+            // Note: FSEvents doesn't always set flags as expected, so we need to be flexible
             let type: FileChangeType
-            if flags & UInt32(kFSEventStreamEventFlagItemCreated) != 0 {
-                type = .created
-            } else if flags & UInt32(kFSEventStreamEventFlagItemRemoved) != 0 {
+            
+            // Check if file exists to help determine the event type
+            let fileExists = fileManager.fileExists(atPath: path)
+            
+            // Debug logging for testing
+            #if DEBUG
+            let isTestEnvironment = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            if isTestEnvironment && (path.contains(".md") || path.contains("test")) {
+                print("FSEvents Debug: path=\(path), flags=\(String(format: "0x%08X", flags)), exists=\(fileExists)")
+            }
+            #endif
+            
+            if flags & UInt32(kFSEventStreamEventFlagItemRemoved) != 0 {
                 type = .deleted
+            } else if flags & UInt32(kFSEventStreamEventFlagItemCreated) != 0 {
+                type = .created
             } else if flags & UInt32(kFSEventStreamEventFlagItemRenamed) != 0 {
-                type = .renamed
+                // Renamed can mean moved, created, or deleted
+                if fileExists {
+                    type = .created  // File was moved in or renamed to this path
+                } else {
+                    type = .deleted  // File was moved out or renamed from this path
+                }
             } else if flags & UInt32(kFSEventStreamEventFlagItemModified) != 0 {
                 type = .modified
+            } else if flags & UInt32(kFSEventStreamEventFlagItemInodeMetaMod) != 0 {
+                type = .modified  // Metadata change counts as modification
+            } else if flags & UInt32(kFSEventStreamEventFlagItemXattrMod) != 0 {
+                type = .modified  // Extended attributes change counts as modification
             } else {
-                // Default to modified for other events
-                type = .modified
+                // For generic events, try to determine based on file existence
+                // This handles cases where FSEvents doesn't set specific flags
+                if fileExists {
+                    type = .modified  // File exists, assume it was modified
+                } else {
+                    // Skip events for non-existent files without specific flags
+                    continue
+                }
             }
             
             changes.append(FileChange(path: path, type: type))
