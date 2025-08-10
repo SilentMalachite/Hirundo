@@ -205,6 +205,22 @@ public struct CorsConfig: Codable {
     public let maxAge: Int?
     public let allowCredentials: Bool
     
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        enabled = try container.decode(Bool.self, forKey: .enabled)
+        allowedOrigins = try container.decode([String].self, forKey: .allowedOrigins)
+        allowedMethods = try container.decode([String].self, forKey: .allowedMethods)
+        allowedHeaders = try container.decode([String].self, forKey: .allowedHeaders)
+        exposedHeaders = try container.decodeIfPresent([String].self, forKey: .exposedHeaders)
+        maxAge = try container.decodeIfPresent(Int.self, forKey: .maxAge)
+        allowCredentials = try container.decodeIfPresent(Bool.self, forKey: .allowCredentials) ?? false
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case enabled, allowedOrigins, allowedMethods, allowedHeaders, exposedHeaders, maxAge, allowCredentials
+    }
+    
     public init(
         enabled: Bool = true,
         allowedOrigins: [String] = ["http://localhost:*", "https://localhost:*"],
@@ -547,11 +563,15 @@ public struct HirundoConfig: Codable {
                 if key.stringValue == "url" {
                     throw ConfigError.missingRequiredField("url")
                 }
-                throw ConfigError.invalidFormat(error.localizedDescription)
-            case .typeMismatch(_, _):
-                throw ConfigError.invalidFormat(error.localizedDescription)
+                throw ConfigError.invalidFormat("Missing key: \(key.stringValue)")
+            case .typeMismatch(let type, let context):
+                throw ConfigError.invalidFormat("Type mismatch: expected \(type) at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+            case .valueNotFound(let type, let context):
+                throw ConfigError.invalidFormat("Value not found: expected \(type) at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+            case .dataCorrupted(let context):
+                throw ConfigError.invalidFormat("Data corrupted at \(context.codingPath.map { $0.stringValue }.joined(separator: ".")): \(context.debugDescription)")
             default:
-                throw ConfigError.parseError(error.localizedDescription)
+                throw ConfigError.parseError("YAML parsing failed: \(String(describing: error))")
             }
         } catch {
             throw ConfigError.parseError(error.localizedDescription)
@@ -618,12 +638,63 @@ private func isValidURL(_ url: String) -> Bool {
         return false
     }
     
-    // Prevent dangerous schemes and local addresses
-    if host.hasPrefix("localhost") || host.hasPrefix("127.0.0.1") || host.hasPrefix("0.0.0.0") {
+    // Prevent SSRF attacks by blocking access to internal and local addresses
+    // Check for localhost variations
+    let lowercasedHost = host.lowercased()
+    let localHostnames = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "[::]"]
+    if localHostnames.contains(lowercasedHost) {
+        return false
+    }
+    
+    // Block private IP ranges (RFC 1918)
+    // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+    if isPrivateIPAddress(host) {
+        return false
+    }
+    
+    // Block link-local addresses (169.254.0.0/16)
+    if host.hasPrefix("169.254.") {
+        return false
+    }
+    
+    // Block metadata service endpoints (cloud providers)
+    let blockedMetadataHosts = [
+        "metadata.google.internal",
+        "169.254.169.254",  // AWS/GCP/Azure metadata
+        "metadata.aws.internal"
+    ]
+    if blockedMetadataHosts.contains(lowercasedHost) {
         return false
     }
     
     return true
+}
+
+/// Checks if the given host is a private IP address
+/// - Parameter host: The host to check
+/// - Returns: True if the host is a private IP address, false otherwise
+private func isPrivateIPAddress(_ host: String) -> Bool {
+    // Parse IPv4 address
+    let components = host.split(separator: ".").compactMap { Int($0) }
+    guard components.count == 4 else { return false }
+    
+    // Check for private IP ranges (RFC 1918)
+    // 10.0.0.0/8
+    if components[0] == 10 {
+        return true
+    }
+    
+    // 172.16.0.0/12
+    if components[0] == 172 && components[1] >= 16 && components[1] <= 31 {
+        return true
+    }
+    
+    // 192.168.0.0/16
+    if components[0] == 192 && components[1] == 168 {
+        return true
+    }
+    
+    return false
 }
 
 /// Validates a language code format (e.g., "en", "en-US", "ja-JP")

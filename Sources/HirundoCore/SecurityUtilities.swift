@@ -66,7 +66,11 @@ public enum SecurityUtilities {
                 "/usr/bin/open", "/usr/bin/vi", "/opt/local/bin/vim", "/opt/local/bin/nvim"
             ]
             
-            if !allowedPaths.contains(sanitized) && !isTestEnvironment {
+            // In test environment, still validate paths but allow more flexibility for testing specific scenarios
+            let isValidPath = allowedPaths.contains(sanitized) || 
+                            (isTestEnvironment && (sanitized.hasPrefix("/usr/bin/") || sanitized.hasPrefix("/usr/local/bin/")))
+            
+            if !isValidPath {
                 print("⚠️ Editor path '\(sanitized)' is not in the allowed paths for security reasons.")
                 return nil
             }
