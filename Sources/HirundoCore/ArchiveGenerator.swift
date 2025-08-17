@@ -5,15 +5,18 @@ public class ArchiveGenerator {
     private let fileManager: SiteFileManager
     private let templateRenderer: SiteTemplateRenderer
     private let config: HirundoConfig
+    private let templateEngine: TemplateEngine
     
     public init(
         fileManager: SiteFileManager,
         templateRenderer: SiteTemplateRenderer,
-        config: HirundoConfig
+        config: HirundoConfig,
+        templateEngine: TemplateEngine
     ) {
         self.fileManager = fileManager
         self.templateRenderer = templateRenderer
         self.config = config
+        self.templateEngine = templateEngine
     }
     
     // Generate archive page
@@ -147,65 +150,151 @@ public class ArchiveGenerator {
     }
     
     private func generateCategoriesIndex(categories: [String], outputDir: URL) throws {
-        // Simple categories listing page
-        var html = """
-        <!DOCTYPE html>
-        <html lang="\(config.site.language ?? "en")">
-        <head>
-            <meta charset="UTF-8">
-            <title>Categories - \(config.site.title)</title>
-        </head>
-        <body>
-            <h1>Categories</h1>
-            <ul>
-        """
+        // Use template-based generation instead of string concatenation
+        let context: [String: Any] = [
+            "site": [
+                "title": config.site.title,
+                "language": config.site.language ?? "en"
+            ],
+            "categories": categories.sorted().map { category in
+                [
+                    "name": category,
+                    "slug": slugify(category),
+                    "url": "/categories/\(slugify(category))/"
+                ]
+            },
+            "page": [
+                "title": "Categories",
+                "type": "categories_index"
+            ]
+        ]
         
-        for category in categories.sorted() {
-            let categorySlug = slugify(category)
-            html += """
-                <li><a href="/categories/\(categorySlug)/">\(category)</a></li>
-            """
-        }
-        
-        html += """
-            </ul>
-        </body>
-        </html>
-        """
-        
+        let html = try renderCategoriesTemplate(context: context)
         let indexPath = outputDir.appendingPathComponent("index.html")
         try fileManager.writeFile(content: html, to: indexPath)
     }
     
-    private func generateTagsIndex(tags: [String], outputDir: URL) throws {
-        // Simple tags listing page
-        var html = """
-        <!DOCTYPE html>
-        <html lang="\(config.site.language ?? "en")">
-        <head>
-            <meta charset="UTF-8">
-            <title>Tags - \(config.site.title)</title>
-        </head>
-        <body>
-            <h1>Tags</h1>
-            <ul>
-        """
+    private func renderCategoriesTemplate(context: [String: Any]) throws -> String {
+        // Try to use custom template if available, fallback to default
+        let templateName = "categories.html"
         
-        for tag in tags.sorted() {
-            let tagSlug = slugify(tag)
-            html += """
-                <li><a href="/tags/\(tagSlug)/">\(tag)</a></li>
-            """
+        do {
+            return try templateEngine.render(template: templateName, context: context)
+        } catch {
+            // Fallback to safe default template
+            return generateDefaultCategoriesHTML(context: context)
+        }
+    }
+    
+    private func generateDefaultCategoriesHTML(context: [String: Any]) -> String {
+        guard let site = context["site"] as? [String: Any],
+              let categories = context["categories"] as? [[String: Any]],
+              let page = context["page"] as? [String: Any] else {
+            return "<html><body><h1>Error: Invalid context</h1></body></html>"
         }
         
-        html += """
+        let title = site["title"] as? String ?? "Site"
+        let language = site["language"] as? String ?? "en"
+        let pageTitle = page["title"] as? String ?? "Categories"
+        
+        var categoriesHTML = ""
+        for category in categories {
+            if let name = category["name"] as? String,
+               let url = category["url"] as? String {
+                categoriesHTML += "<li><a href=\"\(url)\">\(name)</a></li>\n"
+            }
+        }
+        
+        return """
+        <!DOCTYPE html>
+        <html lang="\(language)">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>\(pageTitle) - \(title)</title>
+        </head>
+        <body>
+            <h1>\(pageTitle)</h1>
+            <ul>
+        \(categoriesHTML)
             </ul>
         </body>
         </html>
         """
+    }
+    
+    private func generateTagsIndex(tags: [String], outputDir: URL) throws {
+        // Use template-based generation instead of string concatenation
+        let context: [String: Any] = [
+            "site": [
+                "title": config.site.title,
+                "language": config.site.language ?? "en"
+            ],
+            "tags": tags.sorted().map { tag in
+                [
+                    "name": tag,
+                    "slug": slugify(tag),
+                    "url": "/tags/\(slugify(tag))/"
+                ]
+            },
+            "page": [
+                "title": "Tags",
+                "type": "tags_index"
+            ]
+        ]
         
+        let html = try renderTagsTemplate(context: context)
         let indexPath = outputDir.appendingPathComponent("index.html")
         try fileManager.writeFile(content: html, to: indexPath)
+    }
+    
+    private func renderTagsTemplate(context: [String: Any]) throws -> String {
+        // Try to use custom template if available, fallback to default
+        let templateName = "tags.html"
+        
+        do {
+            return try templateEngine.render(template: templateName, context: context)
+        } catch {
+            // Fallback to safe default template
+            return generateDefaultTagsHTML(context: context)
+        }
+    }
+    
+    private func generateDefaultTagsHTML(context: [String: Any]) -> String {
+        guard let site = context["site"] as? [String: Any],
+              let tags = context["tags"] as? [[String: Any]],
+              let page = context["page"] as? [String: Any] else {
+            return "<html><body><h1>Error: Invalid context</h1></body></html>"
+        }
+        
+        let title = site["title"] as? String ?? "Site"
+        let language = site["language"] as? String ?? "en"
+        let pageTitle = page["title"] as? String ?? "Tags"
+        
+        var tagsHTML = ""
+        for tag in tags {
+            if let name = tag["name"] as? String,
+               let url = tag["url"] as? String {
+                tagsHTML += "<li><a href=\"\(url)\">\(name)</a></li>\n"
+            }
+        }
+        
+        return """
+        <!DOCTYPE html>
+        <html lang="\(language)">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>\(pageTitle) - \(title)</title>
+        </head>
+        <body>
+            <h1>\(pageTitle)</h1>
+            <ul>
+        \(tagsHTML)
+            </ul>
+        </body>
+        </html>
+        """
     }
     
     private func groupPostsByCategory(_ posts: [Post]) -> [String: [Post]] {

@@ -4,8 +4,29 @@ public struct AnyCodable: Codable, @unchecked Sendable {
     public let value: Any
     
     public init(_ value: Any) {
-        self.value = value
+        // Validate that the value is a supported Sendable type
+        switch value {
+        case is NSNull, is Bool, is Int, is Double, is String:
+            self.value = value
+        case let array as [Any]:
+            // Recursively validate array elements
+            self.value = array.map { AnyCodable($0).value }
+        case let dictionary as [String: Any]:
+            // Recursively validate dictionary values
+            self.value = dictionary.mapValues { AnyCodable($0).value }
+        default:
+            // For unsupported types, convert to string representation
+            self.value = String(describing: value)
+        }
     }
+    
+    // Type-safe initializers for common Sendable types
+    public init(_ value: Bool) { self.value = value }
+    public init(_ value: Int) { self.value = value }
+    public init(_ value: Double) { self.value = value }
+    public init(_ value: String) { self.value = value }
+    public init(_ value: [AnyCodable]) { self.value = value.map { $0.value } }
+    public init(_ value: [String: AnyCodable]) { self.value = value.mapValues { $0.value } }
     
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()

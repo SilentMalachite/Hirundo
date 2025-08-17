@@ -114,7 +114,7 @@ final class ErrorRecoveryTests: XCTestCase {
         
         // Build site - should not throw
         let generator = try SiteGenerator(projectPath: projectPath)
-        let buildResult = try generator.buildWithRecovery()
+        let buildResult = try await generator.buildWithRecovery()
         
         // Verify results
         XCTAssertEqual(buildResult.successCount, 2, "Should process 2 valid pages")
@@ -179,7 +179,7 @@ final class ErrorRecoveryTests: XCTestCase {
         
         // Build site
         let generator = try SiteGenerator(projectPath: projectPath)
-        let buildResult = try generator.buildWithRecovery()
+        let buildResult = try await generator.buildWithRecovery()
         
         // Verify results
         XCTAssertEqual(buildResult.successCount, 1, "Should process 1 valid page")
@@ -247,7 +247,7 @@ final class ErrorRecoveryTests: XCTestCase {
         
         // Build site
         let generator = try SiteGenerator(projectPath: projectPath)
-        let buildResult = try generator.buildWithRecovery()
+        let buildResult = try await generator.buildWithRecovery()
         
         // Create error summary (since errorSummary is not in our simplified BuildResult)
         var summary = "Build completed with errors\n"
@@ -284,7 +284,7 @@ final class ErrorRecoveryTests: XCTestCase {
         
         // Build site
         let generator = try SiteGenerator(projectPath: projectPath)
-        let buildResult = try generator.buildWithRecovery()
+        let buildResult = try await generator.buildWithRecovery()
         
         // Verify output directory was created
         let outputDir = tempDirectory.appendingPathComponent("_site")
@@ -333,7 +333,7 @@ final class ErrorRecoveryTests: XCTestCase {
         
         // Build site
         let generator = try SiteGenerator(projectPath: projectPath)
-        let buildResult = try generator.buildWithRecovery()
+        let buildResult = try await generator.buildWithRecovery()
         
         // At least the valid page should be processed
         XCTAssertGreaterThanOrEqual(buildResult.successCount, 1)

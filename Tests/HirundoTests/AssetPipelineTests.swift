@@ -36,7 +36,7 @@ final class AssetPipelineTests: XCTestCase {
         try "console.log('hello');".write(to: jsFile, atomically: true, encoding: .utf8)
         
         // Process assets
-        try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+        let _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
         
         // Verify files were copied
         XCTAssertTrue(FileManager.default.fileExists(atPath: destDir.appendingPathComponent("style.css").path))
@@ -62,7 +62,7 @@ final class AssetPipelineTests: XCTestCase {
         try Data().write(to: imgDir.appendingPathComponent("logo.png"))
         
         // Process assets
-        try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+        let _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
         
         // Verify directory structure
         XCTAssertTrue(FileManager.default.fileExists(atPath: destDir.appendingPathComponent("css/main.css").path))
@@ -91,7 +91,7 @@ final class AssetPipelineTests: XCTestCase {
         try pluginManager.register(minifyPlugin)
         try pluginManager.initializeAll(context: PluginContext(
             projectPath: tempDir.path,
-            config: HirundoConfig(site: Site(title: "Test", url: "https://example.com"))
+            config: HirundoConfig(site: try Site(title: "Test", url: "https://example.com"))
         ))
         
         let sourceDir = tempDir.appendingPathComponent("source")
@@ -115,7 +115,7 @@ final class AssetPipelineTests: XCTestCase {
         try cssContent.write(to: cssFile, atomically: true, encoding: .utf8)
         
         // Process assets
-        try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+        let _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
         
         // Verify minification
         let processedCSS = try String(contentsOf: destDir.appendingPathComponent("style.css"), encoding: .utf8)
@@ -198,7 +198,7 @@ final class AssetPipelineTests: XCTestCase {
         ]
         
         // Process assets
-        try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+        let _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
         
         // Verify concatenated file
         let bundlePath = destDir.appendingPathComponent("js/bundle.js")
@@ -225,7 +225,7 @@ final class AssetPipelineTests: XCTestCase {
         }
         
         // Process assets
-        try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+        let _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
         
         // Verify all images were processed
         for ext in imageTypes {
@@ -251,7 +251,7 @@ final class AssetPipelineTests: XCTestCase {
         try "skip".write(to: sourceDir.appendingPathComponent("debug.log"), atomically: true, encoding: .utf8)
         
         // Process assets
-        try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+        let _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
         
         // Verify only non-excluded files were copied
         XCTAssertTrue(FileManager.default.fileExists(atPath: destDir.appendingPathComponent("style.css").path))
@@ -270,7 +270,7 @@ final class AssetPipelineTests: XCTestCase {
         try pluginManager.register(optimizePlugin)
         try pluginManager.initializeAll(context: PluginContext(
             projectPath: tempDir.path,
-            config: HirundoConfig(site: Site(title: "Test", url: "https://example.com"))
+            config: HirundoConfig(site: try Site(title: "Test", url: "https://example.com"))
         ))
         
         let sourceDir = tempDir.appendingPathComponent("source")

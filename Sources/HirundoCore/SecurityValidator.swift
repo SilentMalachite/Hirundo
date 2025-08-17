@@ -5,11 +5,6 @@ public class SecurityValidator {
     private let projectPath: String
     private let config: HirundoConfig
     
-    // Path sanitization cache for performance
-    private var pathCache: [String: String] = [:]
-    private let cacheQueue = DispatchQueue(label: "com.hirundo.pathcache", attributes: .concurrent)
-    private let maxCacheSize = 1000
-    
     public init(projectPath: String, config: HirundoConfig) {
         self.projectPath = projectPath
         self.config = config
@@ -17,71 +12,59 @@ public class SecurityValidator {
     
     // Validate a file path is safe and within bounds
     public func validatePath(_ path: String, withinBaseDirectory baseDirectory: String) throws {
-        let sanitized = sanitizePath(path)
-        
-        if !isPathSafe(sanitized, withinBaseDirectory: baseDirectory) {
-            throw SecurityError.pathTraversal(path)
-        }
-        
-        // Check for null bytes
+        // First validate raw path before sanitization
         if path.contains("\0") {
             throw SecurityError.invalidPath(path, reason: "Path contains null bytes")
         }
         
-        // Check path length
         if path.count > config.limits.maxFilenameLength {
             throw SecurityError.pathTooLong(path, limit: config.limits.maxFilenameLength)
         }
-    }
-    
-    // Sanitize a path by resolving .. and . components with caching
-    public func sanitizePath(_ path: String) -> String {
-        // Check cache first
-        let cached = cacheQueue.sync {
-            return pathCache[path]
+        
+        // Check for suspicious patterns before sanitization
+        if containsSuspiciousPattern(path) {
+            throw SecurityError.invalidPath(path, reason: "Path contains suspicious patterns")
         }
         
-        if let cachedPath = cached {
-            return cachedPath
+        // Handle absolute paths by converting to relative if they're within the base directory
+        let canonicalBase = URL(fileURLWithPath: baseDirectory).standardized.path
+        let canonicalPath = URL(fileURLWithPath: path).standardized.path
+        
+        // Check if the canonical path is within the base directory
+        if !canonicalPath.hasPrefix(canonicalBase) {
+            throw SecurityError.pathTraversal(path)
         }
         
-        // Remove any null bytes
-        var sanitized = path.replacingOccurrences(of: "\0", with: "")
-        
-        // Normalize the path
-        let url = URL(fileURLWithPath: sanitized)
-        sanitized = url.standardizedFileURL.path
-        
-        // Remove any double slashes
-        while sanitized.contains("//") {
-            sanitized = sanitized.replacingOccurrences(of: "//", with: "/")
-        }
-        
-        // Add to cache with size limit enforcement
-        cacheQueue.async(flags: .barrier) { [weak self] in
-            guard let self = self else { return }
-            
-            // Evict oldest entries if cache is full
-            if self.pathCache.count >= self.maxCacheSize {
-                // Remove 20% of cache entries (LRU approximation)
-                let entriesToRemove = self.maxCacheSize / 5
-                let keysToRemove = Array(self.pathCache.keys.prefix(entriesToRemove))
-                for key in keysToRemove {
-                    self.pathCache.removeValue(forKey: key)
-                }
+        // For absolute paths within the base directory, we can proceed with validation
+        // Convert to relative path for sanitization if it's absolute and within base
+        let pathToSanitize: String
+        if canonicalPath.hasPrefix(canonicalBase) {
+            if canonicalPath == canonicalBase {
+                pathToSanitize = "."
+            } else {
+                // Remove the base directory prefix to get relative path
+                let relativePath = String(canonicalPath.dropFirst(canonicalBase.count))
+                pathToSanitize = relativePath.hasPrefix("/") ? String(relativePath.dropFirst()) : relativePath
             }
-            
-            self.pathCache[path] = sanitized
+        } else {
+            pathToSanitize = path
         }
         
-        return sanitized
+        let sanitized = sanitizePath(pathToSanitize)
+        
+        if sanitized.isEmpty && !pathToSanitize.isEmpty {
+            throw SecurityError.invalidPath(path, reason: "Path sanitization resulted in empty path")
+        }
     }
     
-    // Clear the path cache
+    // Sanitize a path by delegating to PathSanitizer to avoid duplication
+    public func sanitizePath(_ path: String) -> String {
+        return PathSanitizer.sanitize(path)
+    }
+    
+    // Clear the path cache (delegates to PathSanitizer)
     public func clearCache() {
-        cacheQueue.async(flags: .barrier) { [weak self] in
-            self?.pathCache.removeAll()
-        }
+        PathSanitizer.clearCache()
     }
     
     // Check if a path is safe (no directory traversal)
@@ -144,38 +127,14 @@ public class SecurityValidator {
     
     // Sanitize HTML content for template
     public func sanitizeForTemplate(_ text: String) -> String {
-        var sanitized = text
-        
-        // Escape HTML entities
-        sanitized = sanitized
+        // Simple HTML entity escaping for template safety
+        // This provides basic XSS protection without being overly restrictive
+        return text
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
             .replacingOccurrences(of: "'", with: "&#39;")
-        
-        // Remove any script tags (extra safety)
-        let scriptPattern = #"<script[^>]*>.*?</script>"#
-        if let regex = try? NSRegularExpression(pattern: scriptPattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
-            sanitized = regex.stringByReplacingMatches(in: sanitized, options: [], range: NSRange(location: 0, length: sanitized.count), withTemplate: "")
-        }
-        
-        // Remove any event handlers
-        let eventPattern = #"\s*on\w+\s*=\s*["'][^"']*["']"#
-        if let regex = try? NSRegularExpression(pattern: eventPattern, options: .caseInsensitive) {
-            sanitized = regex.stringByReplacingMatches(in: sanitized, options: [], range: NSRange(location: 0, length: sanitized.count), withTemplate: "")
-        }
-        
-        // Remove javascript: protocol
-        sanitized = sanitized.replacingOccurrences(of: "javascript:", with: "", options: .caseInsensitive)
-        
-        // Remove data: protocol for potential XSS
-        let dataPattern = #"data:[^,]*script[^,]*,"#
-        if let regex = try? NSRegularExpression(pattern: dataPattern, options: .caseInsensitive) {
-            sanitized = regex.stringByReplacingMatches(in: sanitized, options: [], range: NSRange(location: 0, length: sanitized.count), withTemplate: "")
-        }
-        
-        return sanitized
     }
     
     private func containsSuspiciousPattern(_ text: String) -> Bool {

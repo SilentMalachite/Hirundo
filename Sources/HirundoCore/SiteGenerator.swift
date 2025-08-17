@@ -40,7 +40,8 @@ public class SiteGenerator {
         self.archiveGenerator = ArchiveGenerator(
             fileManager: siteFileManager,
             templateRenderer: templateRenderer,
-            config: config
+            config: config,
+            templateEngine: templateRenderer.templateEngine
         )
         
         // Initialize plugin system
@@ -52,7 +53,7 @@ public class SiteGenerator {
     }
     
     // Main build method - orchestrates the build process
-    public func build(clean: Bool = false, includeDrafts: Bool = false) throws {
+    public func build(clean: Bool = false, includeDrafts: Bool = false) async throws {
         let buildStartTime = Date()
         
         let outputURL = URL(fileURLWithPath: projectPath)
@@ -76,7 +77,7 @@ public class SiteGenerator {
         let contentURL = URL(fileURLWithPath: projectPath)
             .appendingPathComponent(config.build.contentDirectory)
         
-        let (pages, posts) = try processContent(
+        let (pages, posts) = try await processContent(
             contentDirectory: contentURL,
             outputDirectory: outputURL,
             includeDrafts: includeDrafts
@@ -99,7 +100,7 @@ public class SiteGenerator {
     }
     
     // Build with error recovery
-    public func buildWithRecovery(clean: Bool = false, includeDrafts: Bool = false) throws -> BuildResult {
+    public func buildWithRecovery(clean: Bool = false, includeDrafts: Bool = false) async throws -> BuildResult {
         var errors: [BuildErrorDetail] = []
         var successCount = 0
         var failCount = 0
@@ -123,7 +124,7 @@ public class SiteGenerator {
         )
         
         // Process content with error recovery
-        let (processedContents, processingErrors) = try contentProcessor.processDirectoryWithRecovery(
+        let (processedContents, processingErrors) = try await contentProcessor.processDirectoryWithRecovery(
             at: contentURL,
             includeDrafts: includeDrafts
         )
@@ -142,7 +143,7 @@ public class SiteGenerator {
         for content in processedContents {
             do {
                 print("[SiteGenerator] Processing content: \(content.url.lastPathComponent)")
-                _ = try processIndividualContent(
+                _ = try await processIndividualContent(
                     content,
                     outputDirectory: outputURL,
                     allPages: [],
@@ -176,19 +177,19 @@ public class SiteGenerator {
         contentDirectory: URL,
         outputDirectory: URL,
         includeDrafts: Bool
-    ) throws -> (pages: [Page], posts: [Post]) {
+    ) async throws -> (pages: [Page], posts: [Post]) {
         var pages: [Page] = []
         var posts: [Post] = []
         
         // Process all content files
-        let processedContents = try contentProcessor.processDirectory(
+        let processedContents = try await contentProcessor.processDirectory(
             at: contentDirectory,
             includeDrafts: includeDrafts
         )
         
         // Render and write each content
         for content in processedContents {
-            let (page, post) = try processIndividualContent(
+            let (page, post) = try await processIndividualContent(
                 content,
                 outputDirectory: outputDirectory,
                 allPages: pages,
@@ -211,12 +212,12 @@ public class SiteGenerator {
         outputDirectory: URL,
         allPages: [Page],
         allPosts: [Post]
-    ) throws -> (page: Page?, post: Post?) {
+    ) async throws -> (page: Page?, post: Post?) {
         // Render markdown to HTML
         let htmlContent = contentProcessor.renderMarkdownContent(content.markdown)
         
         // Render with template
-        let renderedHTML = try templateRenderer.renderContent(
+        let renderedHTML = try await templateRenderer.renderContent(
             content,
             htmlContent: htmlContent,
             allPages: allPages,

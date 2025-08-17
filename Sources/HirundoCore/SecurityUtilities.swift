@@ -1,7 +1,10 @@
 import Foundation
+import os.log
 
 /// Security utilities for input validation and sanitization
 public enum SecurityUtilities {
+    
+    private static let logger = Logger(subsystem: "com.hirundo.security", category: "SecurityUtilities")
     
     /// Validates and sanitizes an editor command to prevent security vulnerabilities
     /// - Parameter editorCommand: The editor command to validate
@@ -31,14 +34,14 @@ public enum SecurityUtilities {
         
         // Check if the editor is in the allowed list
         guard allowedEditors.contains(commandName) else {
-            print("⚠️ Editor '\(commandName)' is not in the allowed list for security reasons.")
-            print("Allowed editors: \(allowedEditors.joined(separator: ", "))")
+            logger.warning("Editor '\(commandName, privacy: .public)' is not in the allowed list for security reasons")
+            logger.info("Allowed editors: \(allowedEditors.joined(separator: ", "), privacy: .public)")
             return nil
         }
         
         // 2. Prevent path traversal attempts
         if sanitized.contains("..") || sanitized.contains("./") {
-            print("⚠️ Path traversal attempt detected in editor command: \(sanitized)")
+            logger.warning("Path traversal attempt detected in editor command: \(sanitized, privacy: .public)")
             return nil
         }
         
@@ -46,7 +49,7 @@ public enum SecurityUtilities {
         let dangerousChars = ["&", "|", ";", "$", "`", "(", ")", "{", "}", "[", "]", "<", ">", "\"", "'", "~"]
         for char in dangerousChars {
             if sanitized.contains(char) {
-                print("⚠️ Potentially dangerous character '\(char)' detected in editor command: \(sanitized)")
+                logger.warning("Potentially dangerous character '\(char, privacy: .public)' detected in editor command: \(sanitized, privacy: .public)")
                 return nil
             }
         }

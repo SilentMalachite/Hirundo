@@ -6,6 +6,8 @@ A modern, fast, and secure static site generator built with Swift.
 [![Platform](https://img.shields.io/badge/Platform-macOS%2014%2B-blue.svg)](https://github.com/SilentMalachite/hirundo)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/SilentMalachite/hirundo/actions)
+[![Security](https://img.shields.io/badge/Security-Audited-green.svg)](SECURITY.md)
+[![Tests](https://img.shields.io/badge/Tests-85%2B%20Passing-brightgreen.svg)](#testing)
 
 ## Features
 
@@ -321,6 +323,27 @@ swift build
 ```bash
 swift test
 ```
+
+## Testing
+
+Hirundo includes a comprehensive test suite with 85+ tests covering:
+
+- **Security Tests**: Path traversal protection, input validation, XSS prevention
+- **Edge Case Tests**: Invalid UTF-8, malformed front matter, special characters
+- **Integration Tests**: End-to-end workflow validation
+- **Unit Tests**: Individual component testing
+- **Performance Tests**: Memory usage and timeout validation
+- **Concurrency Tests**: Swift 6.0 compliance verification
+
+### Test Categories
+
+- `AssetPipelineTests` - Asset processing and minification
+- `ConfigTests` - Configuration validation and parsing  
+- `ContentProcessorTests` - Markdown processing and validation
+- `EdgeCaseTests` - Error handling and edge case scenarios
+- `SecurityTests` - Security validation and protection
+- `IntegrationTests` - End-to-end functionality
+- `WebSocketAuthenticationTests` - Live reload security
 
 ### Debug Mode
 

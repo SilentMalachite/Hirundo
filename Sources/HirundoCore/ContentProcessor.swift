@@ -2,7 +2,15 @@ import Foundation
 import Markdown
 
 // Content processing responsibility separated from SiteGenerator
-public class ContentProcessor {
+extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
+        }
+    }
+}
+
+public class ContentProcessor: @unchecked Sendable {
     private let markdownParser: MarkdownParser
     private let config: HirundoConfig
     private let securityValidator: SecurityValidator
@@ -18,15 +26,27 @@ public class ContentProcessor {
         at fileURL: URL,
         projectPath: String,
         includeDrafts: Bool
-    ) throws -> ProcessedContent? {
+    ) async throws -> ProcessedContent? {
         // Validate file path
         try securityValidator.validatePath(fileURL.path, withinBaseDirectory: projectPath)
         
-        // Read file content with timeout
-        let content = try TimeoutFileManager.readFile(
-            at: fileURL.path,
-            timeout: config.timeouts.fileReadTimeout
-        )
+        // Read file content with timeout using async API
+        let content: String
+        do {
+            content = try await TimeoutManager.withFileReadTimeout {
+                try String(contentsOf: fileURL, encoding: .utf8)
+            }
+        } catch {
+            // Convert file reading errors to appropriate MarkdownError
+            if let nsError = error as NSError? {
+                if nsError.domain == NSCocoaErrorDomain && nsError.code == 259 {
+                    // Code 259 is NSFileReadUnknownStringEncodingError (invalid encoding)
+                    throw MarkdownError.invalidEncoding
+                }
+            }
+            // Re-throw other errors as-is
+            throw error
+        }
         
         // Parse markdown
         let result = try markdownParser.parse(content)
@@ -48,78 +68,194 @@ public class ContentProcessor {
         )
     }
     
-    // Process all content in a directory
+    // Process all content in a directory with memory-efficient batching
     public func processDirectory(
         at directoryURL: URL,
         includeDrafts: Bool
-    ) throws -> [ProcessedContent] {
-        var processedContents: [ProcessedContent] = []
-        
-        guard let enumerator = FileManager.default.enumerator(
+    ) async throws -> [ProcessedContent] {
+        return try await processDirectoryInBatches(
             at: directoryURL,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            throw ContentProcessorError.cannotEnumerateDirectory(directoryURL.path)
-        }
-        
-        for case let fileURL as URL in enumerator {
-            guard fileURL.pathExtension == "md" || fileURL.pathExtension == "markdown" else {
-                continue
-            }
-            
-            if let processed = try processMarkdownFile(
-                at: fileURL,
-                projectPath: directoryURL.deletingLastPathComponent().path,
-                includeDrafts: includeDrafts
-            ) {
-                processedContents.append(processed)
-            }
-        }
-        
-        return processedContents
+            includeDrafts: includeDrafts,
+            batchSize: 50 // Process 50 files at a time
+        )
     }
     
-    // Process directory with error recovery - returns both successes and failures
-    public func processDirectoryWithRecovery(
+    // Memory-efficient batch processing for large directories
+    public func processDirectoryInBatches(
         at directoryURL: URL,
-        includeDrafts: Bool
-    ) throws -> (contents: [ProcessedContent], errors: [(url: URL, error: Error)]) {
-        var processedContents: [ProcessedContent] = []
-        var errors: [(url: URL, error: Error)] = []
+        includeDrafts: Bool,
+        batchSize: Int = 50
+    ) async throws -> [ProcessedContent] {
+        // First, collect all markdown file URLs
+        var markdownURLs: [URL] = []
         
         guard let enumerator = FileManager.default.enumerator(
             at: directoryURL,
-            includingPropertiesForKeys: [.isRegularFileKey],
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
             options: [.skipsHiddenFiles]
         ) else {
             throw ContentProcessorError.cannotEnumerateDirectory(directoryURL.path)
         }
         
-        for case let fileURL as URL in enumerator {
-            guard fileURL.pathExtension == "md" || fileURL.pathExtension == "markdown" else {
-                continue
-            }
-            
-            do {
-                if let processed = try processMarkdownFile(
-                    at: fileURL,
-                    projectPath: directoryURL.deletingLastPathComponent().path,
-                    includeDrafts: includeDrafts
-                ) {
-                    processedContents.append(processed)
-                    print("[ContentProcessor] Successfully processed: \(fileURL.lastPathComponent)")
+        // Use manual iteration to avoid makeIterator() async issue
+        var pendingURLs: [URL] = []
+        let processEnumerator = {
+            while let fileURL = enumerator.nextObject() as? URL {
+                guard fileURL.pathExtension == "md" || fileURL.pathExtension == "markdown" else {
+                    continue
                 }
-            } catch {
-                // Collect error information
-                print("[ContentProcessor] Error processing \(fileURL.lastPathComponent): \(error)")
-                errors.append((url: fileURL, error: error))
-                // Continue to next file
-                continue
+                
+                // Check file size to warn about potentially large files
+                if let fileSize = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+                   fileSize > self.config.limits.maxMarkdownFileSize {
+                    print("Warning: Large markdown file detected: \(fileURL.lastPathComponent) (\(fileSize) bytes)")
+                    // Skip files that are too large to prevent memory issues
+                    if fileSize > self.config.limits.maxMarkdownFileSize * 2 {
+                        print("Skipping extremely large file: \(fileURL.lastPathComponent)")
+                        continue
+                    }
+                }
+                
+                pendingURLs.append(fileURL)
             }
         }
         
-        return (contents: processedContents, errors: errors)
+        // Execute enumeration in non-async context
+        await Task {
+            processEnumerator()
+        }.value
+        
+        markdownURLs = pendingURLs
+        
+        // Process files in batches to control memory usage
+        var allProcessedContents: [ProcessedContent] = []
+        let batches = markdownURLs.chunked(into: batchSize)
+        
+        for (batchIndex, batch) in batches.enumerated() {
+            print("Processing batch \(batchIndex + 1)/\(batches.count) (\(batch.count) files)")
+            
+            // Process batch efficiently with async/await and memory management
+            let batchContents = try await withThrowingTaskGroup(of: ProcessedContent?.self) { group in
+                var results: [ProcessedContent] = []
+                
+                for fileURL in batch {
+                    group.addTask { [self] in
+                        return try await self.processMarkdownFile(
+                            at: fileURL,
+                            projectPath: directoryURL.deletingLastPathComponent().path,
+                            includeDrafts: includeDrafts
+                        )
+                    }
+                }
+                
+                for try await result in group {
+                    if let processed = result {
+                        results.append(processed)
+                    }
+                }
+                
+                return results
+            }
+            
+            allProcessedContents.append(contentsOf: batchContents)
+            
+            // Optional: Add small delay between batches to reduce system pressure
+            if batchIndex < batches.count - 1 {
+                try await Task.sleep(nanoseconds: 10_000_000) // 10ms
+            }
+        }
+        
+        return allProcessedContents
+    }
+    
+    // Process directory with error recovery and memory efficiency
+    public func processDirectoryWithRecovery(
+        at directoryURL: URL,
+        includeDrafts: Bool,
+        batchSize: Int = 50
+    ) async throws -> (contents: [ProcessedContent], errors: [(url: URL, error: Error)]) {
+        var allProcessedContents: [ProcessedContent] = []
+        var allErrors: [(url: URL, error: Error)] = []
+        
+        // Collect markdown files first
+        var markdownURLs: [URL] = []
+        
+        guard let enumerator = FileManager.default.enumerator(
+            at: directoryURL,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            throw ContentProcessorError.cannotEnumerateDirectory(directoryURL.path)
+        }
+        
+        // Use manual iteration to avoid makeIterator() async issue
+        var pendingURLs: [URL] = []
+        let processEnumerator = {
+            while let fileURL = enumerator.nextObject() as? URL {
+                guard fileURL.pathExtension == "md" || fileURL.pathExtension == "markdown" else {
+                    continue
+                }
+                pendingURLs.append(fileURL)
+            }
+        }
+        
+        // Execute enumeration in non-async context
+        await Task {
+            processEnumerator()
+        }.value
+        
+        markdownURLs = pendingURLs
+        
+        let batches = markdownURLs.chunked(into: batchSize)
+        
+        for (batchIndex, batch) in batches.enumerated() {
+            print("Processing batch \(batchIndex + 1)/\(batches.count) (\(batch.count) files) with error recovery")
+            
+            // Process batch with async error handling and parallel processing
+            let (batchContents, batchErrors) = await withTaskGroup(of: (ProcessedContent?, (URL, Error)?).self) { group in
+                var contents: [ProcessedContent] = []
+                var errors: [(URL, Error)] = []
+                
+                for fileURL in batch {
+                    group.addTask { [self] in
+                        do {
+                            let processed = try await self.processMarkdownFile(
+                                at: fileURL,
+                                projectPath: directoryURL.deletingLastPathComponent().path,
+                                includeDrafts: includeDrafts
+                            )
+                            return (processed, nil)
+                        } catch {
+                            return (nil, (fileURL, error))
+                        }
+                    }
+                }
+                
+                for await result in group {
+                    if let content = result.0 {
+                        contents.append(content)
+                    }
+                    if let error = result.1 {
+                        errors.append(error)
+                    }
+                }
+                
+                return (contents, errors)
+            }
+            
+            allProcessedContents.append(contentsOf: batchContents)
+            allErrors.append(contentsOf: batchErrors)
+            
+            // Log batch completion
+            print("[ContentProcessor] Batch \(batchIndex + 1) completed: \(batchContents.count) files processed, \(batchErrors.count) errors")
+            
+            // Memory pressure relief between batches
+            if batchIndex < batches.count - 1 {
+                try await Task.sleep(nanoseconds: 10_000_000) // 10ms
+            }
+        }
+        
+        return (contents: allProcessedContents, errors: allErrors)
     }
     
     // Render markdown content to HTML
@@ -218,8 +354,10 @@ public class ContentProcessor {
     }
 }
 
+// Array extension is defined elsewhere
+
 // Processed content model
-public struct ProcessedContent {
+public struct ProcessedContent: Sendable {
     public let url: URL
     public let markdown: MarkdownParseResult
     public let type: ProcessedContentType
@@ -227,7 +365,7 @@ public struct ProcessedContent {
 }
 
 // Content metadata
-public struct ContentMetadata {
+public struct ContentMetadata: Sendable {
     public let title: String
     public let description: String?
     public let date: Date
@@ -239,7 +377,7 @@ public struct ContentMetadata {
 }
 
 // Content type enum
-public enum ProcessedContentType {
+public enum ProcessedContentType: Sendable {
     case page
     case post
 }
@@ -248,6 +386,8 @@ public enum ProcessedContentType {
 public enum ContentProcessorError: LocalizedError {
     case cannotEnumerateDirectory(String)
     case invalidContent(String)
+    case fileSizeExceeded(String, Int)
+    case batchProcessingFailed(String)
     
     public var errorDescription: String? {
         switch self {
@@ -255,6 +395,10 @@ public enum ContentProcessorError: LocalizedError {
             return "Cannot enumerate directory: \(path)"
         case .invalidContent(let reason):
             return "Invalid content: \(reason)"
+        case .fileSizeExceeded(let path, let size):
+            return "File size exceeded limit: \(path) (\(size) bytes)"
+        case .batchProcessingFailed(let reason):
+            return "Batch processing failed: \(reason)"
         }
     }
 }

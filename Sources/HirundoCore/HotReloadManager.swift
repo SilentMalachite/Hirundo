@@ -10,6 +10,10 @@ public enum FileChangeType: Sendable {
     case deleted
     case renamed
 }
+enum HotReloadError: Error {
+    case watcherCreationFailed
+    case cannotOpenPath(String)
+}
 
 // Represents a file change event
 public struct FileChange: Sendable {
@@ -79,6 +83,7 @@ public final class HotReloadManager: @unchecked Sendable {
     private var fsEventsWrapper: FSEventsWrapper?
     private var debounceWorkItem: DispatchWorkItem?
     private let timerQueue = DispatchQueue(label: "com.hirundo.hotreload.timer")
+    private let workItemLock = NSLock()
     
     // Use actor for thread-safe state management
     private let state = HotReloadState()
@@ -176,6 +181,8 @@ public final class HotReloadManager: @unchecked Sendable {
         }
         
         timerQueue.sync {
+            workItemLock.lock()
+            defer { workItemLock.unlock() }
             debounceWorkItem?.cancel()
             debounceWorkItem = nil
         }
@@ -229,9 +236,12 @@ public final class HotReloadManager: @unchecked Sendable {
         // Add to pending changes
         await state.addPendingChange(refinedChange.path, change: refinedChange)
         
-        // Reset debounce timer using DispatchWorkItem for better thread safety
+        // Reset debounce timer with proper synchronization
         timerQueue.async { [weak self] in
             guard let self = self else { return }
+            
+            self.workItemLock.lock()
+            defer { self.workItemLock.unlock() }
             
             // Cancel existing work item if any
             self.debounceWorkItem?.cancel()
@@ -289,8 +299,8 @@ public final class HotReloadManager: @unchecked Sendable {
     }
 }
 
-// Hot reload errors
-public enum HotReloadError: LocalizedError {
+// Basic hot reload errors
+public enum BasicHotReloadError: LocalizedError {
     case cannotOpenPath(String)
     case watcherCreationFailed
     

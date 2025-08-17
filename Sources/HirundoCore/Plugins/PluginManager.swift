@@ -544,7 +544,15 @@ public class PluginManager {
         try validatePluginSecurity(at: url)
         
         // TODO: Implement secure dynamic loading
-        // This would require proper code signing validation and sandbox restrictions
+        // This would require:
+        // 1. Code signing validation using Security framework
+        // 2. Capability-based sandboxing restrictions  
+        // 3. Plugin API surface area restrictions
+        // 4. Resource usage limits and monitoring
+        // 5. Secure IPC communication channels
+        // 
+        // For now, dynamic loading is disabled for security reasons.
+        // Only built-in plugins are supported to prevent code injection attacks.
         throw PluginError.invalidPlugin("Dynamic plugin loading not implemented for security reasons")
     }
     

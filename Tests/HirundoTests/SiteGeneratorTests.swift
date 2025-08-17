@@ -217,10 +217,10 @@ final class SiteGeneratorTests: XCTestCase {
         )
     }
     
-    func testBasicSiteGeneration() throws {
+    func testBasicSiteGeneration() async throws {
         generator = try SiteGenerator(projectPath: tempDir.path)
         
-        try generator.build()
+        try await generator.build()
         
         let outputDir = tempDir.appendingPathComponent("_site")
         
@@ -252,9 +252,9 @@ final class SiteGeneratorTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: outputDir.appendingPathComponent("css/style.css").path), "css/style.css should exist")
     }
     
-    func testPageContent() throws {
+    func testPageContent() async throws {
         generator = try SiteGenerator(projectPath: tempDir.path)
-        try generator.build()
+        try await generator.build()
         
         let indexPath = tempDir.appendingPathComponent("_site/index.html")
         let indexContent = try String(contentsOf: indexPath, encoding: .utf8)
@@ -265,9 +265,9 @@ final class SiteGeneratorTests: XCTestCase {
         XCTAssertTrue(indexContent.contains("&copy; テスト太郎"))
     }
     
-    func testBlogPostGeneration() throws {
+    func testBlogPostGeneration() async throws {
         generator = try SiteGenerator(projectPath: tempDir.path)
-        try generator.build()
+        try await generator.build()
         
         let postPath = tempDir.appendingPathComponent("_site/posts/first-post/index.html")
         let postContent = try String(contentsOf: postPath, encoding: .utf8)
@@ -280,9 +280,9 @@ final class SiteGeneratorTests: XCTestCase {
                      postContent.contains("<a href=\"/categories/Swift\">Swift</a>"))
     }
     
-    func testCategoryPageGeneration() throws {
+    func testCategoryPageGeneration() async throws {
         generator = try SiteGenerator(projectPath: tempDir.path)
-        try generator.build()
+        try await generator.build()
         
         let categoryDir = tempDir.appendingPathComponent("_site/categories/テスト")
         XCTAssertTrue(FileManager.default.fileExists(atPath: categoryDir.appendingPathComponent("index.html").path))
@@ -296,9 +296,9 @@ final class SiteGeneratorTests: XCTestCase {
         XCTAssertTrue(categoryContent.contains("二番目の投稿"))
     }
     
-    func testTagPageGeneration() throws {
+    func testTagPageGeneration() async throws {
         generator = try SiteGenerator(projectPath: tempDir.path)
-        try generator.build()
+        try await generator.build()
         
         let tagDir = tempDir.appendingPathComponent("_site/tags/hirundo")
         XCTAssertTrue(FileManager.default.fileExists(atPath: tagDir.appendingPathComponent("index.html").path))
@@ -312,9 +312,9 @@ final class SiteGeneratorTests: XCTestCase {
         XCTAssertTrue(tagContent.contains("二番目の投稿"))
     }
     
-    func testArchiveGeneration() throws {
+    func testArchiveGeneration() async throws {
         generator = try SiteGenerator(projectPath: tempDir.path)
-        try generator.build()
+        try await generator.build()
         
         let archivePath = tempDir.appendingPathComponent("_site/archive/index.html")
         XCTAssertTrue(FileManager.default.fileExists(atPath: archivePath.path))
@@ -327,9 +327,9 @@ final class SiteGeneratorTests: XCTestCase {
         XCTAssertTrue(archiveContent.contains("2024-01-02"))
     }
     
-    func testStaticFileCopying() throws {
+    func testStaticFileCopying() async throws {
         generator = try SiteGenerator(projectPath: tempDir.path)
-        try generator.build()
+        try await generator.build()
         
         let copiedCssPath = tempDir.appendingPathComponent("_site/css/style.css")
         XCTAssertTrue(FileManager.default.fileExists(atPath: copiedCssPath.path))
@@ -338,14 +338,14 @@ final class SiteGeneratorTests: XCTestCase {
         XCTAssertEqual(cssContent, "body { font-family: sans-serif; }")
     }
     
-    func testIncrementalBuild() throws {
+    func testIncrementalBuild() async throws {
         generator = try SiteGenerator(projectPath: tempDir.path)
         
-        try generator.build()
+        try await generator.build()
         
         _ = Date()
         
-        Thread.sleep(forTimeInterval: 0.1)
+        try await Task.sleep(for: .milliseconds(100))
         
         let newPostContent = """
         ---
@@ -367,7 +367,7 @@ final class SiteGeneratorTests: XCTestCase {
             encoding: .utf8
         )
         
-        try generator.build()
+        try await generator.build()
         
         let thirdPostPath = tempDir.appendingPathComponent("_site/posts/third-post/index.html")
         XCTAssertTrue(FileManager.default.fileExists(atPath: thirdPostPath.path))
@@ -379,21 +379,21 @@ final class SiteGeneratorTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: newCategoryPath.path))
     }
     
-    func testCleanBuild() throws {
+    func testCleanBuild() async throws {
         generator = try SiteGenerator(projectPath: tempDir.path)
         
-        try generator.build()
+        try await generator.build()
         
         let testFilePath = tempDir.appendingPathComponent("_site/test.txt")
         try "test".write(to: testFilePath, atomically: true, encoding: .utf8)
         
-        try generator.build(clean: true)
+        try await generator.build(clean: true)
         
         XCTAssertFalse(FileManager.default.fileExists(atPath: testFilePath.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: tempDir.appendingPathComponent("_site/index.html").path))
     }
     
-    func testDraftHandling() throws {
+    func testDraftHandling() async throws {
         let draftContent = """
         ---
         title: "下書き投稿"
@@ -416,17 +416,17 @@ final class SiteGeneratorTests: XCTestCase {
         
         generator = try SiteGenerator(projectPath: tempDir.path)
         
-        try generator.build()
+        try await generator.build()
         
         let draftPath = tempDir.appendingPathComponent("_site/posts/draft-post/index.html")
         XCTAssertFalse(FileManager.default.fileExists(atPath: draftPath.path))
         
-        try generator.build(includeDrafts: true)
+        try await generator.build(includeDrafts: true)
         
         XCTAssertTrue(FileManager.default.fileExists(atPath: draftPath.path))
     }
     
-    func testErrorHandling() throws {
+    func testErrorHandling() async throws {
         let invalidContent = """
         ---
         title: "無効な投稿"
@@ -448,7 +448,7 @@ final class SiteGeneratorTests: XCTestCase {
         
         // The build should throw an error for invalid content
         do {
-            try generator.build()
+            try await generator.build()
             XCTFail("Expected error to be thrown for invalid content")
         } catch {
             // Any error is acceptable here - could be template error, date parsing error, etc.

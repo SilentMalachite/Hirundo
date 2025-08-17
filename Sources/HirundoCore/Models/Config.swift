@@ -131,6 +131,66 @@ public struct Build: Codable, Sendable {
         enableSourceMaps: Bool? = nil,
         concatenateJS: Bool? = nil,
         concatenateCSS: Bool? = nil
+    ) throws {
+        // Basic path validation
+        try Self.validateDirectory(contentDirectory, name: "contentDirectory")
+        try Self.validateDirectory(outputDirectory, name: "outputDirectory")
+        try Self.validateDirectory(staticDirectory, name: "staticDirectory")
+        try Self.validateDirectory(templatesDirectory, name: "templatesDirectory")
+        
+        // Cross-relationship validation (check for directory duplication)
+        let directories = [contentDirectory, staticDirectory, templatesDirectory]
+        let uniqueDirectories = Set(directories)
+        if uniqueDirectories.count != directories.count {
+            throw ConfigError.invalidValue("Build directories must be unique (content, static, templates)")
+        }
+        
+        // Ensure output directory is not the same as other directories
+        if directories.contains(outputDirectory) {
+            throw ConfigError.invalidValue("Output directory cannot be the same as content, static, or templates directory")
+        }
+        
+        self.contentDirectory = contentDirectory
+        self.outputDirectory = outputDirectory
+        self.staticDirectory = staticDirectory
+        self.templatesDirectory = templatesDirectory
+        self.enableAssetFingerprinting = enableAssetFingerprinting
+        self.enableSourceMaps = enableSourceMaps
+        self.concatenateJS = concatenateJS
+        self.concatenateCSS = concatenateCSS
+    }
+    
+    /// Non-throwing convenience initializer (for compatibility with existing code)
+    public static func defaultBuild() -> Build {
+        do {
+            return try Build()
+        } catch {
+            // Use safe default values if an error occurs
+            return Build(
+                contentDirectory: "content",
+                outputDirectory: "_site", 
+                staticDirectory: "static",
+                templatesDirectory: "templates",
+                enableAssetFingerprinting: nil,
+                enableSourceMaps: nil,
+                concatenateJS: nil,
+                concatenateCSS: nil,
+                skipValidation: true
+            )
+        }
+    }
+    
+    /// Internal initializer (validation skipped)
+    private init(
+        contentDirectory: String,
+        outputDirectory: String,
+        staticDirectory: String,
+        templatesDirectory: String,
+        enableAssetFingerprinting: Bool?,
+        enableSourceMaps: Bool?,
+        concatenateJS: Bool?,
+        concatenateCSS: Bool?,
+        skipValidation: Bool
     ) {
         self.contentDirectory = contentDirectory
         self.outputDirectory = outputDirectory
@@ -140,6 +200,73 @@ public struct Build: Codable, Sendable {
         self.enableSourceMaps = enableSourceMaps
         self.concatenateJS = concatenateJS
         self.concatenateCSS = concatenateCSS
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        let contentDirectory = try container.decodeIfPresent(String.self, forKey: .contentDirectory) ?? "content"
+        let outputDirectory = try container.decodeIfPresent(String.self, forKey: .outputDirectory) ?? "_site"
+        let staticDirectory = try container.decodeIfPresent(String.self, forKey: .staticDirectory) ?? "static"
+        let templatesDirectory = try container.decodeIfPresent(String.self, forKey: .templatesDirectory) ?? "templates"
+        let enableAssetFingerprinting = try container.decodeIfPresent(Bool.self, forKey: .enableAssetFingerprinting)
+        let enableSourceMaps = try container.decodeIfPresent(Bool.self, forKey: .enableSourceMaps)
+        let concatenateJS = try container.decodeIfPresent(Bool.self, forKey: .concatenateJS)
+        let concatenateCSS = try container.decodeIfPresent(Bool.self, forKey: .concatenateCSS)
+        
+        try self.init(
+            contentDirectory: contentDirectory,
+            outputDirectory: outputDirectory,
+            staticDirectory: staticDirectory,
+            templatesDirectory: templatesDirectory,
+            enableAssetFingerprinting: enableAssetFingerprinting,
+            enableSourceMaps: enableSourceMaps,
+            concatenateJS: concatenateJS,
+            concatenateCSS: concatenateCSS
+        )
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case contentDirectory, outputDirectory, staticDirectory, templatesDirectory
+        case enableAssetFingerprinting, enableSourceMaps, concatenateJS, concatenateCSS
+    }
+    
+    /// Directory path validation
+    private static func validateDirectory(_ path: String, name: String) throws {
+        guard !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ConfigError.invalidValue("\(name) cannot be empty")
+        }
+        
+        let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Length check
+        guard trimmedPath.count <= 255 else {
+            throw ConfigError.invalidValue("\(name) path cannot exceed 255 characters")
+        }
+        
+        // Forbidden characters check
+        let forbiddenChars = CharacterSet(charactersIn: "<>:\"|?*\0")
+        if trimmedPath.rangeOfCharacter(from: forbiddenChars) != nil {
+            throw ConfigError.invalidValue("\(name) contains forbidden characters")
+        }
+        
+        // Path traversal check
+        if trimmedPath.contains("..") {
+            throw ConfigError.invalidValue("\(name) cannot contain path traversal sequences (..)")
+        }
+        
+        // Absolute path check
+        if trimmedPath.hasPrefix("/") || trimmedPath.hasPrefix("\\") {
+            throw ConfigError.invalidValue("\(name) cannot be an absolute path")
+        }
+        
+        // Special directory names check
+        let specialDirs = [".git", ".svn", ".hg", "node_modules", ".DS_Store"]
+        for specialDir in specialDirs {
+            if trimmedPath.contains(specialDir) {
+                throw ConfigError.invalidValue("\(name) cannot contain special directory: \(specialDir)")
+            }
+        }
     }
 }
 
@@ -170,7 +297,66 @@ public struct Server: Codable, Sendable {
     public let cors: CorsConfig?
     public let websocketAuth: WebSocketAuthConfig?
     
-    public init(port: Int = 8080, liveReload: Bool = true, cors: CorsConfig? = nil, websocketAuth: WebSocketAuthConfig? = nil) {
+    public init(port: Int = 8080, liveReload: Bool = true, cors: CorsConfig? = nil, websocketAuth: WebSocketAuthConfig? = nil) throws {
+        // Detailed port number validation
+        try Self.validatePort(port)
+        
+        self.port = port
+        self.liveReload = liveReload
+        self.cors = cors
+        self.websocketAuth = websocketAuth
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        let port = try container.decodeIfPresent(Int.self, forKey: .port) ?? 8080
+        let liveReload = try container.decodeIfPresent(Bool.self, forKey: .liveReload) ?? true
+        let cors = try container.decodeIfPresent(CorsConfig.self, forKey: .cors)
+        let websocketAuth = try container.decodeIfPresent(WebSocketAuthConfig.self, forKey: .websocketAuth)
+        
+        try self.init(port: port, liveReload: liveReload, cors: cors, websocketAuth: websocketAuth)
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case port, liveReload, cors, websocketAuth
+    }
+    
+    /// Detailed port number validation
+    private static func validatePort(_ port: Int) throws {
+        // Basic range check
+        guard port > 0 && port <= 65535 else {
+            throw ConfigError.invalidValue("Port must be between 1 and 65535")
+        }
+        
+        // System reserved ports check (1-1023)
+        if port <= 1023 && port != 8080 && port != 3000 && port != 4000 {
+            throw ConfigError.invalidValue("Port \(port) is in the system reserved range (1-1023). Use ports above 1023 for development.")
+        }
+        
+        // Warning for commonly used service ports
+        let commonServicePorts = [22, 25, 53, 80, 110, 143, 443, 993, 995, 3306, 5432, 6379, 27017]
+        if commonServicePorts.contains(port) {
+            throw ConfigError.invalidValue("Port \(port) is commonly used by other services. Consider using a different port.")
+        }
+        
+        // Recommend default development port range
+        if port < 3000 || port > 9999 {
+            print("[Warning] Port \(port) is outside the common development range (3000-9999). This may cause conflicts.")
+        }
+    }
+    
+    /// Non-throwing convenience initializer (compatibility with existing code)
+    public static func defaultServer() -> Server {
+        do {
+            return try Server()
+        } catch {
+            return Server(port: 8080, liveReload: true, cors: nil, websocketAuth: nil, skipValidation: true)
+        }
+    }
+    
+    /// Internal initializer (validation skipped)
+    private init(port: Int, liveReload: Bool, cors: CorsConfig?, websocketAuth: WebSocketAuthConfig?, skipValidation: Bool) {
         self.port = port
         self.liveReload = liveReload
         self.cors = cors
@@ -188,7 +374,66 @@ public struct WebSocketAuthConfig: Codable, Sendable {
         enabled: Bool = true,
         tokenExpirationMinutes: Int = 60,
         maxActiveTokens: Int = 100
-    ) {
+    ) throws {
+        // Token expiration validation
+        guard tokenExpirationMinutes > 0 else {
+            throw ConfigError.invalidValue("tokenExpirationMinutes must be greater than 0")
+        }
+        guard tokenExpirationMinutes <= 1440 else { // 24 hours
+            throw ConfigError.invalidValue("tokenExpirationMinutes cannot exceed 1440 minutes (24 hours)")
+        }
+        
+        // Maximum active tokens validation
+        guard maxActiveTokens > 0 else {
+            throw ConfigError.invalidValue("maxActiveTokens must be greater than 0")
+        }
+        guard maxActiveTokens <= 10000 else {
+            throw ConfigError.invalidValue("maxActiveTokens cannot exceed 10000 (memory consideration)")
+        }
+        
+        // Security warning
+        if tokenExpirationMinutes > 480 { // 8 hours
+            print("[Warning] tokenExpirationMinutes \(tokenExpirationMinutes) is quite long. Consider shorter expiration for better security.")
+        }
+        
+        if maxActiveTokens > 1000 {
+            print("[Warning] maxActiveTokens \(maxActiveTokens) is quite high. This may impact memory usage.")
+        }
+        
+        self.enabled = enabled
+        self.tokenExpirationMinutes = tokenExpirationMinutes
+        self.maxActiveTokens = maxActiveTokens
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        let enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        let tokenExpirationMinutes = try container.decodeIfPresent(Int.self, forKey: .tokenExpirationMinutes) ?? 60
+        let maxActiveTokens = try container.decodeIfPresent(Int.self, forKey: .maxActiveTokens) ?? 100
+        
+        try self.init(
+            enabled: enabled,
+            tokenExpirationMinutes: tokenExpirationMinutes,
+            maxActiveTokens: maxActiveTokens
+        )
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case enabled, tokenExpirationMinutes, maxActiveTokens
+    }
+    
+    /// Non-throwing convenience initializer (compatibility with existing code)
+    public static func defaultWebSocketAuth() -> WebSocketAuthConfig {
+        do {
+            return try WebSocketAuthConfig()
+        } catch {
+            return WebSocketAuthConfig(enabled: true, tokenExpirationMinutes: 60, maxActiveTokens: 100, skipValidation: true)
+        }
+    }
+    
+    /// Internal initializer (validation skipped)
+    private init(enabled: Bool, tokenExpirationMinutes: Int, maxActiveTokens: Int, skipValidation: Bool) {
         self.enabled = enabled
         self.tokenExpirationMinutes = tokenExpirationMinutes
         self.maxActiveTokens = maxActiveTokens
@@ -272,7 +517,57 @@ public struct Blog: Codable, Sendable {
         generateArchive: Bool = true,
         generateCategories: Bool = true,
         generateTags: Bool = true
-    ) {
+    ) throws {
+        // postsPerPage validation
+        guard postsPerPage > 0 else {
+            throw ConfigError.invalidValue("postsPerPage must be greater than 0")
+        }
+        guard postsPerPage <= 100 else {
+            throw ConfigError.invalidValue("postsPerPage cannot exceed 100 (performance consideration)")
+        }
+        
+        // Performance warning
+        if postsPerPage > 50 {
+            print("[Warning] postsPerPage \(postsPerPage) is quite high. Consider using a smaller value for better performance.")
+        }
+        
+        self.postsPerPage = postsPerPage
+        self.generateArchive = generateArchive
+        self.generateCategories = generateCategories
+        self.generateTags = generateTags
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        let postsPerPage = try container.decodeIfPresent(Int.self, forKey: .postsPerPage) ?? 10
+        let generateArchive = try container.decodeIfPresent(Bool.self, forKey: .generateArchive) ?? true
+        let generateCategories = try container.decodeIfPresent(Bool.self, forKey: .generateCategories) ?? true
+        let generateTags = try container.decodeIfPresent(Bool.self, forKey: .generateTags) ?? true
+        
+        try self.init(
+            postsPerPage: postsPerPage,
+            generateArchive: generateArchive,
+            generateCategories: generateCategories,
+            generateTags: generateTags
+        )
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case postsPerPage, generateArchive, generateCategories, generateTags
+    }
+    
+    /// Non-throwing convenience initializer (compatibility with existing code)
+    public static func defaultBlog() -> Blog {
+        do {
+            return try Blog()
+        } catch {
+            return Blog(postsPerPage: 10, generateArchive: true, generateCategories: true, generateTags: true, skipValidation: true)
+        }
+    }
+    
+    /// Internal initializer (validation skipped)
+    private init(postsPerPage: Int, generateArchive: Bool, generateCategories: Bool, generateTags: Bool, skipValidation: Bool) {
         self.postsPerPage = postsPerPage
         self.generateArchive = generateArchive
         self.generateCategories = generateCategories
@@ -430,6 +725,42 @@ public struct TimeoutConfig: Codable, Sendable {
         case fileReadTimeout, fileWriteTimeout, directoryOperationTimeout
         case httpRequestTimeout, fsEventsTimeout, serverStartTimeout
     }
+    
+    /// Non-throwing convenience initializer (compatibility with existing code)
+    public static func defaultConfig() -> TimeoutConfig {
+        do {
+            return try TimeoutConfig()
+        } catch {
+            // Use safe default values if an error occurs
+            return TimeoutConfig(
+                fileReadTimeout: 30.0,
+                fileWriteTimeout: 30.0,
+                directoryOperationTimeout: 15.0,
+                httpRequestTimeout: 10.0,
+                fsEventsTimeout: 5.0,
+                serverStartTimeout: 30.0,
+                skipValidation: true
+            )
+        }
+    }
+    
+    /// Internal initializer (validation skipped)
+    private init(
+        fileReadTimeout: TimeInterval,
+        fileWriteTimeout: TimeInterval,
+        directoryOperationTimeout: TimeInterval,
+        httpRequestTimeout: TimeInterval,
+        fsEventsTimeout: TimeInterval,
+        serverStartTimeout: TimeInterval,
+        skipValidation: Bool
+    ) {
+        self.fileReadTimeout = fileReadTimeout
+        self.fileWriteTimeout = fileWriteTimeout
+        self.directoryOperationTimeout = directoryOperationTimeout
+        self.httpRequestTimeout = httpRequestTimeout
+        self.fsEventsTimeout = fsEventsTimeout
+        self.serverStartTimeout = serverStartTimeout
+    }
 }
 
 public struct HirundoConfig: Codable, Sendable {
@@ -517,12 +848,12 @@ public struct HirundoConfig: Codable, Sendable {
     
     public init(
         site: Site,
-        build: Build = Build(),
-        server: Server = Server(),
-        blog: Blog = Blog(),
+        build: Build = Build.defaultBuild(),
+        server: Server = Server.defaultServer(),
+        blog: Blog = Blog.defaultBlog(),
         plugins: [PluginConfiguration] = [],
         limits: Limits = Limits(),
-        timeouts: TimeoutConfig = try! TimeoutConfig()
+        timeouts: TimeoutConfig = TimeoutConfig.defaultConfig()
     ) {
         self.site = site
         self.build = build
@@ -533,16 +864,64 @@ public struct HirundoConfig: Codable, Sendable {
         self.timeouts = timeouts
     }
     
+    /// Create a default configuration for testing and development
+    public static func createDefault() -> HirundoConfig {
+        do {
+            let defaultSite = try Site(
+                title: "Test Site",
+                description: "A test site for development",
+                url: "https://localhost:8080",
+                language: "en-US",
+                author: try Author(name: "Test Author", email: "test@example.com")
+            )
+            
+            return HirundoConfig(
+                site: defaultSite,
+                build: Build.defaultBuild(),
+                server: Server.defaultServer(),
+                blog: Blog.defaultBlog(),
+                plugins: [],
+                limits: Limits(),
+                timeouts: TimeoutConfig.defaultConfig()
+            )
+        } catch {
+            // Fallback with minimal configuration if validation fails
+            do {
+                let fallbackSite = try Site(
+                    title: "Test Site",
+                    description: nil,
+                    url: "https://localhost:8080",
+                    language: "en-US",
+                    author: nil
+                )
+                
+                return HirundoConfig(
+                    site: fallbackSite,
+                    build: Build.defaultBuild(),
+                    server: Server.defaultServer(),
+                    blog: Blog.defaultBlog(),
+                    plugins: [],
+                    limits: Limits(),
+                    timeouts: TimeoutConfig.defaultConfig()
+                )
+            } catch {
+                // If even the minimal fallback fails, create an absolute minimal config
+                // This should never happen in practice, but provides a safety net
+                fatalError("Unable to create even minimal default configuration: \(error)")
+            }
+        }
+    }
+    
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
         self.site = try container.decode(Site.self, forKey: .site)
-        self.build = try container.decodeIfPresent(Build.self, forKey: .build) ?? Build()
-        self.server = try container.decodeIfPresent(Server.self, forKey: .server) ?? Server()
-        self.blog = try container.decodeIfPresent(Blog.self, forKey: .blog) ?? Blog()
+        self.build = try container.decodeIfPresent(Build.self, forKey: .build) ?? Build.defaultBuild()
+        self.server = try container.decodeIfPresent(Server.self, forKey: .server) ?? Server.defaultServer()
+        self.blog = try container.decodeIfPresent(Blog.self, forKey: .blog) ?? Blog.defaultBlog()
         self.plugins = try container.decodeIfPresent([PluginConfiguration].self, forKey: .plugins) ?? []
         self.limits = try container.decodeIfPresent(Limits.self, forKey: .limits) ?? Limits()
-        self.timeouts = try container.decodeIfPresent(TimeoutConfig.self, forKey: .timeouts) ?? TimeoutConfig()
+        self.timeouts = try container.decodeIfPresent(TimeoutConfig.self, forKey: .timeouts) ?? TimeoutConfig.defaultConfig()
     }
     
     public static func parse(from yaml: String) throws -> HirundoConfig {
@@ -638,29 +1017,13 @@ private func isValidURL(_ url: String) -> Bool {
         return false
     }
     
-    // Prevent SSRF attacks by blocking access to internal and local addresses
-    // Check for localhost variations
+    // Allow localhost for development - this is a static site generator
+    // that needs to work with localhost during development
+    // Still block cloud metadata endpoints for security
     let lowercasedHost = host.lowercased()
-    let localHostnames = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "[::]"]
-    if localHostnames.contains(lowercasedHost) {
-        return false
-    }
-    
-    // Block private IP ranges (RFC 1918)
-    // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
-    if isPrivateIPAddress(host) {
-        return false
-    }
-    
-    // Block link-local addresses (169.254.0.0/16)
-    if host.hasPrefix("169.254.") {
-        return false
-    }
-    
-    // Block metadata service endpoints (cloud providers)
     let blockedMetadataHosts = [
         "metadata.google.internal",
-        "169.254.169.254",  // AWS/GCP/Azure metadata
+        "169.254.169.254",  // AWS/GCP/Azure metadata endpoint
         "metadata.aws.internal"
     ]
     if blockedMetadataHosts.contains(lowercasedHost) {

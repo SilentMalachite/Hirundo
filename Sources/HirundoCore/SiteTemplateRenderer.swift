@@ -2,9 +2,10 @@ import Foundation
 
 // Template rendering separated from SiteGenerator
 public class SiteTemplateRenderer {
-    private let templateEngine: TemplateEngine
+    public let templateEngine: TemplateEngine
     private let config: HirundoConfig
     private let securityValidator: SecurityValidator
+    private let cacheManager: MemoryEfficientCacheManager
     
     public init(
         templatesDirectory: String,
@@ -14,6 +15,9 @@ public class SiteTemplateRenderer {
         self.config = config
         self.securityValidator = securityValidator
         self.templateEngine = TemplateEngine(templatesDirectory: templatesDirectory)
+        
+        // Initialize cache manager
+        self.cacheManager = MemoryEfficientCacheManager()
         
         // Configure template engine with site config
         templateEngine.configure(with: config.site)
@@ -25,7 +29,20 @@ public class SiteTemplateRenderer {
         htmlContent: String,
         allPages: [Page],
         allPosts: [Post]
-    ) throws -> String {
+    ) async throws -> String {
+        // Generate cache key based on content and dependencies
+        let cacheKey = generateCacheKey(
+            for: content,
+            htmlContent: htmlContent,
+            pagesCount: allPages.count,
+            postsCount: allPosts.count
+        )
+        
+        // Try to retrieve from cache first
+        if let cachedData = await cacheManager.retrieve(key: cacheKey),
+           let cachedResult = String(data: cachedData, encoding: .utf8) {
+            return cachedResult
+        }
         // Prepare template context
         var context: [String: Any] = [
             "site": prepareSiteContext(),
@@ -57,7 +74,25 @@ public class SiteTemplateRenderer {
         let templateName = content.metadata.template ?? (content.type == .post ? "post.html" : "default.html")
         
         // Render with template
-        return try templateEngine.render(template: templateName, context: context)
+        let renderedContent = try templateEngine.render(template: templateName, context: context)
+        
+        // Cache the rendered result
+        if let renderedData = renderedContent.data(using: .utf8) {
+            let dependencies = Set([
+                content.url.path,
+                templateName,
+                "pages_\(allPages.count)",
+                "posts_\(allPosts.count)"
+            ])
+            
+            await cacheManager.store(
+                key: cacheKey,
+                value: renderedData,
+                dependencies: dependencies
+            )
+        }
+        
+        return renderedContent
     }
     
     // Render archive page
@@ -96,7 +131,7 @@ public class SiteTemplateRenderer {
     }
     
     // Clear template cache
-    public func clearCache() {
+    public func clearTemplateEngineCache() {
         templateEngine.clearCache()
     }
     
@@ -211,6 +246,46 @@ public class SiteTemplateRenderer {
         }
         
         return tags
+    }
+    
+    // MARK: - Cache Management
+    
+    /// Generates a cache key for template rendering
+    private func generateCacheKey(
+        for content: ProcessedContent,
+        htmlContent: String,
+        pagesCount: Int,
+        postsCount: Int
+    ) -> String {
+        // Create a hash-based cache key to ensure consistency
+        let keyComponents = [
+            content.url.path,
+            content.metadata.title,
+            String(content.metadata.date.timeIntervalSince1970),
+            content.metadata.template ?? "default",
+            String(pagesCount),
+            String(postsCount),
+            String(htmlContent.count) // Use content length as a simple hash
+        ]
+        
+        let combinedKey = keyComponents.joined(separator: "_")
+        return "template_\(combinedKey.hashValue)"
+    }
+    
+    /// Invalidates cache for a specific content piece
+    public func invalidateCache(for content: ProcessedContent) async {
+        let pattern = "template_*\(content.url.path)*"
+        await cacheManager.invalidatePattern(pattern)
+    }
+    
+    /// Clears all template cache
+    public func clearCache() async {
+        await cacheManager.clear()
+    }
+    
+    /// Gets cache statistics
+    public func getCacheStatistics() async -> MemoryEfficientCacheManager.CacheStatistics {
+        return await cacheManager.getStatistics()
     }
 }
 

@@ -198,7 +198,10 @@ public class AssetPipeline {
         let fingerprint: String?
         if enableFingerprinting {
             fingerprint = try generateFingerprint(for: fileURL)
-            outputPath = addFingerprint(to: outputPath, fingerprint: fingerprint!)
+            guard let validFingerprint = fingerprint else {
+                throw AssetPipelineError.processingFailed("Failed to generate fingerprint for file: \(fileURL.path)")
+            }
+            outputPath = addFingerprint(to: outputPath, fingerprint: validFingerprint)
         } else {
             fingerprint = nil
         }
@@ -362,7 +365,8 @@ public class AssetPipeline {
     // Generate fingerprint for data
     private func generateFingerprint(for data: Data) -> String {
         let hash = SHA256.hash(data: data)
-        return hash.compactMap { String(format: "%02x", $0) }.joined().prefix(8).lowercased()
+        // Use 16 characters (64-bit) instead of 8 for better collision resistance
+        return hash.compactMap { String(format: "%02x", $0) }.joined().prefix(16).lowercased()
     }
     
     // Process asset content based on type

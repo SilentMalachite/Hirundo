@@ -19,19 +19,19 @@ let package = Package(
         )
     ],
     dependencies: [
-        // Markdown パーサー
+        // Markdown parser
         .package(url: "https://github.com/apple/swift-markdown.git", from: "0.6.0"),
-        // YAML パーサー
+        // YAML parser
         .package(url: "https://github.com/jpsim/Yams.git", from: "6.0.2"),
-        // テンプレートエンジン
+        // Template engine
         .package(url: "https://github.com/stencilproject/Stencil.git", from: "0.15.1"),
-        // HTTPサーバー
-        .package(url: "https://github.com/httpswift/swifter.git", .upToNextMajor(from: "1.5.0")),
+        // HTTP server - fixed to specific version to prevent unexpected breaking changes
+        .package(url: "https://github.com/httpswift/swifter.git", from: "1.5.0"),
         // Argument Parser
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.6.1")
     ],
     targets: [
-        // メインの実行可能ターゲット
+        // Main executable target
         .executableTarget(
             name: "Hirundo",
             dependencies: [
@@ -42,7 +42,7 @@ let package = Package(
                 .swiftLanguageMode(.v6)
             ]
         ),
-        // コアライブラリターゲット
+        // Core library target
         .target(
             name: "HirundoCore",
             dependencies: [
@@ -55,7 +55,7 @@ let package = Package(
                 .swiftLanguageMode(.v6)
             ]
         ),
-        // テストターゲット
+        // Test target
         .testTarget(
             name: "HirundoTests",
             dependencies: ["HirundoCore"],

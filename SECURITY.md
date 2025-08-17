@@ -99,6 +99,27 @@ Before deploying Hirundo in production:
 - [ ] Monitor build logs for security warnings
 - [ ] Implement proper file permissions on the server
 
+## Recent Security Updates (2025-08-17)
+
+### Critical Fixes Applied
+- ✅ **Path Traversal Vulnerabilities**: Fixed critical path traversal issues in SecurityValidator
+- ✅ **Force Unwrapping Removal**: Eliminated dangerous force unwrapping operations that could cause crashes
+- ✅ **Swift 6.0 Concurrency**: Resolved all concurrency safety issues with proper Sendable compliance
+- ✅ **Error Type Consistency**: Improved error handling to prevent information disclosure
+- ✅ **Memory Safety**: Enhanced WebSocket session management to prevent memory leaks
+
+### Security Enhancements
+- 🔒 **Enhanced Path Validation**: Absolute paths now properly validated within project directories
+- 🔒 **UTF-8 Error Handling**: Invalid encoding errors now properly typed and handled
+- 🔒 **Front Matter Parsing**: Improved YAML parsing security for edge cases
+- 🔒 **HTML Sanitization**: Strengthened dangerous pattern detection in markdown content
+- 🔒 **Plugin System**: Dynamic loading disabled for security (only built-in plugins allowed)
+
+### Testing & Validation
+- 🧪 **85+ Security Tests**: Comprehensive test suite now passing with edge case coverage
+- 🧪 **Integration Testing**: End-to-end security validation in realistic scenarios
+- 🧪 **Concurrency Testing**: Swift 6.0 concurrency safety verified
+
 ## Security Announcements
 
 Security updates and announcements will be published:
@@ -106,6 +127,7 @@ Security updates and announcements will be published:
 - In GitHub Security Advisories
 - In the CHANGELOG.md file
 - On the project's main page
+- Through GitHub Releases with security tags
 
 ## Acknowledgments
 

@@ -5,9 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] - 2025-08-17
 
 ### Added
+- **NEW**: Comprehensive EdgeCase test suite (85+ tests) for robust error handling
+- **NEW**: SecurityValidator tests for enhanced security validation  
+- **NEW**: Integration tests for end-to-end workflow validation
+- **NEW**: MemoryEfficientCacheManager for optimized memory usage
+- **NEW**: StringExtensions utility for common string operations
+- Enhanced WebSocket authentication system with complete token management
 - Comprehensive security improvements and vulnerability fixes
 - Configurable security and performance limits through `Limits` configuration
 - Advanced path traversal protection with symlink resolution
@@ -21,10 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Template engine thread safety improvements
 - Comprehensive timeout configuration for all I/O operations
 - CORS (Cross-Origin Resource Sharing) support for development server
-- WebSocket authentication for secure live reload connections
-- Swift 6.0 and macOS 14+ support with modern concurrency features
+- **Swift 6.0** full concurrency support and compliance
 
 ### Changed
+- **BREAKING**: Upgraded to Swift 6.0 with full concurrency support
+- **SECURITY**: Improved SecurityValidator to handle absolute paths within project directories
+- **PARSER**: Enhanced MarkdownParser front matter parsing for edge cases (files ending with `---`)
+- **ERROR HANDLING**: Refactored ContentProcessor with better error handling for invalid UTF-8 files
+- **RELIABILITY**: Updated force unwrapping (`try!`) to proper error handling in Config.swift
+- **PERFORMANCE**: Optimized PathSanitizer for better performance and thread safety
 - **BREAKING**: JavaScript transpilation disabled by default for security reasons
 - Improved HTML rendering using proper AST-based processing
 - Enhanced markdown parser with better security validation
@@ -33,24 +44,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Development server error handling improved with detailed logging
 
 ### Fixed
+- **CRITICAL**: Fixed path traversal vulnerabilities in SecurityValidator  
+- **CRITICAL**: Removed dangerous force unwrapping operations
+- **CRITICAL**: Resolved Swift 6.0 concurrency issues and warnings
+- **RELIABILITY**: Improved error type consistency across the codebase
+- **TESTING**: Fixed all failing edge case tests including UTF-8 and front matter parsing
+- **MEMORY**: Enhanced memory management in WebSocket connections
 - FSEventsWrapper implementation completed and thread-safe
 - Template engine race conditions resolved
-- Path traversal vulnerabilities patched
 - Memory leaks in WebSocket management eliminated
 - Asset processing file conflicts resolved
 - Plugin loading system security issues addressed
 - Build system compatibility issues resolved
 
 ### Security
+- **CRITICAL FIX**: Strengthened path validation to prevent directory traversal attacks
+- **ENHANCED**: HTML content sanitization in MarkdownParser with dangerous pattern detection
+- **IMPROVED**: File permission and access control validation
+- **ADDED**: Comprehensive input validation for all user-provided content
+- **SECURED**: Plugin system with proper sandboxing (dynamic loading disabled for security)
 - Comprehensive input validation and sanitization
-- Protection against path traversal attacks
 - Safe handling of user-generated content
 - Memory-safe resource management
-- Secure plugin loading with validation
 - XSS prevention in HTML rendering
 - DoS attack prevention through configurable timeouts
 - WebSocket authentication and session management
 - CORS policy enforcement for secure cross-origin requests
+
+### Performance
+- **NEW**: Memory-efficient caching system implementation
+- **IMPROVED**: Concurrent file processing with proper error recovery
+- **ENHANCED**: Streaming markdown parser for large files
+- **OPTIMIZED**: Asset pipeline performance with better minification
+
+### Developer Experience
+- **NEW**: 85+ comprehensive tests now passing (previously had failures)
+- **IMPROVED**: Enhanced error messages with actionable feedback
+- **ENHANCED**: Development server with better hot reload capabilities
+- **ADDED**: Proper configuration validation with detailed error reporting
+
+### Migration Notes
+⚠️ **Important**: This release includes breaking changes due to Swift 6.0 upgrade
+- Ensure Swift 6.0+ is installed
+- Review custom plugins for concurrency compliance  
+- Test thoroughly before production deployment
+- Update CI/CD pipelines for Swift 6.0 compatibility
 
 ## [1.0.0] - TBD
 

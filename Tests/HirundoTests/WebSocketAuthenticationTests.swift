@@ -1,6 +1,7 @@
 import XCTest
 import Foundation
 @testable import HirundoCore
+@preconcurrency import Swifter
 
 /// Test class for WebSocket authentication functionality
 /// Tests secure token-based authentication for WebSocket connections in development server

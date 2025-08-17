@@ -346,7 +346,7 @@ struct BuildCommand: ParsableCommand {
     @Flag(name: .long, help: "Continue building even if some files fail (error recovery mode)")
     var continueOnError: Bool = false
     
-    mutating func run() throws {
+    mutating func run() async throws {
         let currentDirectory = FileManager.default.currentDirectoryPath
         
         print("🔨 Building site...")
@@ -356,7 +356,7 @@ struct BuildCommand: ParsableCommand {
             
             if continueOnError {
                 // Use build with recovery mode
-                let result = try generator.buildWithRecovery(clean: clean, includeDrafts: drafts)
+                let result = try await generator.buildWithRecovery(clean: clean, includeDrafts: drafts)
                 
                 if result.success {
                     print("✅ Site built successfully!")
@@ -385,7 +385,7 @@ struct BuildCommand: ParsableCommand {
                 }
             } else {
                 // Use standard build (fails on first error)
-                try generator.build(clean: clean, includeDrafts: drafts)
+                try await generator.build(clean: clean, includeDrafts: drafts)
                 
                 print("✅ Site built successfully!")
                 print("📁 Output directory: \(currentDirectory)/_site")
@@ -415,14 +415,14 @@ struct ServeCommand: ParsableCommand {
     @Flag(name: .long, help: "Don't open browser")
     var noBrowser: Bool = false
     
-    mutating func run() throws {
+    mutating func run() async throws {
         let currentDirectory = FileManager.default.currentDirectoryPath
         
         // First, build the site
         print("🔨 Building site...")
         do {
             let generator = try SiteGenerator(projectPath: currentDirectory)
-            try generator.build()
+            try await generator.build()
         } catch {
             handleError(error, context: "Build")
             throw ExitCode.failure
@@ -469,7 +469,7 @@ struct ServeCommand: ParsableCommand {
         
         // Start server
         do {
-            try server.start()
+            try await server.start()
         } catch {
             handleError(error, context: "Server start")
             throw ExitCode.failure

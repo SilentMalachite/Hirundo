@@ -2,57 +2,7 @@ import Foundation
 import Stencil
 import PathKit
 
-// String extension for slugification (shared with SiteGenerator)
-extension String {
-    func slugify(maxLength: Int = 100) -> String {
-        // Step 1: Convert to lowercase and trim
-        var slug = self.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Step 2: Replace spaces and common separators with hyphens
-        slug = slug.replacingOccurrences(of: #"[\s\-_\+]+"#, with: "-", options: .regularExpression)
-        
-        // Step 3: Remove or replace dangerous characters for URLs
-        // Keep letters (including Unicode), numbers, and hyphens
-        // Remove only truly problematic characters for URLs
-        let allowedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-"))
-        slug = slug.unicodeScalars.compactMap { scalar in
-            if allowedCharacters.contains(scalar) {
-                return String(scalar)
-            } else if scalar.value == 0x20 || scalar.value == 0x5F { // space or underscore
-                return "-"
-            } else if scalar.properties.isAlphabetic || CharacterSet.decimalDigits.contains(scalar) {
-                // Keep Unicode letters and numbers (Japanese, Chinese, etc.)
-                return String(scalar)
-            } else {
-                return nil
-            }
-        }.joined()
-        
-        // Step 4: Handle multiple consecutive hyphens
-        slug = slug.replacingOccurrences(of: #"\-+"#, with: "-", options: .regularExpression)
-        
-        // Step 5: Remove leading and trailing hyphens
-        slug = slug.replacingOccurrences(of: #"^-+|-+$"#, with: "", options: .regularExpression)
-        
-        // Step 6: Ensure slug is not empty
-        if slug.isEmpty {
-            slug = "untitled"
-        }
-        
-        // Step 7: Limit length if needed
-        if slug.count > maxLength {
-            let endIndex = slug.index(slug.startIndex, offsetBy: maxLength)
-            slug = String(slug[..<endIndex])
-            
-            // Make sure we don't end with a hyphen after truncation
-            slug = slug.replacingOccurrences(of: #"-+$"#, with: "", options: .regularExpression)
-        }
-        
-        return slug
-    }
-}
-
-public class TemplateEngine {
+public class TemplateEngine: @unchecked Sendable {
     private var environment: Environment
     private let templatesDirectory: String
     private var cache: [String: (template: Template, addedAt: Date)] = [:]
@@ -127,6 +77,45 @@ public class TemplateEngine {
     public func registerCustomFilters() {
         // Filters are already registered in init
         // This method exists for compatibility with tests
+    }
+    
+    /// Validate template syntax without rendering
+    public func validateTemplate(name: String) throws {
+        let templatePath = Path(templatesDirectory) + name
+        guard templatePath.exists else {
+            throw TemplateEngineError.templateNotFound(name)
+        }
+        
+        do {
+            let templateContent: String = try templatePath.read()
+            _ = environment.templateClass.init(templateString: templateContent, environment: environment)
+        } catch {
+            throw TemplateEngineError.syntaxError(name, error.localizedDescription)
+        }
+    }
+    
+    /// Validate all templates in the templates directory
+    public func validateAllTemplates() throws {
+        let templatesPath = Path(templatesDirectory)
+        guard templatesPath.exists else {
+            throw TemplateEngineError.templatesDirectoryNotFound(templatesDirectory)
+        }
+        
+        var errors: [String] = []
+        
+        for file in try templatesPath.recursiveChildren() {
+            if file.extension == "html" || file.extension == "stencil" {
+                do {
+                    try validateTemplate(name: file.lastComponent)
+                } catch {
+                    errors.append("Template \(file.lastComponent): \(error.localizedDescription)")
+                }
+            }
+        }
+        
+        if !errors.isEmpty {
+            throw TemplateEngineError.multipleValidationErrors(errors)
+        }
     }
     
     private func getTemplate(name: String) throws -> Template {
@@ -332,6 +321,28 @@ public class TemplateEngine {
             }
             
             return formatter.string(from: date)
+        }
+    }
+}
+
+// MARK: - Template Engine Errors
+
+public enum TemplateEngineError: LocalizedError {
+    case templateNotFound(String)
+    case syntaxError(String, String)
+    case templatesDirectoryNotFound(String)
+    case multipleValidationErrors([String])
+    
+    public var errorDescription: String? {
+        switch self {
+        case .templateNotFound(let name):
+            return "Template not found: \(name)"
+        case .syntaxError(let name, let error):
+            return "Syntax error in template \(name): \(error)"
+        case .templatesDirectoryNotFound(let path):
+            return "Templates directory not found: \(path)"
+        case .multipleValidationErrors(let errors):
+            return "Multiple template validation errors:\n" + errors.joined(separator: "\n")
         }
     }
 }

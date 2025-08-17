@@ -117,6 +117,8 @@ public enum ErrorCategory: String, CaseIterable, Sendable {
     case plugin = "PLUGIN"
     case hotReload = "HOTRELOAD"
     case server = "SERVER"
+    case network = "NETWORK"
+    case filesystem = "FILESYSTEM"
 }
 
 public struct HirundoErrorInfo: HirundoError {
@@ -194,6 +196,18 @@ public struct HirundoErrorInfo: HirundoError {
                 "Server Error",
                 "The development server encountered an issue.",
                 suggestedAction: "Check if the port is already in use or try a different port"
+            )
+        case .network:
+            return formatUserMessage(
+                "Network Error",
+                "A network operation failed.",
+                suggestedAction: "Check your internet connection and try again"
+            )
+        case .filesystem:
+            return formatUserMessage(
+                "File System Error",
+                "A file operation failed.",
+                suggestedAction: "Check file permissions and available disk space"
             )
         }
     }

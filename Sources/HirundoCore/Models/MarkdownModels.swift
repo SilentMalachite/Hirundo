@@ -1,7 +1,7 @@
 import Foundation
 import Markdown
 
-public struct MarkdownParseResult {
+public struct MarkdownParseResult: @unchecked Sendable {
     public let document: Document?
     public let frontMatter: [String: Any]?
     public let content: [MarkdownElement]

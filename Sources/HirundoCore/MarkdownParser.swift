@@ -39,10 +39,33 @@ public class MarkdownParser {
         
         // Extract front matter if present
         if content.hasPrefix("---\n") {
-            let components = content.components(separatedBy: "---\n")
-            if components.count >= 3 {
-                let yamlString = components[1]
-                markdownContent = components[2...].joined(separator: "---\n")
+            // Find the closing front matter delimiter
+            let patterns = ["\n---\n", "\n---$"]
+            var endRange: Range<String.Index>? = nil
+            var endPatternLength = 0
+            
+            for pattern in patterns {
+                if pattern.hasSuffix("$") {
+                    // Handle end of string pattern
+                    let actualPattern = String(pattern.dropLast())
+                    if content.hasSuffix(actualPattern) {
+                        endRange = content.range(of: actualPattern, options: .backwards)
+                        endPatternLength = actualPattern.count
+                        break
+                    }
+                } else {
+                    if let range = content.range(of: pattern) {
+                        endRange = range
+                        endPatternLength = pattern.count
+                        break
+                    }
+                }
+            }
+            
+            if let endRange = endRange {
+                let yamlString = String(content[content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound])
+                let remainderStartIndex = content.index(endRange.lowerBound, offsetBy: endPatternLength)
+                markdownContent = remainderStartIndex < content.endIndex ? String(content[remainderStartIndex...]) : ""
                 
                 // Validate YAML front matter size
                 guard yamlString.count <= limits.maxFrontMatterSize else {
@@ -841,13 +864,33 @@ struct HTMLRenderer {
     }
     
     private func removeEventHandlers(_ html: String) -> String {
-        // Remove all on* attributes
+        var sanitized = html
+        
+        // Remove all on* event attributes
         let eventPattern = #"\s*on\w+\s*=\s*["'][^"']*["']"#
-        return html.replacingOccurrences(
+        sanitized = sanitized.replacingOccurrences(
             of: eventPattern,
             with: "",
             options: [.regularExpression, .caseInsensitive]
         )
+        
+        // Remove javascript: URLs
+        let jsPattern = #"javascript\s*:"#
+        sanitized = sanitized.replacingOccurrences(
+            of: jsPattern,
+            with: "blocked:",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        
+        // Remove data: URLs that could contain JavaScript
+        let dataPattern = #"data\s*:\s*[^,]*script[^,]*,"#
+        sanitized = sanitized.replacingOccurrences(
+            of: dataPattern,
+            with: "data:text/plain,blocked",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        
+        return sanitized
     }
     
     private func escapeTextContent(_ html: String) -> String {
