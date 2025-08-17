@@ -2,10 +2,12 @@
 
 Swiftで構築された、モダンで高速、かつセキュアな静的サイトジェネレーター。
 
-[![Swift Version](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
-[![Platform](https://img.shields.io/badge/Platform-macOS%2013%2B%20%7C%20Linux-blue.svg)](https://github.com/SilentMalachite/hirundo)
+[![Swift Version](https://img.shields.io/badge/Swift-6.0+-orange.svg)](https://swift.org)
+[![Platform](https://img.shields.io/badge/Platform-macOS%2014%2B-blue.svg)](https://github.com/SilentMalachite/hirundo)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/SilentMalachite/hirundo/actions)
+[![Security](https://img.shields.io/badge/Security-Audited-green.svg)](SECURITY.md)
+[![Tests](https://img.shields.io/badge/Tests-85%2B%20Passing-brightgreen.svg)](#テスト)
 
 ## 主な機能
 
@@ -19,6 +21,8 @@ Swiftで構築された、モダンで高速、かつセキュアな静的サイ
 - **📦 型安全**: 包括的検証付きの強く型付けされた設定とモデル
 - **⚡ 設定可能**: カスタマイズ可能なセキュリティ制限とパフォーマンス設定
 - **🛡️ メモリ安全**: WebSocket接続とファイル監視の高度なメモリ管理
+- **⏱️ タイムアウト保護**: DoS攻撃防護のための全I/O操作の設定可能タイムアウト
+- **🌐 CORS対応**: 開発サーバーでの設定可能なCORS（Cross-Origin Resource Sharing）サポート
 
 ## クイックスタート
 
@@ -284,9 +288,9 @@ Hirundoは包括的な保護対策でセキュリティを優先しています�
 
 ### 要件
 
-- Swift 5.9+
-- macOS 13+ または Linux
-- Xcode 15+（macOS開発の場合）
+- Swift 6.0+
+- macOS 14+ または Linux
+- Xcode 16+（macOS開発の場合）
 
 ### ソースからビルド
 
@@ -298,9 +302,28 @@ swift build
 
 ### テストの実行
 
+Hirundoは包括的なテストスイートを提供します：
+
 ```bash
+# 全テストを実行
 swift test
+
+# 特定のテストを実行
+swift test --filter SecurityValidatorTests
+swift test --filter EdgeCaseTests
+swift test --filter IntegrationTests
+
+# テストカバレッジの生成
+swift test --enable-code-coverage
 ```
+
+#### テストカテゴリ
+
+- **単体テスト**: 個別コンポーネントのテスト（85+ テスト）
+- **統合テスト**: エンドツーエンドのワークフローテスト
+- **セキュリティテスト**: 脆弱性とセキュリティ検証
+- **エッジケーステスト**: 境界条件と異常ケース
+- **パフォーマンステスト**: メモリとパフォーマンスの検証
 
 ### デバッグモード
 
