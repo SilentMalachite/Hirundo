@@ -334,6 +334,9 @@ public class SiteGenerator {
                 try loadPlugin(pluginConfig, context: pluginContext)
             }
         }
+        
+        // Initialize plugins after registration so hooks can run
+        try pluginManager.initializeAll(context: pluginContext)
     }
     
     private func loadPlugin(_ pluginConfig: HirundoConfig.PluginConfiguration, context: PluginContext) throws {

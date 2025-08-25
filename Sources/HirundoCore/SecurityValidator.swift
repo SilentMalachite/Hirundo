@@ -72,8 +72,8 @@ public class SecurityValidator {
         let normalizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
         let normalizedBase = URL(fileURLWithPath: baseDirectory).standardizedFileURL.path
         
-        // Check if the normalized path starts with the base directory
-        return normalizedPath.hasPrefix(normalizedBase)
+        // Check if the path is exactly the base or a child (boundary-aware)
+        return normalizedPath == normalizedBase || normalizedPath.hasPrefix(normalizedBase + "/")
     }
     
     // Validate file size

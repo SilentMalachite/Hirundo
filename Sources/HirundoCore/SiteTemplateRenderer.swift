@@ -1,6 +1,8 @@
 import Foundation
 
 // Template rendering separated from SiteGenerator
+import CryptoKit
+
 public class SiteTemplateRenderer {
     public let templateEngine: TemplateEngine
     private let config: HirundoConfig
@@ -257,7 +259,7 @@ public class SiteTemplateRenderer {
         pagesCount: Int,
         postsCount: Int
     ) -> String {
-        // Create a hash-based cache key to ensure consistency
+        // Create a stable SHA256-based key
         let keyComponents = [
             content.url.path,
             content.metadata.title,
@@ -265,17 +267,19 @@ public class SiteTemplateRenderer {
             content.metadata.template ?? "default",
             String(pagesCount),
             String(postsCount),
-            String(htmlContent.count) // Use content length as a simple hash
+            String(htmlContent.count)
         ]
-        
-        let combinedKey = keyComponents.joined(separator: "_")
-        return "template_\(combinedKey.hashValue)"
+        let combined = keyComponents.joined(separator: "|")
+        let digest = SHA256.hash(data: Data(combined.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        // Use 32 chars for readability
+        return "template_" + String(hex.prefix(32))
     }
     
     /// Invalidates cache for a specific content piece
     public func invalidateCache(for content: ProcessedContent) async {
-        let pattern = "template_*\(content.url.path)*"
-        await cacheManager.invalidatePattern(pattern)
+        // Invalidate by dependency (content path) to cascade to all dependent entries
+        await cacheManager.invalidate(dependency: content.url.path)
     }
     
     /// Clears all template cache

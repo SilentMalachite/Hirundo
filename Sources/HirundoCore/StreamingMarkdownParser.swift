@@ -65,52 +65,54 @@ public final class StreamingMarkdownParser {
     private func extractFrontMatter(from fileHandle: FileHandle) throws -> (String?, Int) {
         fileHandle.seek(toFileOffset: 0)
         
-        var frontMatter = ""
-        var contentStart = 0
-        var foundStart = false
-        var foundEnd = false
-        var totalRead = 0
-        
-        while totalRead < maxMetadataSize {
-            guard let data = fileHandle.readData(ofLength: 1024) as Data?,
-                  !data.isEmpty else {
-                break
-            }
-            
-            guard let chunk = String(data: data, encoding: .utf8) else {
-                throw MarkdownError.invalidEncoding
-            }
-            
-            let lines = chunk.components(separatedBy: .newlines)
-            
-            for (index, line) in lines.enumerated() {
-                if !foundStart {
-                    if line.trimmingCharacters(in: .whitespaces) == "---" {
-                        foundStart = true
-                        contentStart = totalRead + line.count + 1
-                    }
-                } else if !foundEnd {
-                    if line.trimmingCharacters(in: .whitespaces) == "---" {
-                        foundEnd = true
-                        contentStart = totalRead + chunk.components(separatedBy: "\n")
-                            .prefix(index + 1)
-                            .map { $0.count + 1 }
-                            .reduce(0, +)
-                        break
-                    } else {
-                        frontMatter += line + "\n"
-                    }
-                }
-            }
-            
-            if foundEnd {
-                break
-            }
-            
-            totalRead += data.count
+        // Read up to maxMetadataSize bytes to locate front matter boundaries by byte offset
+        let head = fileHandle.readData(ofLength: maxMetadataSize)
+        if head.count == 0 {
+            return (nil, 0)
         }
         
-        return (foundStart && foundEnd ? frontMatter : nil, contentStart)
+        // Check start marker at beginning of file (--- followed by newline)
+        let startLineLF = Data("---\n".utf8)
+        let startLineCRLF = Data("---\r\n".utf8)
+        var contentStartOffset = 0
+        var searchStartIndex = 0
+        
+        if head.starts(with: startLineLF) {
+            searchStartIndex = startLineLF.count
+        } else if head.starts(with: startLineCRLF) {
+            searchStartIndex = startLineCRLF.count
+        } else {
+            // No front matter
+            return (nil, 0)
+        }
+        
+        // Find end marker on its own line: \n---\n or \r\n---\r\n
+        let endLF = Data("\n---\n".utf8)
+        let endCRLF = Data("\r\n---\r\n".utf8)
+        
+        // Search for LF pattern first
+        var endRange = head.range(of: endLF, options: [], in: searchStartIndex..<head.count)
+        var endLen = endLF.count
+        if endRange == nil {
+            endRange = head.range(of: endCRLF, options: [], in: searchStartIndex..<head.count)
+            endLen = endCRLF.count
+        }
+        
+        guard let end = endRange else {
+            // End marker not found within the metadata size limit
+            return (nil, 0)
+        }
+        
+        // front matter bytes lie between searchStartIndex and end.lowerBound
+        let fmData = head.subdata(in: searchStartIndex..<end.lowerBound)
+        guard let fmString = String(data: fmData, encoding: .utf8) else {
+            throw MarkdownError.invalidEncoding
+        }
+        
+        // content starts right after end marker
+        contentStartOffset = end.lowerBound + endLen
+        
+        return (fmString, contentStartOffset)
     }
     
     /// Parses front matter YAML

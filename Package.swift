@@ -59,7 +59,6 @@ let package = Package(
         .testTarget(
             name: "HirundoTests",
             dependencies: ["HirundoCore"],
-            exclude: ["Pending"],
             swiftSettings: [
                 .swiftLanguageMode(.v6)
             ]

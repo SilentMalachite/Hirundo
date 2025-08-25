@@ -163,6 +163,17 @@ build:
 server:
   port: 8080
   liveReload: true
+  websocketAuth:
+    enabled: true              # ライブリロード用のトークン認証を有効化
+    tokenExpirationMinutes: 60 # トークン有効期限（分）
+    maxActiveTokens: 100       # 最大アクティブトークン数
+  cors:
+    enabled: true
+    allowedOrigins: ["http://localhost:*", "https://localhost:*"]
+    allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowedHeaders: ["Content-Type", "Authorization"]
+    maxAge: 3600
+    allowCredentials: false
 
 blog:
   postsPerPage: 10
@@ -331,6 +342,26 @@ swift test --enable-code-coverage
 
 ```bash
 HIRUNDO_LOG_LEVEL=debug hirundo build
+```
+
+### ライブリロード認証の概要
+
+開発サーバーのWebSocket接続はトークンで認証されます：
+
+- トークン取得: `GET /auth-token` → `{ token, expiresIn, endpoint: "/livereload" }`
+- 接続直後にサーバーから `auth_required` が送られます
+- クライアントは `{"type":"auth", "token":"..."}` を送信
+- 成功時 `auth_success`、以降リロードイベントを受信／失敗時は未登録のためイベントは受信しません
+
+`hirundo serve` ではHTMLにクライアントスクリプトが自動挿入され、上記フローが自動で処理されます。
+
+### 付属フィクスチャでのローカル確認
+
+```bash
+cd test-hirundo
+swift run --package-path .. hirundo build --clean
+swift run --package-path .. hirundo serve
+# ブラウザで http://localhost:8080 を開き、test-hirundo/content/ 配下を編集
 ```
 
 ## 技術アーキテクチャ

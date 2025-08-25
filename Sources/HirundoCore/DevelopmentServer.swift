@@ -16,6 +16,7 @@ public final class DevelopmentServer: @unchecked Sendable {
     private let host: String
     private let liveReload: Bool
     private let corsConfig: CorsConfig?
+    private let websocketAuth: WebSocketAuthConfig?
     private let server: HttpServer
     private let fileManager: FileManager
     private var hotReloadManager: HotReloadManager?
@@ -24,17 +25,18 @@ public final class DevelopmentServer: @unchecked Sendable {
     private var cleanupTimer: Timer?
     
     // Authentication properties
-    private var validTokens: Set<String> = []
-    private var expiredTokens: Set<String> = []
+    private var tokenStore: [String: Date] = [:] // token -> expiry
+    private var authenticatedSessions: Set<ObjectIdentifier> = []
     private let authQueue = DispatchQueue(label: "auth.tokens", attributes: .concurrent)
     
-    public init(projectPath: String, port: Int, host: String, liveReload: Bool, corsConfig: CorsConfig? = nil, fileManager: FileManager = .default) {
+    public init(projectPath: String, port: Int, host: String, liveReload: Bool, corsConfig: CorsConfig? = nil, fileManager: FileManager = .default, websocketAuth: WebSocketAuthConfig? = nil) {
         self.fileManager = fileManager
         self.projectPath = projectPath
         self.port = port
         self.host = host
         self.liveReload = liveReload
         self.corsConfig = corsConfig ?? CorsConfig()
+        self.websocketAuth = websocketAuth
         self.server = HttpServer()
         
         setupRoutes()
@@ -65,17 +67,21 @@ public final class DevelopmentServer: @unchecked Sendable {
         server["/auth-token"] = { [weak self] request in
             guard let self = self else { return .internalServerError }
             
-            if request.method == "GET" {
-                let token = self.generateAuthToken()
-                let response = """
-                {
-                    "token": "\(token)",
-                    "endpoint": "/auth-token"
-                }
-                """
-                return .ok(.json(response))
+            guard request.method == "GET" else {
+                return .badRequest(.text("Method not allowed"))
             }
-            return .badRequest(.text("Method not allowed"))
+            
+            let token = self.generateAuthToken()
+            let expiresIn = (self.websocketAuth?.tokenExpirationMinutes ?? 60)
+            let json = """
+            {"token":"\(token)","expiresIn":\(expiresIn),"endpoint":"/livereload"}
+            """
+            var headers = self.getCorsHeaders(for: request)
+            headers["Content-Type"] = "application/json; charset=utf-8"
+            let data = Data(json.utf8)
+            return .raw(200, "OK", headers) { writer in
+                try writer.write(data)
+            }
         }
         
         // Main route handler for static files
@@ -84,16 +90,38 @@ public final class DevelopmentServer: @unchecked Sendable {
         }
         
         if liveReload {
-            // WebSocket endpoint for live reload
+            // WebSocket endpoint for live reload with auth
             server["/livereload"] = websocket(
                 text: { [weak self] session, text in
-                    // Simple ping/pong for keepalive
-                    if text == "ping" {
+                    guard let self = self else { return }
+                    // Handle JSON messages for auth / control
+                    if let data = text.data(using: .utf8),
+                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let type = obj["type"] as? String {
+                        if type == "auth" {
+                            let token = obj["token"] as? String
+                            if self.authenticateWebSocketConnection(session, token: token) {
+                                let id = ObjectIdentifier(session)
+                                self.authenticatedSessions.insert(id)
+                                self.addWebSocketSession(session)
+                                session.writeText("{\"type\":\"auth_success\",\"message\":\"Authentication successful\"}")
+                            } else {
+                                session.writeText("{\"type\":\"auth_error\",\"message\":\"Invalid or expired token\"}")
+                                // Swifter's WebSocketSession may not expose a close API in this version.
+                                // We simply don't register the session; it won't receive reload events.
+                            }
+                            return
+                        }
+                    }
+                    // Simple ping/pong for keepalive (only after auth)
+                    let id = ObjectIdentifier(session)
+                    if text == "ping" && self.authenticatedSessions.contains(id) {
                         session.writeText("pong")
                     }
                 },
                 connected: { [weak self] session in
-                    self?.handleWebSocketConnection(session)
+                    // Send authentication challenge on connect
+                    self?.sendAuthChallenge(session)
                 }
             )
         }
@@ -102,11 +130,30 @@ public final class DevelopmentServer: @unchecked Sendable {
     // MARK: - Authentication Methods
     
     public func generateAuthToken() -> String {
-        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "") + 
-                   String(arc4random_uniform(999999)).padLeft(toLength: 6, withPad: "0")
+        // Generate secure alphanumeric token (length 40)
+        let chars = Array("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        var token = String()
+        token.reserveCapacity(40)
+        for _ in 0..<40 {
+            let idx = Int(arc4random_uniform(UInt32(chars.count)))
+            token.append(chars[idx])
+        }
         
-        authQueue.async(flags: .barrier) { [weak self] in
-            self?.validTokens.insert(token)
+        let minutes = websocketAuth?.tokenExpirationMinutes ?? 60
+        let expiry = Date().addingTimeInterval(TimeInterval(minutes * 60))
+        
+        authQueue.async(flags: .barrier) { [weak self, token, expiry] in
+            guard let self = self else { return }
+            // Enforce max active tokens
+            let maxTokens = self.websocketAuth?.maxActiveTokens ?? 100
+            if self.tokenStore.count >= maxTokens {
+                // Remove the earliest-expiring tokens
+                let sorted = self.tokenStore.sorted { $0.value < $1.value }
+                for (k, _) in sorted.prefix(self.tokenStore.count - maxTokens + 1) {
+                    self.tokenStore.removeValue(forKey: k)
+                }
+            }
+            self.tokenStore[token] = expiry
         }
         
         return token
@@ -120,19 +167,28 @@ public final class DevelopmentServer: @unchecked Sendable {
         guard !token.isEmpty else { return false }
         
         return authQueue.sync {
-            return validTokens.contains(token) && !expiredTokens.contains(token)
+            if let expiry = tokenStore[token] {
+                if expiry > Date() {
+                    return true
+                } else {
+                    // Expired
+                    tokenStore.removeValue(forKey: token)
+                    return false
+                }
+            }
+            return false
         }
     }
     
     public func authenticateWebSocketConnection(_ session: Any, token: String?) -> Bool {
+        guard websocketAuth?.enabled ?? true else { return true }
         guard let token = token else { return false }
         return validateAuthToken(token)
     }
     
     public func expireAuthToken(_ token: String) {
         authQueue.async(flags: .barrier) { [weak self] in
-            self?.expiredTokens.insert(token)
-            self?.validTokens.remove(token)
+            self?.tokenStore.removeValue(forKey: token)
         }
     }
     
@@ -161,15 +217,14 @@ public final class DevelopmentServer: @unchecked Sendable {
     }
     
     private func handleWebSocketConnection(_ session: WebSocketSession) {
-        addWebSocketSession(session)
-        
-        // Send initial connection success
-        session.writeText("""
-        {
-            "type": "connected",
-            "message": "Live reload connected"
-        }
-        """)
+        // Authentication is required before adding to broadcast list
+        sendAuthChallenge(session)
+    }
+
+    
+    private func sendAuthChallenge(_ session: WebSocketSession) {
+        let message = "{\"type\":\"auth_required\",\"message\":\"Please provide authentication token\"}"
+        session.writeText(message)
     }
     
     private func getCorsHeaders(for request: HttpRequest) -> [String: String] {
@@ -249,24 +304,43 @@ public final class DevelopmentServer: @unchecked Sendable {
                     let liveReloadScript = """
                     <script>
                     (function() {
-                        const ws = new WebSocket('ws://\(host):\(port)/livereload');
-                        ws.onmessage = function(event) {
-                            const data = JSON.parse(event.data);
-                            if (data.type === 'reload') {
-                                window.location.reload();
-                            } else if (data.type === 'error') {
-                                console.error('Build error:', data.message);
+                        async function initLiveReload() {
+                            try {
+                                const resp = await fetch('/auth-token', { method: 'GET', credentials: 'include' });
+                                const info = await resp.json();
+                                const token = info.token;
+                                const ws = new WebSocket('ws://\(host):\(port)/livereload');
+                                ws.onopen = function() {
+                                    ws.send(JSON.stringify({ type: 'auth', token }));
+                                };
+                                ws.onmessage = function(event) {
+                                    try {
+                                        const data = JSON.parse(event.data);
+                                        if (data.type === 'auth_success') {
+                                            // authenticated
+                                        } else if (data.type === 'reload') {
+                                            window.location.reload();
+                                        } else if (data.type === 'error') {
+                                            console.error('Build error:', data.message);
+                                        } else if (data.type === 'auth_error') {
+                                            console.error('LiveReload auth failed.');
+                                        }
+                                    } catch (_) { /* ignore */ }
+                                };
+                                ws.onclose = function() {
+                                    setTimeout(() => window.location.reload(), 2000);
+                                };
+                                // Ping every 30 seconds to keep connection alive
+                                setInterval(() => {
+                                    if (ws.readyState === WebSocket.OPEN) {
+                                        ws.send('ping');
+                                    }
+                                }, 30000);
+                            } catch (e) {
+                                console.error('LiveReload init failed:', e);
                             }
-                        };
-                        ws.onclose = function() {
-                            setTimeout(() => window.location.reload(), 2000);
-                        };
-                        // Ping every 30 seconds to keep connection alive
-                        setInterval(() => {
-                            if (ws.readyState === WebSocket.OPEN) {
-                                ws.send('ping');
-                            }
-                        }, 30000);
+                        }
+                        initLiveReload();
                     })();
                     </script>
                     """
@@ -373,6 +447,7 @@ public final class DevelopmentServer: @unchecked Sendable {
     
     // Periodic cleanup of disconnected sessions
     private func performPeriodicCleanup() {
+        // Cleanup sessions
         sessionsQueue.async(flags: .barrier) { [weak self] in
             guard let self = self else { return }
             let initialCount = self.websocketSessions.count
@@ -382,6 +457,12 @@ public final class DevelopmentServer: @unchecked Sendable {
             if cleanedCount > 0 {
                 print("🧹 Cleaned up \(cleanedCount) disconnected WebSocket sessions")
             }
+        }
+        // Cleanup expired tokens
+        authQueue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
+            let now = Date()
+            self.tokenStore = self.tokenStore.filter { _, expiry in expiry > now }
         }
     }
     
