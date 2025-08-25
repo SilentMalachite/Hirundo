@@ -49,7 +49,7 @@ struct HirundoCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "hirundo",
         abstract: "A modern, fast, and secure static site generator built with Swift",
-        version: "1.0.0",
+        version: "1.0.1",
         subcommands: [
             InitCommand.self,
             BuildCommand.self,
@@ -738,4 +738,3 @@ struct CleanCommand: ParsableCommand {
         print("✨ Clean complete!")
     }
 }
-
