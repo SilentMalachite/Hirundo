@@ -5,7 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 2025-08-17
+## [Unreleased]
+
+## [1.0.1] - 2025-08-26
+
+### Added
+- Development server: token-based WebSocket authentication flow with `/auth-token` endpoint and CORS headers
+
+### Changed
+- Streaming markdown parser: front matter extraction is now byte-accurate to avoid multibyte offset drift
+- Template renderer cache: stable SHA256-based cache keys; dependency-based invalidation
+
+### Fixed
+- Plugin system: ensure plugins are initialized so hooks run (`initializeAll(context:)` wired in `SiteGenerator`)
+- Security: `isPathSafe` now verifies exact base or subpath (boundary-aware check)
 
 ### Added
 - **NEW**: Comprehensive EdgeCase test suite (85+ tests) for robust error handling
@@ -90,7 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Test thoroughly before production deployment
 - Update CI/CD pipelines for Swift 6.0 compatibility
 
-## [1.0.0] - TBD
+## [1.0.0] - 2025-08-17
 
 ### Added
 - Initial release of Hirundo static site generator

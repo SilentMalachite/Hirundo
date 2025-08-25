@@ -428,18 +428,20 @@ struct ServeCommand: ParsableCommand {
             throw ExitCode.failure
         }
         
-        // Load config to get CORS settings
+        // Load config to get CORS and WebSocket auth settings
         let configPath = URL(fileURLWithPath: currentDirectory).appendingPathComponent("config.yaml")
         var corsConfig: CorsConfig? = nil
+        var wsAuthConfig: WebSocketAuthConfig? = nil
         
         if FileManager.default.fileExists(atPath: configPath.path) {
             do {
                 let config = try HirundoConfig.load(from: configPath)
                 corsConfig = config.server.cors
+                wsAuthConfig = config.server.websocketAuth
             } catch {
                 // Don't show stack trace for config loading during serve
-                print("⚠️ Could not load CORS settings from config.yaml")
-                print("Using default CORS configuration")
+                print("⚠️ Could not load server settings from config.yaml")
+                print("Using default server configuration")
             }
         }
         
@@ -449,7 +451,9 @@ struct ServeCommand: ParsableCommand {
             port: port,
             host: host,
             liveReload: !noReload,
-            corsConfig: corsConfig
+            corsConfig: corsConfig,
+            fileManager: .default,
+            websocketAuth: wsAuthConfig
         )
         
         let url = "http://\(host):\(port)"

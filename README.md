@@ -163,6 +163,10 @@ build:
 server:
   port: 8080
   liveReload: true
+  websocketAuth:
+    enabled: true              # Enable token-based auth for live reload
+    tokenExpirationMinutes: 60 # Token lifetime (minutes)
+    maxActiveTokens: 100       # Max concurrent tokens
   cors:
     enabled: true
     allowedOrigins: ["http://localhost:*", "https://localhost:*"]
@@ -301,6 +305,35 @@ Hirundo prioritizes security with comprehensive protection measures:
 - **Timeout Protection**: Configurable timeouts for all I/O operations to prevent DoS attacks
 - **Error Isolation**: Secure error reporting without information leakage
 - **File Watching**: Safe file system monitoring with cleanup
+
+### Live Reload Authentication
+Hirundo authenticates live reload WebSocket connections during development:
+
+- Token endpoint: `GET /auth-token` returns `{ token, expiresIn, endpoint: "/livereload" }`
+- Server sends `{"type":"auth_required"}` after TCP connect
+- Client responds with `{"type":"auth", "token":"..."}`
+- On success, server replies `{"type":"auth_success"}` and the connection will receive reload events
+- On failure, the session is not registered and will not receive events (an `auth_error` message is sent)
+
+The injected client script in HTML handles this flow automatically when `serve` is used.
+
+Quick check from a terminal:
+
+```bash
+curl -i http://localhost:8080/auth-token
+```
+
+You should see a 200 JSON containing a `token`.
+
+### Local Verification with Fixture
+You can quickly verify end-to-end using the provided fixture:
+
+```bash
+cd test-hirundo
+swift run --package-path .. hirundo build --clean
+swift run --package-path .. hirundo serve
+# open http://localhost:8080 and edit files under test-hirundo/content/
+```
 
 ## Development
 

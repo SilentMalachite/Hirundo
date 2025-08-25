@@ -162,6 +162,16 @@ public actor MemoryEfficientCacheManager {
         dependencyIndex.removeAll()
         statistics = CacheStatistics()
     }
+
+    
+    /// Invalidate all entries that depend on the given dependency key (e.g., a content path)
+    public func invalidate(dependency: String) async {
+        if let dependents = dependencyIndex[dependency] {
+            for key in dependents {
+                await invalidate(key: key, cascade: true)
+            }
+        }
+    }
     
     // MARK: - Private Methods
     
