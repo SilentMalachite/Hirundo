@@ -1,4 +1,5 @@
 import Foundation
+import Security
 @preconcurrency import Swifter
 
 // Weak wrapper for WebSocket sessions to prevent memory leaks
@@ -73,14 +74,20 @@ public final class DevelopmentServer: @unchecked Sendable {
             
             let token = self.generateAuthToken()
             let expiresIn = (self.websocketAuth?.tokenExpirationMinutes ?? 60)
-            let json = """
-            {"token":"\(token)","expiresIn":\(expiresIn),"endpoint":"/livereload"}
-            """
             var headers = self.getCorsHeaders(for: request)
             headers["Content-Type"] = "application/json; charset=utf-8"
-            let data = Data(json.utf8)
-            return .raw(200, "OK", headers) { writer in
-                try writer.write(data)
+            let payload: [String: Any] = [
+                "token": token,
+                "expiresIn": expiresIn,
+                "endpoint": "/livereload"
+            ]
+            do {
+                let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+                return .raw(200, "OK", headers) { writer in
+                    try writer.write(data)
+                }
+            } catch {
+                return .internalServerError
             }
         }
         
@@ -130,12 +137,18 @@ public final class DevelopmentServer: @unchecked Sendable {
     // MARK: - Authentication Methods
     
     public func generateAuthToken() -> String {
-        // Generate secure alphanumeric token (length 40)
+        // Generate secure alphanumeric token (length 40) using SecRandom
         let chars = Array("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        let count = chars.count
+        let maxUnbiased = (256 / count) * count // rejection sampling threshold
         var token = String()
         token.reserveCapacity(40)
-        for _ in 0..<40 {
-            let idx = Int(arc4random_uniform(UInt32(chars.count)))
+        while token.count < 40 {
+            var byte: UInt8 = 0
+            let status = SecRandomCopyBytes(kSecRandomDefault, 1, &byte)
+            if status != errSecSuccess { continue }
+            if byte >= maxUnbiased { continue }
+            let idx = Int(byte) % count
             token.append(chars[idx])
         }
         
@@ -249,7 +262,7 @@ public final class DevelopmentServer: @unchecked Sendable {
                 let escapedPattern = NSRegularExpression.escapedPattern(for: allowedOrigin)
                 let pattern = escapedPattern.replacingOccurrences(of: "\\*", with: ".*")
                 if let regex = try? NSRegularExpression(pattern: "^" + pattern + "$", options: []),
-                   regex.firstMatch(in: origin, options: [], range: NSRange(location: 0, length: origin.count)) != nil {
+                   regex.firstMatch(in: origin, options: [], range: NSRange(origin.startIndex..., in: origin)) != nil {
                     isOriginAllowed = true
                     break
                 }
