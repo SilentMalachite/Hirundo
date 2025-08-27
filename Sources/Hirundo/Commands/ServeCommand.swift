@@ -1,8 +1,11 @@
 import ArgumentParser
 import HirundoCore
 import Foundation
+#if os(macOS)
+import AppKit
+#endif
 
-struct ServeCommand: ParsableCommand {
+struct ServeCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "serve",
         abstract: "Start development server with live reload"
@@ -20,8 +23,8 @@ struct ServeCommand: ParsableCommand {
     @Flag(name: .long, help: "Don't open browser")
     var noBrowser: Bool = false
     
-    mutating func run() throws {
-        print("🌐 Starting development server...")
+    mutating func run() async throws {
+        print("🌐 Starting development server…")
         print("🏠 Host: \(host)")
         print("🔌 Port: \(port)")
         print("🔄 Live reload: \(!noReload ? "enabled" : "disabled")")
@@ -29,19 +32,32 @@ struct ServeCommand: ParsableCommand {
         
         let currentDirectory = FileManager.default.currentDirectoryPath
         
-        // Test SiteGenerator initialization
         do {
-            print("🔧 Initializing SiteGenerator...")
+            // Validate configuration
             _ = try SiteGenerator(projectPath: currentDirectory)
-            print("✅ SiteGenerator initialized successfully!")
+            
+            let server = DevelopmentServer(
+                projectPath: currentDirectory,
+                port: port,
+                host: host,
+                liveReload: !noReload
+            )
+            try await server.start()
+            print("✅ Development server is running at http://\(host):\(port)")
+            
+            #if os(macOS)
+            if !noBrowser, let url = URL(string: "http://\(host):\(port)") {
+                _ = NSWorkspace.shared.open(url)
+            }
+            #endif
+            
+            print("🔚 Press Ctrl+C to stop")
+            while true {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            }
         } catch {
-            print("❌ Failed to initialize SiteGenerator:")
-            print("Error: \(error)")
-            handleError(error, context: "SiteGenerator initialization")
+            handleError(error, context: "Serve")
             throw ExitCode.failure
         }
-        
-        print("✅ Serve command executed successfully!")
-        print("💡 Full implementation would start DevelopmentServer")
     }
 }
