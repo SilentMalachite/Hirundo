@@ -157,6 +157,26 @@ final class SiteGeneratorTests: XCTestCase {
 }
 ```
 
+## Commit Message Convention
+
+We follow Conventional Commits. Examples:
+
+- `feat: add RSS plugin option`
+- `fix: prevent path traversal`
+- `docs: add DEVELOPMENT and TESTING guides`
+- `refactor: simplify template cache keys`
+- `test: cover websocket auth edge cases`
+
+Use imperative tone and scope when helpful, and reference issues when applicable, e.g. `Fixes #123`.
+
+## Pre-PR Checklist
+
+- All tests pass locally: `swift test`
+- Documentation updated as needed (README/ARCHITECTURE/SECURITY/CHANGELOG)
+- Public APIs include `///` docs for new/changed symbols
+- Breaking changes clearly called out in the PR description
+- Changes are minimal, focused, and follow repository conventions
+
 ## Documentation
 
 ### Code Documentation

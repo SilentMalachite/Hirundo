@@ -357,6 +357,15 @@ swift build
 swift test
 ```
 
+## Documentation
+
+- Development Guide: see `DEVELOPMENT.md`
+- Testing Guide: see `TESTING.md`
+- Architecture: see `ARCHITECTURE.md`
+- Security Policy and guidance: see `SECURITY.md` and `WEBSOCKET_AUTHENTICATION.md`
+- Contributing Guide: see `CONTRIBUTING.md`
+- 日本語ドキュメント: `README.ja.md`
+
 ## Testing
 
 Hirundo includes a comprehensive test suite with 85+ tests covering:

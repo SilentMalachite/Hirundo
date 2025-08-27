@@ -344,6 +344,14 @@ swift test --enable-code-coverage
 HIRUNDO_LOG_LEVEL=debug hirundo build
 ```
 
+## ドキュメント
+
+- 開発ガイド: `DEVELOPMENT.md`
+- テストガイド: `TESTING.md`
+- アーキテクチャ: `ARCHITECTURE.md`
+- セキュリティ: `SECURITY.md` と `WEBSOCKET_AUTHENTICATION.md`
+- コントリビューション: `CONTRIBUTING.md`
+
 ### ライブリロード認証の概要
 
 開発サーバーのWebSocket接続はトークンで認証されます：

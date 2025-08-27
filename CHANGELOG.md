@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- docs: DEVELOPMENT.md with local workflows and conventions
+- docs: TESTING.md with structure, coverage expectations, and fixture usage
+
+### Changed
+- docs: README now links to documentation index and Japanese README
+- docs: ARCHITECTURE diagram labels cleaned up for clarity
+- docs: CONTRIBUTING explicitly documents Conventional Commits and pre-PR checklist
+
 ## [1.0.1] - 2025-08-26
 
 ### Added
