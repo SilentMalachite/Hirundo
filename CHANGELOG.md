@@ -20,6 +20,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - devserver: `/auth-token` の JSON 応答生成を `JSONSerialization` へ変更（安全性/保守性の向上）
 - cli: `build --config <file>` で任意ファイル名の設定を正式サポート（`SiteGenerator.init(configURL:)` を追加）
 
+## [1.0.2] - 2025-08-28
+
+### Added
+- cli: `build --config <file>` で任意ファイル名の設定ファイルに対応（`SiteGenerator.init(configURL:)` を追加）
+
+### Changed
+- cli: `build`/`serve` を `HirundoCore` に委譲し本実装へ移行（`AsyncParsableCommand` 化、フラグ反映、非同期待機ループ）
+- cli: ルートコマンドを非同期対応（`AsyncParsableCommand` + availability）にし、実行性を改善
+- ci: GitHub Actions を Swift 6.0 + macOS ランナーに統一
+- devserver: `/auth-token` の JSON 応答生成を `JSONSerialization` へ変更（安全性/保守性の向上）
+
+### Security
+- devserver: 認証トークン生成を `SecRandomCopyBytes` に変更（暗号学的強度の確保）
+- devserver: CORS オリジン照合の `NSRange` を `NSRange(origin.startIndex..., in:)` に修正（UTF-16 境界の不整合を解消）
+
+### Fixed
+- cli: 非同期ルート検査の警告解消（availability 付与）
+
 ### Security
 - devserver: 認証トークン生成を `arc4random_uniform` から `SecRandomCopyBytes` に変更（暗号学的強度の確保）
 - devserver: CORS オリジン照合の `NSRange` を `NSRange(origin.startIndex..., in:)` に修正（UTF-16 境界の不整合を解消）
