@@ -15,19 +15,21 @@ public class SiteGenerator {
     private let pluginManager: PluginManager
     private let assetPipeline: AssetPipeline
     
-    public init(projectPath: String, fileManager: FileManager = .default) throws {
+    /// Designated initializer that accepts a resolved configuration
+    /// - Parameters:
+    ///   - projectPath: Root directory of the project (parent of the configuration file)
+    ///   - config: Parsed Hirundo configuration to use
+    ///   - fileManager: FileManager instance (for testing/injection)
+    public init(projectPath: String, config: HirundoConfig, fileManager: FileManager = .default) throws {
         self.projectPath = projectPath
         self.fileManager = fileManager
-        
-        // Load configuration
-        let configPath = URL(fileURLWithPath: projectPath).appendingPathComponent("config.yaml")
-        self.config = try HirundoConfig.load(from: configPath)
-        
+        self.config = config
+
         // Initialize components with single responsibilities
         self.securityValidator = SecurityValidator(projectPath: projectPath, config: config)
         self.contentProcessor = ContentProcessor(config: config, securityValidator: securityValidator)
         self.siteFileManager = SiteFileManager(config: config, securityValidator: securityValidator, projectPath: projectPath, fileManager: fileManager)
-        
+
         let templatesPath = URL(fileURLWithPath: projectPath)
             .appendingPathComponent(config.build.templatesDirectory)
             .path
@@ -36,20 +38,40 @@ public class SiteGenerator {
             config: config,
             securityValidator: securityValidator
         )
-        
+
         self.archiveGenerator = ArchiveGenerator(
             fileManager: siteFileManager,
             templateRenderer: templateRenderer,
             config: config,
             templateEngine: templateRenderer.templateEngine
         )
-        
+
         // Initialize plugin system
         self.pluginManager = PluginManager()
         self.assetPipeline = AssetPipeline(pluginManager: pluginManager)
-        
+
         // Load and configure plugins
         try loadPlugins()
+    }
+
+    /// Convenience initializer using default config filename (config.yaml) under the project path
+    /// - Parameters:
+    ///   - projectPath: Root directory containing config.yaml
+    ///   - fileManager: FileManager instance (for testing/injection)
+    public convenience init(projectPath: String, fileManager: FileManager = .default) throws {
+        let configURL = URL(fileURLWithPath: projectPath).appendingPathComponent("config.yaml")
+        let config = try HirundoConfig.load(from: configURL)
+        try self.init(projectPath: projectPath, config: config, fileManager: fileManager)
+    }
+
+    /// Convenience initializer that loads configuration from an explicit URL
+    /// - Parameters:
+    ///   - configURL: Path to the configuration YAML file (arbitrary filename allowed)
+    ///   - fileManager: FileManager instance (for testing/injection)
+    public convenience init(configURL: URL, fileManager: FileManager = .default) throws {
+        let projectPath = configURL.deletingLastPathComponent().path
+        let config = try HirundoConfig.load(from: configURL)
+        try self.init(projectPath: projectPath, config: config, fileManager: fileManager)
     }
     
     // Main build method - orchestrates the build process

@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - cli: `build`/`serve` を `HirundoCore` に委譲し本実装へ移行（`AsyncParsableCommand` 化、フラグ反映、待機ループの非同期化）
 - ci: GitHub Actions を Swift 6.0 + macOS ランナーに統一
 - devserver: `/auth-token` の JSON 応答生成を `JSONSerialization` へ変更（安全性/保守性の向上）
+- cli: `build --config <file>` で任意ファイル名の設定を正式サポート（`SiteGenerator.init(configURL:)` を追加）
 
 ### Security
 - devserver: 認証トークン生成を `arc4random_uniform` から `SecRandomCopyBytes` に変更（暗号学的強度の確保）

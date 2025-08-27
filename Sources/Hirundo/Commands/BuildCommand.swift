@@ -27,18 +27,16 @@ struct BuildCommand: AsyncParsableCommand {
         let fm = FileManager.default
         let cwd = fm.currentDirectoryPath
         
-        // Resolve projectPath from config option if possible
-        var projectPath = cwd
+        // Resolve configuration URL if provided (supports arbitrary filename)
         let configURL = URL(fileURLWithPath: config, relativeTo: URL(fileURLWithPath: cwd)).standardized
-        if fm.fileExists(atPath: configURL.path) {
-            projectPath = configURL.deletingLastPathComponent().path
-            if configURL.lastPathComponent != "config.yaml" {
-                print("⚠️ Custom config filenames are not yet supported; expecting 'config.yaml'. Using \(configURL.path) only if named 'config.yaml'.")
-            }
-        }
 
         do {
-            let generator = try SiteGenerator(projectPath: projectPath)
+            let generator: SiteGenerator
+            if fm.fileExists(atPath: configURL.path) {
+                generator = try SiteGenerator(configURL: configURL)
+            } else {
+                generator = try SiteGenerator(projectPath: cwd)
+            }
             print("🔨 Building site (env=\(environment), drafts=\(drafts), clean=\(clean))…")
             if continueOnError {
                 let result = try await generator.buildWithRecovery(clean: clean, includeDrafts: drafts)
