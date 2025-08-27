@@ -8,11 +8,10 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        swift-version: ['5.9']
+        swift-version: ['6.0']
     
     steps:
     - uses: actions/checkout@v4
@@ -60,7 +59,7 @@ jobs:
     - name: Setup Swift
       uses: swift-actions/setup-swift@v1
       with:
-        swift-version: '5.9'
+        swift-version: '6.0'
     
     - name: SwiftLint
       run: |
@@ -91,11 +90,8 @@ jobs:
         head: HEAD
 
   build-release:
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
     
     steps:
     - uses: actions/checkout@v4
@@ -103,7 +99,7 @@ jobs:
     - name: Setup Swift
       uses: swift-actions/setup-swift@v1
       with:
-        swift-version: '5.9'
+        swift-version: '6.0'
     
     - name: Build Release
       run: swift build -c release
