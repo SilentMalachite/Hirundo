@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - devserver: `/auth-token` の JSON 応答生成を `JSONSerialization` へ変更（安全性/保守性の向上）
 - cli: `build --config <file>` で任意ファイル名の設定を正式サポート（`SiteGenerator.init(configURL:)` を追加）
 
-## [1.0.2] - 2025-08-28
+## [1.0.3] - 2025-08-28
 
 ### Added
 - cli: `build --config <file>` で任意ファイル名の設定ファイルに対応（`SiteGenerator.init(configURL:)` を追加）
