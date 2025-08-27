@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs: README now links to documentation index and Japanese README
 - docs: ARCHITECTURE diagram labels cleaned up for clarity
 - docs: CONTRIBUTING explicitly documents Conventional Commits and pre-PR checklist
+- cli: `build`/`serve` を `HirundoCore` に委譲し本実装へ移行（`AsyncParsableCommand` 化、フラグ反映、待機ループの非同期化）
+- ci: GitHub Actions を Swift 6.0 + macOS ランナーに統一
+- devserver: `/auth-token` の JSON 応答生成を `JSONSerialization` へ変更（安全性/保守性の向上）
+
+### Security
+- devserver: 認証トークン生成を `arc4random_uniform` から `SecRandomCopyBytes` に変更（暗号学的強度の確保）
+- devserver: CORS オリジン照合の `NSRange` を `NSRange(origin.startIndex..., in:)` に修正（UTF-16 境界の不整合を解消）
+
+### Fixed
+- cli: `serve` 実装で `RunLoop.main.run()` を非同期文脈から呼べない問題を回避（非同期待機ループへ置換）
 
 ## [1.0.1] - 2025-08-26
 
