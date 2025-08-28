@@ -209,12 +209,23 @@ public class HTMLSanitizer {
             return html
         }
         
-        return regex.stringByReplacingMatches(in: html, options: [], range: NSRange(location: 0, length: html.count)) { match, _, _ in
-            let attributeName = (html as NSString).substring(with: match.range(at: 1))
-            let url = (html as NSString).substring(with: match.range(at: 2))
-            let sanitizedURL = sanitizeURL(url)
-            return "\(attributeName)=\"\(sanitizedURL)\""
+        let ns = html as NSString
+        var result = html
+        let matches = regex.matches(in: html, options: [], range: NSRange(location: 0, length: ns.length))
+        
+        // Replace from end to start to avoid range invalidation
+        for match in matches.reversed() {
+            let name = ns.substring(with: match.range(at: 1))
+            let url = ns.substring(with: match.range(at: 2))
+            let sanitized = sanitizeURL(url)
+            let replacement = "\(name)=\"\(sanitized)\""
+            let fullRange = match.range
+            let start = result.index(result.startIndex, offsetBy: fullRange.location)
+            let end = result.index(start, offsetBy: fullRange.length)
+            result.replaceSubrange(start..<end, with: replacement)
         }
+        
+        return result
     }
     
     /// イベントハンドラーを削除

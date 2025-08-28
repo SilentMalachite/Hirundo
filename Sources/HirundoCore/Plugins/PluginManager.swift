@@ -154,7 +154,7 @@ public class PluginManager {
         
         func visit(_ name: String) throws {
             if tempMark.contains(name) {
-                throw PluginError.circularDependency(name)
+                throw PluginError.circularDependency([name])
             }
             if visited.contains(name) {
                 return
@@ -193,5 +193,85 @@ public class PluginManager {
     /// - Parameter context: セキュリティコンテキスト
     public func setSecurityContext(_ context: PluginSecurityContext) {
         self.securityContext = context
+    }
+
+    // MARK: - Convenience configuration APIs used by tests
+    public func setResourceLimit(_ type: ResourceType, value: Double) {
+        switch type {
+        case .memory:
+            self.resourceLimits.memoryLimit = Int(value)
+        case .cpuTime:
+            self.resourceLimits.cpuTimeLimit = value
+        case .fileCount:
+            self.resourceLimits.fileOperationLimit = Int(value)
+        }
+    }
+    
+    public func setAllowedDirectories(_ directories: [String]) {
+        self.securityContext.allowedDirectories = directories
+    }
+    
+    public func enableSandboxing() {
+        self.securityContext.sandboxingEnabled = true
+    }
+
+    /// Processes an asset through all registered plugins in order
+    /// - Parameter asset: The asset to process
+    /// - Returns: The processed asset after all plugins have had a chance
+    public func processAsset(_ asset: AssetItem) throws -> AssetItem {
+        var current = asset
+        guard initialized else { return current }
+        
+        for name in pluginOrder {
+            guard let plugin = plugins[name] else { continue }
+            do {
+                current = try plugin.processAsset(current)
+            } catch {
+                throw PluginError.hookFailed("processAsset", error.localizedDescription)
+            }
+        }
+        return current
+    }
+
+    /// Transforms content through all plugins (before -> transform -> after)
+    /// - Parameter content: The original content item
+    /// - Returns: The transformed content item
+    public func transformContent(_ content: ContentItem) throws -> ContentItem {
+        var current = content
+        guard initialized else { return current }
+        
+        for name in pluginOrder {
+            guard let plugin = plugins[name] else { continue }
+            do {
+                try executeWithSecurity {
+                    current = try plugin.beforeContentTransform(current)
+                    current = try plugin.transformContent(current)
+                    current = try plugin.afterContentTransform(current)
+                }
+            } catch {
+                throw PluginError.hookFailed("transformContent", error.localizedDescription)
+            }
+        }
+        return current
+    }
+
+    /// Allows plugins to enrich template data before rendering
+    /// - Parameter data: Original template data
+    /// - Returns: Enriched template data
+    public func enrichTemplateData(_ data: [String: Any]) throws -> [String: Any] {
+        var current = data
+        guard initialized else { return current }
+        
+        for name in pluginOrder {
+            guard let plugin = plugins[name] else { continue }
+            do {
+                try executeWithSecurity {
+                    current = try plugin.enrichTemplateData(current)
+                }
+            } catch {
+                throw PluginError.hookFailed("enrichTemplateData", error.localizedDescription)
+            }
+        }
+        return current
     }
 }

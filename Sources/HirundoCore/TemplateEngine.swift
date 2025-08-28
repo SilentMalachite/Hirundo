@@ -149,6 +149,9 @@ public class TemplateEngine: @unchecked Sendable {
                 return environment
             }
             
+            // Detect circular inheritance proactively to avoid runtime crashes
+            try detectCircularInheritance(for: name)
+            
             let template = try env.loadTemplate(name: name)
             
             // Enforce cache size limit using LRU eviction
@@ -159,6 +162,70 @@ public class TemplateEngine: @unchecked Sendable {
             cache[name] = (template: template, addedAt: now)
             return template
         }
+    }
+
+    // MARK: - Circular inheritance detection
+    /// Parses the template chain starting at `name` and throws if a cycle is detected.
+    private func detectCircularInheritance(for name: String) throws {
+        var visited = Set<String>()
+        var chain: [String] = []
+        var current: String? = name
+        let rootPath = Path(templatesDirectory)
+        
+        while let templateName = current {
+            // If we've seen this template already, a cycle exists
+            if visited.contains(templateName) {
+                chain.append(templateName)
+                let pathStr = chain.joined(separator: " -> ")
+                throw TemplateError.renderError("Circular template inheritance detected: \(pathStr)")
+            }
+            visited.insert(templateName)
+            chain.append(templateName)
+            
+            // Read the template file content; if missing, stop checking and let loader handle it later
+            let filePath = rootPath + templateName
+            guard filePath.exists else {
+                break
+            }
+            let content: String
+            do {
+                content = try filePath.read()
+            } catch {
+                // If we cannot read, stop cycle detection and let the environment throw a descriptive error
+                break
+            }
+            
+            // Extract parent template from an extends tag with a string literal
+            if let parent = TemplateEngine.parentTemplateName(in: content) {
+                current = parent
+            } else {
+                break
+            }
+        }
+    }
+    
+    /// Extracts the parent template name from an `{% extends "..." %}` or `{% extends '...' %}` tag.
+    private static func parentTemplateName(in content: String) -> String? {
+        // Simple regex to capture quoted literal in extends tag
+        // Supports both double and single quotes
+        let patterns = [
+            #"\{\%\s*extends\s*\"([^\"]+)\"\s*\%\}"#,
+            #"\{\%\s*extends\s*\'([^\']+)\'\s*\%\}"#
+        ]
+        for pattern in patterns {
+            if let range = content.range(of: pattern, options: [.regularExpression]) {
+                let match = String(content[range])
+                // Extract the first quoted group
+                if let quoteStart = match.firstIndex(where: { $0 == "\"" || $0 == "'" }) {
+                    let quote = match[quoteStart]
+                    if let quoteEnd = match[match.index(after: quoteStart)...].firstIndex(of: quote) {
+                        let nameRange = match.index(after: quoteStart)..<quoteEnd
+                        return String(match[nameRange])
+                    }
+                }
+            }
+        }
+        return nil
     }
     
     private func evictOldestCacheEntries() {

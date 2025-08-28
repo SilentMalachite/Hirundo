@@ -70,3 +70,11 @@ public struct List {
     public let items: [String]
     public let isOrdered: Bool
 }
+
+// Convenience extension for tests: HTML from Document
+import Markdown
+public extension Document {
+    var htmlString: String {
+        SimpleHTMLRenderer.render(self)
+    }
+}

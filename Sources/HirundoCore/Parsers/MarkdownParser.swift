@@ -79,17 +79,13 @@ public class MarkdownParser {
             )
         }
         
-        // HTMLをレンダリング
-        let html = htmlRenderer.render(document)
-        
         // 抜粋を生成（フロントマターにない場合）
         let finalExcerpt = excerpt ?? firstParagraph ?? ""
         
         return MarkdownParseResult(
+            document: document,
             frontMatter: frontMatter,
-            content: markdownContent,
-            html: html,
-            elements: elements,
+            content: elements,
             headings: headings,
             links: links,
             images: images,
@@ -128,20 +124,20 @@ public class MarkdownParser {
             let (frontMatter, _, excerpt) = try frontMatterProcessor.extractFrontMatter(from: content)
             return ContentItem(
                 path: path,
-                frontMatter: frontMatter,
-                content: "",
-                html: "",
-                excerpt: excerpt ?? ""
+                frontMatter: frontMatter ?? [:],
+                content: excerpt ?? "",
+                type: .page
             )
         } else {
             // 完全な解析を実行
             let result = try parse(content)
+            let url = URL(fileURLWithPath: path)
+            let type: ContentItem.ContentType = url.pathComponents.contains("posts") ? .post : .page
             return ContentItem(
                 path: path,
-                frontMatter: result.frontMatter,
-                content: result.content,
-                html: result.html,
-                excerpt: result.excerpt
+                frontMatter: result.frontMatter ?? [:],
+                content: result.renderHTML(),
+                type: type
             )
         }
     }

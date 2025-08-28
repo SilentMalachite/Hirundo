@@ -361,7 +361,7 @@ public class SiteGenerator {
         try pluginManager.initializeAll(context: pluginContext)
     }
     
-    private func loadPlugin(_ pluginConfig: HirundoConfig.PluginConfiguration, context: PluginContext) throws {
+    private func loadPlugin(_ pluginConfig: PluginConfiguration, context: PluginContext) throws {
         switch pluginConfig.name {
         case "sitemap":
             let plugin = SitemapPlugin()
@@ -383,7 +383,7 @@ public class SiteGenerator {
         }
     }
     
-    private func configurePlugin(_ plugin: Plugin, with config: HirundoConfig.PluginConfiguration) throws {
+    private func configurePlugin(_ plugin: Plugin, with config: PluginConfiguration) throws {
         if !config.settings.isEmpty {
             let pluginConfig = PluginConfig(name: config.name, enabled: config.enabled, settings: config.settings)
             try plugin.configure(with: pluginConfig)

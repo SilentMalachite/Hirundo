@@ -61,16 +61,16 @@ public class HTMLRenderer {
         switch node {
         case let paragraph as Paragraph:
             return "<p>\(renderInline(paragraph))</p>\n"
-        case let heading as Heading:
+        case let heading as Markdown.Heading:
             let level = heading.level
-            return "<h\(level)>\(renderInline(heading))</h\(level)>\n"
+            return "<h\(level)>\(self.renderInline(heading))</h\(level)>\n"
         case let list as UnorderedList:
-            return "<ul>\n\(list.listItems.map { "<li>\(renderInline($0))</li>" }.joined(separator: "\n"))\n</ul>\n"
+            return "<ul>\n\(list.listItems.map { "<li>\(self.renderInline($0))</li>" }.joined(separator: "\n"))\n</ul>\n"
         case let list as OrderedList:
-            return "<ol>\n\(list.listItems.map { "<li>\(renderInline($0))</li>" }.joined(separator: "\n"))\n</ol>\n"
+            return "<ol>\n\(list.listItems.map { "<li>\(self.renderInline($0))</li>" }.joined(separator: "\n"))\n</ol>\n"
         case let blockquote as BlockQuote:
             return "<blockquote>\n\(blockquote.children.map { renderNode($0) }.joined())</blockquote>\n"
-        case let codeBlock as CodeBlock:
+        case let codeBlock as Markdown.CodeBlock:
             let language = codeBlock.language ?? ""
             let languageAttr = language.isEmpty ? "" : " class=\"language-\(language)\""
             return "<pre><code\(languageAttr)>\(escapeText(codeBlock.code))</code></pre>\n"
@@ -92,11 +92,11 @@ public class HTMLRenderer {
             return "<em>\(emphasis.children.map { renderInline($0) }.joined())</em>"
         case let strong as Strong:
             return "<strong>\(strong.children.map { renderInline($0) }.joined())</strong>"
-        case let link as Link:
+        case let link as Markdown.Link:
             let href = sanitizeURL(link.destination ?? "")
             let title = link.title?.isEmpty == false ? " title=\"\(escapeAttribute(link.title!))\"" : ""
             return "<a href=\"\(href)\"\(title)>\(link.children.map { renderInline($0) }.joined())</a>"
-        case let image as Image:
+        case let image as Markdown.Image:
             let src = sanitizeURL(image.source ?? "")
             let alt = image.plainText
             let title = image.title?.isEmpty == false ? " title=\"\(escapeAttribute(image.title!))\"" : ""
@@ -115,7 +115,8 @@ public class HTMLRenderer {
         var html = "<table>\n"
         
         // ヘッダー
-        if let header = table.head {
+        do {
+            let header = table.head
             html += "<thead>\n<tr>\n"
             for cell in header.cells {
                 html += "<th>\(renderInline(cell))</th>"

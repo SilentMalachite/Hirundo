@@ -1,47 +1,7 @@
 import Foundation
 import CryptoKit
 
-// CSS processing options
-public struct CSSProcessingOptions {
-    public var minify: Bool = false
-    public var autoprefixer: Bool = false
-    public var sourceMap: Bool = false
-    
-    public init(minify: Bool = false, autoprefixer: Bool = false, sourceMap: Bool = false) {
-        self.minify = minify
-        self.autoprefixer = autoprefixer
-        self.sourceMap = sourceMap
-    }
-}
-
-// JavaScript processing options
-public struct JSProcessingOptions {
-    public var minify: Bool = false
-    public var transpile: Bool = false
-    public var sourceMap: Bool = false
-    public var target: String = "es2020"
-    
-    public init(minify: Bool = false, transpile: Bool = false, sourceMap: Bool = false, target: String = "es2020") {
-        self.minify = minify
-        self.transpile = transpile
-        self.sourceMap = sourceMap
-        self.target = target
-    }
-}
-
-
-// Asset concatenation rule
-public struct AssetConcatenationRule {
-    public let pattern: String
-    public let output: String
-    public let separator: String
-    
-    public init(pattern: String, output: String, separator: String = "\n") {
-        self.pattern = pattern
-        self.output = output
-        self.separator = separator
-    }
-}
+// AssetConcatenationRule is defined in Assets/AssetConcatenationRule.swift
 
 // Asset pipeline for processing static assets
 public class AssetPipeline {
@@ -751,21 +711,4 @@ public class AssetPipeline {
     }
 }
 
-// MARK: - AssetPipeline Errors
-
-public enum AssetPipelineError: Error, LocalizedError {
-    case pathTraversalAttempt(String)
-    case unsupportedAssetType(String)
-    case processingFailed(String)
-    
-    public var errorDescription: String? {
-        switch self {
-        case .pathTraversalAttempt(let path):
-            return "Path traversal attempt detected: \(path)"
-        case .unsupportedAssetType(let type):
-            return "Unsupported asset type: \(type)"
-        case .processingFailed(let reason):
-            return "Asset processing failed: \(reason)"
-        }
-    }
-}
+// AssetPipelineError is defined in Assets/AssetPipelineError.swift

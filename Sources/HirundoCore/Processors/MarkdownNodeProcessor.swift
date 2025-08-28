@@ -48,12 +48,12 @@ public class MarkdownNodeProcessor {
             }
             
         case let list as UnorderedList:
-            let items = Array(list.listItems.map { $0.plainText })
+            let items: [String] = list.listItems.map { plainText(for: $0) }
             let l = List(items: items, isOrdered: false)
             elements.append(.list(l))
             
         case let list as OrderedList:
-            let items = Array(list.listItems.map { $0.plainText })
+            let items: [String] = list.listItems.map { plainText(for: $0) }
             let l = List(items: items, isOrdered: true)
             elements.append(.list(l))
             
@@ -103,8 +103,7 @@ public class MarkdownNodeProcessor {
         case let image as Markdown.Image:
             let img = Image(
                 alt: image.plainText,
-                src: image.source ?? "",
-                title: image.title
+                url: image.source ?? ""
             )
             images.append(img)
             
@@ -125,19 +124,41 @@ public class MarkdownNodeProcessor {
         var rows: [[String]] = []
         
         // ヘッダー行を処理
-        if let header = table.head {
-            let headerRow = header.cells.map { $0.plainText }
-            rows.append(headerRow)
-        }
+        let header = table.head
+        let headerRow: [String] = header.cells.map { plainText(for: $0) }
+        let headers = headerRow
         
         // ボディ行を処理
         for row in table.body.rows {
-            let rowData = row.cells.map { $0.plainText }
+            let rowData: [String] = row.cells.map { plainText(for: $0) }
             rows.append(rowData)
         }
         
-        let t = Table(rows: rows)
+        let t = Table(headers: headers, rows: rows)
         tables.append(t)
         elements.append(.table(t))
     }
+
+    // Extract plain text from any markup
+    private func plainText(for markup: Markup) -> String {
+        var visitor = PlainTextVisitor()
+        return visitor.visit(markup)
+    }
+}
+
+// A simple visitor to extract plain text from markup
+private struct PlainTextVisitor: MarkupVisitor {
+    typealias Result = String
+    
+    mutating func defaultVisit(_ markup: any Markup) -> String {
+        var result = ""
+        for child in markup.children {
+            result += visit(child)
+        }
+        return result
+    }
+    
+    mutating func visitText(_ text: Text) -> String { text.string }
+    mutating func visitCodeBlock(_ codeBlock: CodeBlock) -> String { "" }
+    mutating func visitHTMLBlock(_ html: HTMLBlock) -> String { "" }
 }

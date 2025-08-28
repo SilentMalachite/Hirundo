@@ -17,35 +17,20 @@ public struct TimeoutConfig: Codable, Sendable {
         fsEventsTimeout: TimeInterval = 5.0,
         serverStartTimeout: TimeInterval = 30.0
     ) throws {
-        // タイムアウト値の検証（簡素化）
-        let timeouts = [
-            ("fileReadTimeout", fileReadTimeout),
-            ("fileWriteTimeout", fileWriteTimeout),
-            ("directoryOperationTimeout", directoryOperationTimeout),
-            ("httpRequestTimeout", httpRequestTimeout),
-            ("fsEventsTimeout", fsEventsTimeout),
-            ("serverStartTimeout", serverStartTimeout)
-        ]
-        
-        for (name, value) in timeouts {
-            let validatedValue = try ConfigValidation.validateTimeout(value, fieldName: name)
-            switch name {
-            case "fileReadTimeout":
-                self.fileReadTimeout = validatedValue
-            case "fileWriteTimeout":
-                self.fileWriteTimeout = validatedValue
-            case "directoryOperationTimeout":
-                self.directoryOperationTimeout = validatedValue
-            case "httpRequestTimeout":
-                self.httpRequestTimeout = validatedValue
-            case "fsEventsTimeout":
-                self.fsEventsTimeout = validatedValue
-            case "serverStartTimeout":
-                self.serverStartTimeout = validatedValue
-            default:
-                break
-            }
-        }
+        // Validate all values first, then assign
+        let fr = try ConfigValidation.validateTimeout(fileReadTimeout, fieldName: "fileReadTimeout")
+        let fw = try ConfigValidation.validateTimeout(fileWriteTimeout, fieldName: "fileWriteTimeout")
+        let dir = try ConfigValidation.validateTimeout(directoryOperationTimeout, fieldName: "directoryOperationTimeout")
+        let http = try ConfigValidation.validateTimeout(httpRequestTimeout, fieldName: "httpRequestTimeout")
+        let fs = try ConfigValidation.validateTimeout(fsEventsTimeout, fieldName: "fsEventsTimeout")
+        let srv = try ConfigValidation.validateTimeout(serverStartTimeout, fieldName: "serverStartTimeout")
+
+        self.fileReadTimeout = fr
+        self.fileWriteTimeout = fw
+        self.directoryOperationTimeout = dir
+        self.httpRequestTimeout = http
+        self.fsEventsTimeout = fs
+        self.serverStartTimeout = srv
     }
     
     /// デフォルトのタイムアウト設定を作成
