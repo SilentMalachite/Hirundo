@@ -105,3 +105,5 @@ struct NewPageCommand: ParsableCommand {
         print("💡 Full implementation would create the page file")
     }
 }
+
+
