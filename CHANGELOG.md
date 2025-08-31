@@ -5,20 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] - 2025-08-31
 
 ### Added
 - docs: DEVELOPMENT.md with local workflows and conventions
 - docs: TESTING.md with structure, coverage expectations, and fixture usage
+- features: Built-in sitemap/RSS/search-index/minify now configured via `features:` in `config.yaml`
 
 ### Changed
 - docs: README now links to documentation index and Japanese README
 - docs: ARCHITECTURE diagram labels cleaned up for clarity
 - docs: CONTRIBUTING explicitly documents Conventional Commits and pre-PR checklist
+- docs: README/README.ja/SECURITY reflect `features:` instead of `plugins:`
 - cli: `build`/`serve` を `HirundoCore` に委譲し本実装へ移行（`AsyncParsableCommand` 化、フラグ反映、待機ループの非同期化）
 - ci: GitHub Actions を Swift 6.0 + macOS ランナーに統一
 - devserver: `/auth-token` の JSON 応答生成を `JSONSerialization` へ変更（安全性/保守性の向上）
 - cli: `build --config <file>` で任意ファイル名の設定を正式サポート（`SiteGenerator.init(configURL:)` を追加）
+
+### Removed
+- **BREAKING**: Removed complex security features that were over-engineered for a static site generator
+- **BREAKING**: Removed TimeoutManager and timeout configuration (simplified to basic file operations)
+- **BREAKING**: Removed CORS configuration and WebSocket authentication (simplified development server)
+- **BREAKING**: Removed plugin system (Plugin/PluginManager); use built-in features under `features:` instead
+- **BREAKING**: Removed SecurityValidator, FileSecurityUtilities, and AssetSecurityManager
+- **BREAKING**: Removed complex path validation and DoS attack protection features
+- **BREAKING**: Removed WebSocketAuthManager, CORSManager, StaticFileHandler, and WebSocketManager
+
+### Simplified
+- Configuration is now much simpler with only essential settings
+- Development server focuses on basic static file serving and live reload
+- File operations use standard Swift APIs without complex validation layers
+- Template rendering simplified to basic Stencil functionality
+- Removed over 30,000 lines of unnecessary security-related code
 
 ## [1.0.3] - 2025-08-28
 

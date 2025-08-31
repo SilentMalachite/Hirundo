@@ -117,7 +117,7 @@ public class ArchiveGenerator {
     
     private func generateCategoryPage(category: String, posts: [Post], categoriesDir: URL) throws {
         // Create category directory (slugified)
-        let categorySlug = slugify(category)
+        let categorySlug = category.slugify()
         let categoryDir = categoriesDir.appendingPathComponent(categorySlug)
         try fileManager.createDirectory(at: categoryDir)
         
@@ -134,7 +134,7 @@ public class ArchiveGenerator {
     
     private func generateTagPage(tag: String, posts: [Post], tagsDir: URL) throws {
         // Create tag directory (slugified)
-        let tagSlug = slugify(tag)
+        let tagSlug = tag.slugify()
         let tagDir = tagsDir.appendingPathComponent(tagSlug)
         try fileManager.createDirectory(at: tagDir)
         
@@ -159,8 +159,8 @@ public class ArchiveGenerator {
             "categories": categories.sorted().map { category in
                 [
                     "name": category,
-                    "slug": slugify(category),
-                    "url": "/categories/\(slugify(category))/"
+                    "slug": category.slugify(),
+                    "url": "/categories/\(category.slugify())/"
                 ]
             },
             "page": [
@@ -233,8 +233,8 @@ public class ArchiveGenerator {
             "tags": tags.sorted().map { tag in
                 [
                     "name": tag,
-                    "slug": slugify(tag),
-                    "url": "/tags/\(slugify(tag))/"
+                    "slug": tag.slugify(),
+                    "url": "/tags/\(tag.slugify())/"
                 ]
             },
             "page": [
@@ -327,25 +327,5 @@ public class ArchiveGenerator {
         return taggedPosts
     }
     
-    private func slugify(_ text: String) -> String {
-        // Convert to lowercase
-        var slug = text.lowercased()
-        
-        // Replace spaces with hyphens
-        slug = slug.replacingOccurrences(of: " ", with: "-")
-        
-        // Remove special characters
-        let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
-        slug = slug.components(separatedBy: allowedCharacters.inverted).joined()
-        
-        // Remove multiple consecutive hyphens
-        while slug.contains("--") {
-            slug = slug.replacingOccurrences(of: "--", with: "-")
-        }
-        
-        // Remove leading/trailing hyphens
-        slug = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        
-        return slug.isEmpty ? "untitled" : slug
-    }
+    
 }

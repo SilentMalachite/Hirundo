@@ -116,6 +116,12 @@ public class FrontMatterProcessor {
             case is Int, is Double, is Bool:
                 // 数値とブール値は安全
                 break
+            case is Date:
+                // 日付型も安全
+                break
+            case is NSNull:
+                // null値も安全
+                break
             default:
                 throw MarkdownError.invalidFrontMatter("Unsupported type in front matter: \(type(of: value))")
             }

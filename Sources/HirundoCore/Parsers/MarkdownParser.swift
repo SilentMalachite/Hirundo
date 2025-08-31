@@ -80,7 +80,7 @@ public class MarkdownParser {
         }
         
         // 抜粋を生成（フロントマターにない場合）
-        let finalExcerpt = excerpt ?? firstParagraph ?? ""
+        let finalExcerpt = excerpt ?? firstParagraph
         
         return MarkdownParseResult(
             document: document,

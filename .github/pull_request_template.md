@@ -39,8 +39,9 @@ Brief description of the changes introduced by this pull request.
 
 - [ ] Code is self-documenting with clear variable names
 - [ ] Added docstrings for new public APIs
-- [ ] Updated README.md if needed
+- [ ] Updated README.md / README.ja.md if needed
 - [ ] Updated CHANGELOG.md
+- [ ] Configuration examples reflect `features:` (not `plugins:`)
 - [ ] Added examples for new features (if applicable)
 
 ## Checklist

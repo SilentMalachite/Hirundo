@@ -2,27 +2,36 @@
 
 Swiftで構築された、モダンで高速、かつセキュアな静的サイトジェネレーター。
 
-[![Swift Version](https://img.shields.io/badge/Swift-6.0+-orange.svg)](https://swift.org)
-[![Platform](https://img.shields.io/badge/Platform-macOS%2014%2B-blue.svg)](https://github.com/SilentMalachite/hirundo)
+[![Swift Version](https://img.shields.io/badge/Swift-5.9%2B-orange.svg)](https://swift.org)
+[![Platform](https://img.shields.io/badge/Platform-macOS%2012%2B-blue.svg)](https://github.com/SilentMalachite/Hirundo)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/SilentMalachite/hirundo/actions)
-[![Security](https://img.shields.io/badge/Security-Audited-green.svg)](SECURITY.md)
-[![Tests](https://img.shields.io/badge/Tests-85%2B%20Passing-brightgreen.svg)](#テスト)
+[![Build](https://img.shields.io/badge/Build-See_CI-blue.svg)](https://github.com/SilentMalachite/Hirundo/actions)
+[![Security](https://img.shields.io/badge/Security-Policy_Available-lightgrey.svg)](SECURITY.md)
+[![Release](https://img.shields.io/github/v/release/SilentMalachite/Hirundo)](https://github.com/SilentMalachite/Hirundo/releases)
+[![Tests](https://img.shields.io/badge/Tests-Passing-green.svg)](#テスト)
 
 ## 主な機能
 
 - **🚀 高速**: マルチレベルキャッシング付きSwiftによる最適なパフォーマンス
-- **🔒 セキュア**: 包括的な入力検証、パストラバーサル保護、安全なアセット処理
 - **📝 Markdown**: Apple swift-markdownを使用したフロントマター付きCommonMarkサポート
 - **🎨 テンプレート**: カスタムフィルター付きの強力なStencilベースのテンプレートエンジン
 - **🔄 ライブリロード**: 自動再構築とリアルタイムエラー報告機能付き開発サーバー
 - **🧩 拡張可能**: 組み込みプラグイン付きカスタム機能プラグインアーキテクチャ
 - **💾 スマートキャッシング**: 超高速再構築のためのマルチレベルインテリジェントキャッシング
 - **📦 型安全**: 包括的検証付きの強く型付けされた設定とモデル
-- **⚡ 設定可能**: カスタマイズ可能なセキュリティ制限とパフォーマンス設定
+- **⚡ シンプル**: 不要な複雑さのない、クリーンで使いやすい設定
 - **🛡️ メモリ安全**: WebSocket接続とファイル監視の高度なメモリ管理
-- **⏱️ タイムアウト保護**: DoS攻撃防護のための全I/O操作の設定可能タイムアウト
-- **🌐 CORS対応**: 開発サーバーでの設定可能なCORS（Cross-Origin Resource Sharing）サポート
+
+## 目次
+
+- [主な機能](#主な機能)
+- [クイックスタート](#クイックスタート)
+- [設定](#設定)
+- [フロントマター](#フロントマター)
+- [テンプレート](#テンプレート)
+- [開発](#開発)
+- [テスト](#テスト)
+- [ライセンス](#ライセンス)
 
 ## クイックスタート
 
@@ -31,7 +40,7 @@ Swiftで構築された、モダンで高速、かつセキュアな静的サイ
 #### Swift Package Managerを使用
 
 ```bash
-git clone https://github.com/SilentMalachite/hirundo.git
+git clone https://github.com/SilentMalachite/Hirundo.git
 cd hirundo
 swift build -c release
 cp .build/release/hirundo /usr/local/bin/
@@ -163,17 +172,6 @@ build:
 server:
   port: 8080
   liveReload: true
-  websocketAuth:
-    enabled: true              # ライブリロード用のトークン認証を有効化
-    tokenExpirationMinutes: 60 # トークン有効期限（分）
-    maxActiveTokens: 100       # 最大アクティブトークン数
-  cors:
-    enabled: true
-    allowedOrigins: ["http://localhost:*", "https://localhost:*"]
-    allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-    allowedHeaders: ["Content-Type", "Authorization"]
-    maxAge: 3600
-    allowCredentials: false
 
 blog:
   postsPerPage: 10
@@ -182,7 +180,7 @@ blog:
   generateTags: true
   rssEnabled: true
 
-# セキュリティとパフォーマンス制限（オプション）
+# パフォーマンス制限（オプション）
 limits:
   maxMarkdownFileSize: 10485760     # 10MB
   maxConfigFileSize: 1048576        # 1MB
@@ -192,11 +190,9 @@ limits:
   maxDescriptionLength: 500
 
 # プラグイン設定（オプション）
-plugins:
-  - name: "sitemap"
-    enabled: true
-  - name: "rss"
-    enabled: true
+features:
+  sitemap: true
+  rss: true
   - name: "minify"
     enabled: true
     settings:
@@ -299,14 +295,14 @@ Hirundoは包括的な保護対策でセキュリティを優先しています�
 
 ### 要件
 
-- Swift 6.0+
-- macOS 14+ または Linux
+- Swift 5.9+
+- macOS 12+ または Linux
 - Xcode 16+（macOS開発の場合）
 
 ### ソースからビルド
 
 ```bash
-git clone https://github.com/SilentMalachite/hirundo.git
+git clone https://github.com/SilentMalachite/Hirundo.git
 cd hirundo
 swift build
 ```
@@ -320,7 +316,7 @@ Hirundoは包括的なテストスイートを提供します：
 swift test
 
 # 特定のテストを実行
-swift test --filter SecurityValidatorTests
+swift test --filter SiteGeneratorTests
 swift test --filter EdgeCaseTests
 swift test --filter IntegrationTests
 

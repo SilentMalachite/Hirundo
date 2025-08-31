@@ -18,21 +18,12 @@ public class HTMLSanitizer {
         // メタタグを削除
         sanitized = removeMetaTags(sanitized)
         
-        // 危険なHTML5要素を削除
-        sanitized = removeDangerousElements(sanitized)
-        
-        // 残りのタグをクリーンアップ
-        sanitized = cleanTags(sanitized)
-        
-        // hrefとsrc属性のURLをサニタイズ
+        // hrefとsrc属性のURLをサニタイズ（HTMLRendererで生成される安全な属性を補助的に検証）
         sanitized = sanitizeURLs(sanitized)
         
         // 残りのイベントハンドラーを削除
         sanitized = removeEventHandlers(sanitized)
-        
-        // テキストコンテンツの危険な文字をエスケープ
-        sanitized = escapeTextContent(sanitized)
-        
+
         return sanitized
     }
     

@@ -2,27 +2,36 @@
 
 A modern, fast, and secure static site generator built with Swift.
 
-[![Swift Version](https://img.shields.io/badge/Swift-6.0+-orange.svg)](https://swift.org)
-[![Platform](https://img.shields.io/badge/Platform-macOS%2014%2B-blue.svg)](https://github.com/SilentMalachite/hirundo)
+[![Swift Version](https://img.shields.io/badge/Swift-6.0%2B-orange.svg)](https://swift.org)
+[![Platform](https://img.shields.io/badge/Platform-macOS%2012%2B-blue.svg)](https://github.com/SilentMalachite/Hirundo)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/SilentMalachite/hirundo/actions)
-[![Security](https://img.shields.io/badge/Security-Audited-green.svg)](SECURITY.md)
-[![Tests](https://img.shields.io/badge/Tests-85%2B%20Passing-brightgreen.svg)](#testing)
+[![Build](https://img.shields.io/badge/Build-See_CI-blue.svg)](https://github.com/SilentMalachite/Hirundo/actions)
+[![Security](https://img.shields.io/badge/Security-Policy_Available-lightgrey.svg)](SECURITY.md)
+[![Release](https://img.shields.io/github/v/release/SilentMalachite/Hirundo)](https://github.com/SilentMalachite/Hirundo/releases)
+[![Tests](https://img.shields.io/badge/Tests-Passing-green.svg)](#testing)
 
 ## Features
 
 - **🚀 Blazing Fast**: Built with Swift for optimal performance with multi-level caching
-- **🔒 Secure**: Comprehensive input validation, path traversal protection, and safe asset processing  
 - **📝 Markdown**: Full CommonMark support with frontmatter using Apple's swift-markdown
 - **🎨 Templates**: Powerful Stencil-based templating engine with custom filters
 - **🔄 Live Reload**: Development server with automatic rebuilding and real-time error reporting
-- **🧩 Extensible**: Plugin architecture for custom functionality with built-in plugins
+- **🧩 Built-in Features**: Useful capabilities like sitemap/RSS/search/minify are available out of the box
 - **💾 Smart Caching**: Multi-level intelligent caching for lightning-fast rebuilds
 - **📦 Type Safe**: Strongly typed configuration and models with comprehensive validation
-- **⚡ Configurable**: Customizable security limits and performance settings
+- **⚡ Simple**: Clean, easy-to-use configuration without unnecessary complexity
 - **🛡️ Memory Safe**: Advanced memory management for WebSocket connections and file watching
-- **⏱️ Timeout Protection**: Configurable timeouts for all I/O operations to prevent DoS attacks
-- **🌐 CORS Ready**: Configurable Cross-Origin Resource Sharing support for development
+
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Frontmatter](#frontmatter)
+- [Templates](#templates)
+- [Development](#development)
+- [Testing](#testing)
+- [License](#license)
 
 ## Quick Start
 
@@ -31,7 +40,7 @@ A modern, fast, and secure static site generator built with Swift.
 #### Using Swift Package Manager
 
 ```bash
-git clone https://github.com/SilentMalachite/hirundo.git
+git clone https://github.com/SilentMalachite/Hirundo.git
 cd hirundo
 swift build -c release
 cp .build/release/hirundo /usr/local/bin/
@@ -163,17 +172,6 @@ build:
 server:
   port: 8080
   liveReload: true
-  websocketAuth:
-    enabled: true              # Enable token-based auth for live reload
-    tokenExpirationMinutes: 60 # Token lifetime (minutes)
-    maxActiveTokens: 100       # Max concurrent tokens
-  cors:
-    enabled: true
-    allowedOrigins: ["http://localhost:*", "https://localhost:*"]
-    allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-    allowedHeaders: ["Content-Type", "Authorization"]
-    maxAge: 3600
-    allowCredentials: false
 
 blog:
   postsPerPage: 10
@@ -182,7 +180,7 @@ blog:
   generateTags: true
   rssEnabled: true
 
-# Security and performance limits (optional)
+# Performance limits (optional)
 limits:
   maxMarkdownFileSize: 10485760     # 10MB
   maxConfigFileSize: 1048576        # 1MB
@@ -191,27 +189,14 @@ limits:
   maxTitleLength: 200
   maxDescriptionLength: 500
 
-# Plugin configuration (optional)
-plugins:
-  - name: "sitemap"
-    enabled: true
-  - name: "rss"
-    enabled: true
-  - name: "minify"
-    enabled: true
-    settings:
-      minifyHTML: true
-      minifyCSS: true
-      minifyJS: false  # Disabled for safety
+# Features (optional)
+features:
+  sitemap: true
+  rss: true
+  searchIndex: true
+  minify: true
 
-# Timeout configuration (optional)
-timeouts:
-  fileReadTimeout: 30.0              # File read operations (seconds)
-  fileWriteTimeout: 30.0             # File write operations (seconds)
-  directoryOperationTimeout: 15.0    # Directory operations (seconds)
-  httpRequestTimeout: 10.0           # HTTP requests (seconds)
-  fsEventsTimeout: 5.0              # File system events startup (seconds)
-  serverStartTimeout: 30.0          # Server startup (seconds)
+
 ```
 
 ## Frontmatter
@@ -269,61 +254,39 @@ Hirundo uses the [Stencil](https://github.com/stencilproject/Stencil) templating
 {% endblock %}
 ```
 
-## Plugins
+## Features
 
-Hirundo includes several built-in plugins:
+Hirundo provides built-in features. Dynamic loading of external code is not supported for security and simplicity.
 
-### Sitemap Plugin
+### Sitemap
 Generates `sitemap.xml` for search engines.
 
-### RSS Plugin
-Creates RSS feeds for your blog posts.
+### RSS
+Creates `rss.xml` for your blog posts.
 
-### Minify Plugin
-Minifies HTML output for better performance.
+### Minify
+Minifies CSS/JS assets for better performance.
 
-### Search Index Plugin
+### Search Index
 Generates a search index for client-side search functionality.
 
 ## Security Features
 
-Hirundo prioritizes security with comprehensive protection measures:
+Hirundo implements appropriate security measures for a static site generator:
 
 ### Input Validation
-- **File Size Limits**: Configurable limits for markdown files, config files, and frontmatter
-- **Path Validation**: Advanced path traversal protection with symlink resolution
-- **Content Sanitization**: Safe processing of user-generated content
+- **File Size Limits**: Configurable limits for markdown files and frontmatter
+- **Path Validation**: Standard path traversal protection
+- **Content Processing**: Safe processing of user-generated content
 
-### Asset Processing Security
-- **Safe CSS/JS Processing**: Validation before minification to prevent code injection
-- **Disabled JS Transpilation**: Potentially unsafe regex-based transpilation is disabled by default
-- **Path Sanitization**: Comprehensive path cleaning with security checks
+### Asset Processing
+- **CSS/JS Processing**: Standard processing with minification support
+- **Path Sanitization**: Basic path cleaning and validation
 
-### Development Server Security
-- **WebSocket Protection**: Memory-safe WebSocket session management with authentication
-- **CORS Configuration**: Flexible Cross-Origin Resource Sharing controls
-- **Timeout Protection**: Configurable timeouts for all I/O operations to prevent DoS attacks
-- **Error Isolation**: Secure error reporting without information leakage
-- **File Watching**: Safe file system monitoring with cleanup
-
-### Live Reload Authentication
-Hirundo authenticates live reload WebSocket connections during development:
-
-- Token endpoint: `GET /auth-token` returns `{ token, expiresIn, endpoint: "/livereload" }`
-- Server sends `{"type":"auth_required"}` after TCP connect
-- Client responds with `{"type":"auth", "token":"..."}`
-- On success, server replies `{"type":"auth_success"}` and the connection will receive reload events
-- On failure, the session is not registered and will not receive events (an `auth_error` message is sent)
-
-The injected client script in HTML handles this flow automatically when `serve` is used.
-
-Quick check from a terminal:
-
-```bash
-curl -i http://localhost:8080/auth-token
-```
-
-You should see a 200 JSON containing a `token`.
+### Development Server
+- **WebSocket Management**: Clean WebSocket connection handling
+- **Live Reload**: Simple file watching with automatic cleanup
+- **Error Handling**: Secure error reporting
 
 ### Local Verification with Fixture
 You can quickly verify end-to-end using the provided fixture:
@@ -340,13 +303,13 @@ swift run --package-path .. hirundo serve
 ### Requirements
 
 - Swift 6.0+
-- macOS 14+
+- macOS 12+
 - Xcode 16+ (for macOS development)
 
 ### Building from Source
 
 ```bash
-git clone https://github.com/SilentMalachite/hirundo.git
+git clone https://github.com/SilentMalachite/Hirundo.git
 cd hirundo
 swift build
 ```
@@ -368,24 +331,22 @@ swift test
 
 ## Testing
 
-Hirundo includes a comprehensive test suite with 85+ tests covering:
+Hirundo includes a test suite that covers core functionality:
 
-- **Security Tests**: Path traversal protection, input validation, XSS prevention
-- **Edge Case Tests**: Invalid UTF-8, malformed front matter, special characters
-- **Integration Tests**: End-to-end workflow validation
 - **Unit Tests**: Individual component testing
-- **Performance Tests**: Memory usage and timeout validation
-- **Concurrency Tests**: Swift 6.0 compliance verification
+- **Integration Tests**: End-to-end workflow validation
+- **Edge Case Tests**: Error handling and edge case scenarios
 
 ### Test Categories
 
 - `AssetPipelineTests` - Asset processing and minification
-- `ConfigTests` - Configuration validation and parsing  
+- `ConfigTests` - Configuration validation and parsing
 - `ContentProcessorTests` - Markdown processing and validation
 - `EdgeCaseTests` - Error handling and edge case scenarios
-- `SecurityTests` - Security validation and protection
 - `IntegrationTests` - End-to-end functionality
-- `WebSocketAuthenticationTests` - Live reload security
+- `HotReloadManagerTests` - File watching functionality
+
+All tests are expected to pass. Run `swift test` to verify on your environment.
 
 ### Debug Mode
 
@@ -407,14 +368,11 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 
 ### Performance Features
 
-- **Multi-level Caching**: Parsed content, rendered pages, and template caching with intelligent invalidation
+- **Multi-level Caching**: Parsed content, rendered pages, and template caching
 - **Async/Await**: Parallel processing for improved build times
-- **Streaming**: Efficient memory usage for large sites with controlled resource usage
-- **Memory Management**: Advanced WebSocket session cleanup and file handle management
-- **Configurable Limits**: Tunable performance and security limits
-- **Hot Reload**: Fast file system monitoring with FSEvents on macOS and fallback on Linux
-- **Timeout Management**: Comprehensive timeout controls for all operations (0.1s to 600s range)
-- **Resource Protection**: CPU time and memory limits to prevent resource exhaustion
+- **Streaming**: Efficient memory usage for large sites
+- **Memory Management**: Clean resource management and file handle handling
+- **Hot Reload**: File system monitoring with automatic cleanup
 
 ## Contributing
 

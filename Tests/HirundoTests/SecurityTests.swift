@@ -22,7 +22,7 @@ final class SecurityTests: XCTestCase {
         // Set up project structure
         let contentDir = tempDir.appendingPathComponent("content")
         let templatesDir = tempDir.appendingPathComponent("templates")
-        let outputDir = tempDir.appendingPathComponent("_site")
+        let _ = tempDir.appendingPathComponent("_site")
         
         try FileManager.default.createDirectory(at: contentDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: templatesDir, withIntermediateDirectories: true)
@@ -69,6 +69,7 @@ final class SecurityTests: XCTestCase {
             try await generator.build()
             
             // If build succeeds, verify the malicious path wasn't used
+            let outputDir = tempDir.appendingPathComponent("_site")
             let outputFiles = try FileManager.default.contentsOfDirectory(at: outputDir, 
                                                                          includingPropertiesForKeys: nil)
             for file in outputFiles {
@@ -110,7 +111,7 @@ final class SecurityTests: XCTestCase {
         let staticDir = tempDir.appendingPathComponent("static")
         let contentDir = tempDir.appendingPathComponent("content")
         let templatesDir = tempDir.appendingPathComponent("templates")
-        let outputDir = tempDir.appendingPathComponent("_site")
+        let _ = tempDir.appendingPathComponent("_site")
         
         try FileManager.default.createDirectory(at: staticDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: contentDir, withIntermediateDirectories: true)
@@ -162,13 +163,16 @@ final class SecurityTests: XCTestCase {
             let testFile = staticDir.appendingPathComponent("test.txt")
             try maliciousPath.write(to: testFile, atomically: true, encoding: .utf8)
             
-            try await generator.build()
-            
-            // Verify no files were created outside the output directory
+            // Clean up any existing files that might interfere with the test
             let parentDir = tempDir.deletingLastPathComponent()
             let sensitivePath = parentDir.appendingPathComponent("sensitive.txt").path
             let exploitPath = "/tmp/hirundo-exploit"
+            try? FileManager.default.removeItem(atPath: sensitivePath)
+            try? FileManager.default.removeItem(atPath: exploitPath)
             
+            try await generator.build()
+            
+            // Verify no files were created outside the output directory
             // These files should not exist due to path traversal protection
             XCTAssertFalse(FileManager.default.fileExists(atPath: sensitivePath), 
                           "Path traversal protection failed - file created at: \(sensitivePath)")
@@ -223,6 +227,7 @@ final class SecurityTests: XCTestCase {
             try await generator.build()
             
             // Check if the output contains sensitive data
+            let _ = tempDir.appendingPathComponent("_site")
             let outputDir = tempDir.appendingPathComponent("_site")
             if FileManager.default.fileExists(atPath: outputDir.path) {
                 let outputFiles = try FileManager.default.contentsOfDirectory(at: outputDir, 
@@ -239,6 +244,8 @@ final class SecurityTests: XCTestCase {
             // Failing to build when symlinks are present is also acceptable
             print("Build failed with symlink present: \(error)")
         }
+        // Ensure cleanup of the sensitive file to avoid cross-test interference
+        try? FileManager.default.removeItem(at: sensitiveFile)
     }
     
     func testNullByteInjection() async throws {
@@ -309,7 +316,7 @@ final class SecurityTests: XCTestCase {
     func testXSSInMarkdownContent() async throws {
         let contentDir = tempDir.appendingPathComponent("content")
         let templatesDir = tempDir.appendingPathComponent("templates")
-        let outputDir = tempDir.appendingPathComponent("_site")
+        let _ = tempDir.appendingPathComponent("_site")
         
         try FileManager.default.createDirectory(at: contentDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: templatesDir, withIntermediateDirectories: true)
@@ -366,6 +373,7 @@ final class SecurityTests: XCTestCase {
             try await generator.build()
             
             // If build succeeds, check that XSS is sanitized
+            let outputDir = tempDir.appendingPathComponent("_site")
             let outputFile = outputDir.appendingPathComponent("xss-test.html")
             if FileManager.default.fileExists(atPath: outputFile.path) {
                 let outputContent = try String(contentsOf: outputFile)
@@ -397,7 +405,7 @@ final class SecurityTests: XCTestCase {
     func testXSSInFrontMatter() async throws {
         let contentDir = tempDir.appendingPathComponent("content")
         let templatesDir = tempDir.appendingPathComponent("templates")
-        let outputDir = tempDir.appendingPathComponent("_site")
+        let _ = tempDir.appendingPathComponent("_site")
         
         try FileManager.default.createDirectory(at: contentDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: templatesDir, withIntermediateDirectories: true)
@@ -455,6 +463,7 @@ final class SecurityTests: XCTestCase {
             try await generator.build()
             
             // If build succeeds, check that XSS is sanitized
+            let outputDir = tempDir.appendingPathComponent("_site")
             let outputFile = outputDir.appendingPathComponent("xss-frontmatter.html")
             if FileManager.default.fileExists(atPath: outputFile.path) {
                 let outputContent = try String(contentsOf: outputFile)
@@ -628,6 +637,7 @@ final class SecurityTests: XCTestCase {
             try await generator.build()
             
             // Check if the large file was processed
+            let _ = tempDir.appendingPathComponent("_site")
             let outputDir = tempDir.appendingPathComponent("_site")
             let largeOutput = outputDir.appendingPathComponent("large-file.html")
             
@@ -700,4 +710,3 @@ final class SecurityTests: XCTestCase {
         }
     }
 }
-

@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import HirundoCore
 
 struct CleanCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
@@ -20,7 +21,20 @@ struct CleanCommand: ParsableCommand {
         
         let fileManager = FileManager.default
         let currentDirectory = fileManager.currentDirectoryPath
-        let outputURL = URL(fileURLWithPath: currentDirectory).appendingPathComponent("_site")
+        // Determine output directory from config if available
+        let defaultOutputDir = "_site"
+        let configURL = URL(fileURLWithPath: currentDirectory).appendingPathComponent("config.yaml")
+        let outputDirName: String
+        if fileManager.fileExists(atPath: configURL.path) {
+            if let config = try? HirundoConfig.load(from: configURL) {
+                outputDirName = config.build.outputDirectory
+            } else {
+                outputDirName = defaultOutputDir
+            }
+        } else {
+            outputDirName = defaultOutputDir
+        }
+        let outputURL = URL(fileURLWithPath: currentDirectory).appendingPathComponent(outputDirName)
         let cacheURL = URL(fileURLWithPath: currentDirectory).appendingPathComponent(".hirundo-cache")
         
         if !force {
@@ -57,4 +71,3 @@ struct CleanCommand: ParsableCommand {
         print("✅ Clean command executed successfully!")
     }
 }
-

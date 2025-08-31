@@ -2,50 +2,31 @@ import Foundation
 
 extension String {
     func slugify(maxLength: Int = 100) -> String {
-        // Step 1: Convert to lowercase and trim
-        var slug = self.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        // Use percent-encoding for URL-safe slugs, which is more robust for Unicode.
+        let slug = self.lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+
+        // Define a conservative ASCII-only allowed set for slug output
+        // to ensure non-ASCII (e.g., Japanese) characters are percent-encoded.
+        let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
         
-        // Step 2: Replace spaces and common separators with hyphens
-        slug = slug.replacingOccurrences(of: #"[\s\-_\+]+"#, with: "-", options: .regularExpression)
+        var encodedSlug = slug.addingPercentEncoding(withAllowedCharacters: allowedCharacters) ?? slug
+        // Normalize percent-encoding to use UPPERCASE hex without altering ASCII letters
+        encodedSlug = encodedSlug.uppercasingPercentEscapes()
         
-        // Step 3: Remove or replace dangerous characters for URLs
-        // Keep letters (including Unicode), numbers, and hyphens
-        // Remove only truly problematic characters for URLs
-        let allowedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-"))
-        slug = slug.unicodeScalars.compactMap { scalar in
-            if allowedCharacters.contains(scalar) {
-                return String(scalar)
-            } else if scalar.value == 0x20 || scalar.value == 0x5F { // space or underscore
-                return "-"
-            } else if scalar.properties.isAlphabetic || CharacterSet.decimalDigits.contains(scalar) {
-                // Keep Unicode letters and numbers (Japanese, Chinese, etc.)
-                return String(scalar)
-            } else {
-                return nil
-            }
-        }.joined()
-        
-        // Step 4: Handle multiple consecutive hyphens
-        slug = slug.replacingOccurrences(of: #"\-+"#, with: "-", options: .regularExpression)
-        
-        // Step 5: Remove leading and trailing hyphens
-        slug = slug.replacingOccurrences(of: #"^-+|-+$"#, with: "", options: .regularExpression)
-        
-        // Step 6: Ensure slug is not empty
-        if slug.isEmpty {
-            slug = "untitled"
+        // Truncate after encoding if necessary
+        if encodedSlug.count > maxLength {
+            let endIndex = encodedSlug.index(encodedSlug.startIndex, offsetBy: maxLength)
+            let truncated = String(encodedSlug[..<endIndex])
+            // Ensure we don't end with a hyphen or a partial encoding
+            return truncated.trimmingCharacters(in: CharacterSet(charactersIn: "-%"))
         }
         
-        // Step 7: Limit length if needed
-        if slug.count > maxLength {
-            let endIndex = slug.index(slug.startIndex, offsetBy: maxLength)
-            slug = String(slug[..<endIndex])
-            
-            // Make sure we don't end with a hyphen after truncation
-            slug = slug.replacingOccurrences(of: #"-+$"#, with: "", options: .regularExpression)
+        if encodedSlug.isEmpty {
+            return "untitled"
         }
         
-        return slug
+        return encodedSlug
     }
     
     func padLeft(toLength: Int, withPad character: Character) -> String {
@@ -55,5 +36,32 @@ extension String {
         } else {
             return self
         }
+    }
+}
+
+private extension String {
+    func uppercasingPercentEscapes() -> String {
+        var result = String()
+        result.reserveCapacity(self.count)
+        var i = self.startIndex
+        while i < self.endIndex {
+            let ch = self[i]
+            if ch == "%" {
+                let next1 = self.index(after: i)
+                if next1 < self.endIndex {
+                    let next2 = self.index(after: next1)
+                    if next2 < self.endIndex {
+                        let hex = self[next1...next2]
+                        result.append("%")
+                        result.append(contentsOf: hex.uppercased())
+                        i = self.index(after: next2)
+                        continue
+                    }
+                }
+            }
+            result.append(ch)
+            i = self.index(after: i)
+        }
+        return result
     }
 }

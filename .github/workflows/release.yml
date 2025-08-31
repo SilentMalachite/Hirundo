@@ -1,0 +1,54 @@
+name: Release Notes
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  generate-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract tag
+        id: tag
+        run: |
+          REF="${GITHUB_REF##*/}"
+          echo "tag=${REF}" >> $GITHUB_OUTPUT
+
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          tag='${{ steps.tag.outputs.tag }}'
+          esc_tag=$(printf '%s' "$tag" | sed 's/[][^$.*/\\]/\\&/g')
+          # Find start line of the tag section (## [vX.Y.Z])
+          start=$(grep -n "^## \[${esc_tag#v}\]" CHANGELOG.md | head -n1 | cut -d: -f1)
+          if [ -z "$start" ]; then
+            echo "No changelog section for $tag found; using placeholder." >&2
+            printf '%s' "Release $tag" > RELEASE_BODY.txt
+          else
+            # Find next section header line or EOF
+            tail -n +"$start" CHANGELOG.md > _tmp.md
+            end=$(awk '/^## \[/{ if (NR>1) { print NR-1; exit } } END{ if (NR>0 && !found) print NR }' _tmp.md)
+            if [ -z "$end" ]; then end=$(wc -l < _tmp.md); fi
+            head -n "$end" _tmp.md > RELEASE_BODY.txt
+          fi
+          echo 'body<<EOF' >> $GITHUB_OUTPUT
+          cat RELEASE_BODY.txt >> $GITHUB_OUTPUT
+          echo 'EOF' >> $GITHUB_OUTPUT
+
+      - name: Create or update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Hirundo ${{ steps.tag.outputs.tag }}
+          body: ${{ steps.changelog.outputs.body }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

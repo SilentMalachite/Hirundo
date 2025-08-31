@@ -90,3 +90,13 @@ docs/build/
 # Log files
 *.log
 logs/
+
+# Local verification site (untracked sample)
+verify-site/
+
+# Scratch test file (kept out of repo root)
+test_markdown_api.swift
+
+# Local tool/cache directories
+.serena/
+.home/

@@ -7,12 +7,10 @@ public class SiteGenerator {
     private let fileManager: FileManager
     
     // Delegated responsibilities
-    private let securityValidator: SecurityValidator
     private let contentProcessor: ContentProcessor
     private let siteFileManager: SiteFileManager
     private let templateRenderer: SiteTemplateRenderer
     private let archiveGenerator: ArchiveGenerator
-    private let pluginManager: PluginManager
     private let assetPipeline: AssetPipeline
     
     /// Designated initializer that accepts a resolved configuration
@@ -26,17 +24,15 @@ public class SiteGenerator {
         self.config = config
 
         // Initialize components with single responsibilities
-        self.securityValidator = SecurityValidator(projectPath: projectPath, config: config)
-        self.contentProcessor = ContentProcessor(config: config, securityValidator: securityValidator)
-        self.siteFileManager = SiteFileManager(config: config, securityValidator: securityValidator, projectPath: projectPath, fileManager: fileManager)
+        self.contentProcessor = ContentProcessor(config: config, projectPath: projectPath)
+        self.siteFileManager = SiteFileManager(config: config, projectPath: projectPath, fileManager: fileManager)
 
         let templatesPath = URL(fileURLWithPath: projectPath)
             .appendingPathComponent(config.build.templatesDirectory)
             .path
         self.templateRenderer = SiteTemplateRenderer(
             templatesDirectory: templatesPath,
-            config: config,
-            securityValidator: securityValidator
+            config: config
         )
 
         self.archiveGenerator = ArchiveGenerator(
@@ -46,12 +42,8 @@ public class SiteGenerator {
             templateEngine: templateRenderer.templateEngine
         )
 
-        // Initialize plugin system
-        self.pluginManager = PluginManager()
-        self.assetPipeline = AssetPipeline(pluginManager: pluginManager)
-
-        // Load and configure plugins
-        try loadPlugins()
+        // Initialize asset pipeline (no external plugins in Stage 2)
+        self.assetPipeline = AssetPipeline()
     }
 
     /// Convenience initializer using default config filename (config.yaml) under the project path
@@ -75,22 +67,11 @@ public class SiteGenerator {
     }
     
     // Main build method - orchestrates the build process
-    public func build(clean: Bool = false, includeDrafts: Bool = false) async throws {
+    public func build(clean: Bool = false, includeDrafts: Bool = false, environment: String = "production") async throws {
         let buildStartTime = Date()
         
         let outputURL = URL(fileURLWithPath: projectPath)
             .appendingPathComponent(config.build.outputDirectory)
-        
-        // Create build context
-        let buildContext = BuildContext(
-            outputPath: outputURL.path,
-            isDraft: includeDrafts,
-            isClean: clean,
-            config: config
-        )
-        
-        // Execute before build hook
-        try pluginManager.executeBeforeBuild(buildContext: buildContext)
         
         // Prepare output directory
         try siteFileManager.prepareOutputDirectory(at: outputURL.path, clean: clean)
@@ -112,9 +93,17 @@ public class SiteGenerator {
         
         // Process static assets
         try processStaticAssets(outputURL: outputURL)
-        
-        // Execute after build hook
-        try pluginManager.executeAfterBuild(buildContext: buildContext)
+
+        // Built-in features (Stage 2)
+        if config.features.sitemap {
+            try generateSitemap(outputURL: outputURL)
+        }
+        if config.features.rss {
+            try generateRSS(posts: posts, outputURL: outputURL)
+        }
+        if config.features.searchIndex {
+            try generateSearchIndex(pages: pages, posts: posts, outputURL: outputURL)
+        }
         
         // Print build summary
         let buildTime = Date().timeIntervalSince(buildStartTime)
@@ -164,7 +153,6 @@ public class SiteGenerator {
         
         for content in processedContents {
             do {
-                print("[SiteGenerator] Processing content: \(content.url.lastPathComponent)")
                 _ = try await processIndividualContent(
                     content,
                     outputDirectory: outputURL,
@@ -172,10 +160,8 @@ public class SiteGenerator {
                     allPosts: []
                 )
                 successCount += 1
-                print("[SiteGenerator] Successfully processed: \(content.url.lastPathComponent)")
             } catch {
                 failCount += 1
-                print("[SiteGenerator] Failed to process \(content.url.lastPathComponent): \(error)")
                 errors.append(BuildErrorDetail(
                     file: content.url.path,
                     stage: .rendering,
@@ -245,6 +231,7 @@ public class SiteGenerator {
             allPages: allPages,
             allPosts: allPosts
         )
+        // (debug removed)
         
         // Determine output path
         // Resolve both paths to handle system symlinks consistently
@@ -340,54 +327,121 @@ public class SiteGenerator {
     }
     
     private func configureAssetPipeline() {
-        // Asset pipeline configuration is handled through plugin system
-        // Plugins modify the pipeline during their execution
+        // Configure built-in options from features
+        if config.features.minify {
+            assetPipeline.cssOptions.minify = true
+            assetPipeline.jsOptions.minify = true
+        }
     }
     
     private func loadPlugins() throws {
-        let pluginContext = PluginContext(
-            projectPath: projectPath,
-            config: config
-        )
-        
-        // Load built-in plugins based on configuration
-        for pluginConfig in config.plugins {
-            if pluginConfig.enabled {
-                try loadPlugin(pluginConfig, context: pluginContext)
-            }
-        }
-        
-        // Initialize plugins after registration so hooks can run
-        try pluginManager.initializeAll(context: pluginContext)
+        // Stage 2: No plugins to load.
     }
-    
-    private func loadPlugin(_ pluginConfig: PluginConfiguration, context: PluginContext) throws {
-        switch pluginConfig.name {
-        case "sitemap":
-            let plugin = SitemapPlugin()
-            try configurePlugin(plugin, with: pluginConfig)
-            try pluginManager.register(plugin)
-            
-        case "rss":
-            let plugin = RSSPlugin()
-            try configurePlugin(plugin, with: pluginConfig)
-            try pluginManager.register(plugin)
-            
-        case "minify":
-            let plugin = MinifyPlugin()
-            try configurePlugin(plugin, with: pluginConfig)
-            try pluginManager.register(plugin)
-            
-        default:
-            print("Warning: Unknown plugin '\(pluginConfig.name)'")
+
+    // MARK: - Built-in feature generators (sitemap, RSS, search index)
+    private func generateSitemap(outputURL: URL) throws {
+        let fm = FileManager.default
+        var urls: [(loc: String, lastmod: Date)] = []
+        let base = config.site.url
+        let enumerator = fm.enumerator(at: outputURL, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles])
+        while let fileURL = enumerator?.nextObject() as? URL {
+            guard fileURL.pathExtension == "html" else { continue }
+            var rel = fileURL.path.replacingOccurrences(of: outputURL.path, with: "")
+            rel = rel.replacingOccurrences(of: "/index.html", with: "/")
+            let mod = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
+            urls.append((loc: base + rel, lastmod: mod))
         }
+        let dateFormatter = ISO8601DateFormatter()
+        var xml = """
+        <?xml version=\"1.0\" encoding=\"UTF-8\"?>
+        <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">
+
+        """
+        for u in urls {
+            xml += """
+            <url>
+                <loc>\(escapeXML(u.loc))</loc>
+                <lastmod>\(dateFormatter.string(from: u.lastmod))</lastmod>
+                <changefreq>weekly</changefreq>
+                <priority>0.5</priority>
+            </url>
+
+            """
+        }
+        xml += "</urlset>"
+        try xml.write(to: outputURL.appendingPathComponent("sitemap.xml"), atomically: true, encoding: .utf8)
     }
-    
-    private func configurePlugin(_ plugin: Plugin, with config: PluginConfiguration) throws {
-        if !config.settings.isEmpty {
-            let pluginConfig = PluginConfig(name: config.name, enabled: config.enabled, settings: config.settings)
-            try plugin.configure(with: pluginConfig)
+
+    private func generateRSS(posts: [Post], outputURL: URL) throws {
+        let dateFormatter = ISO8601DateFormatter()
+        let now = dateFormatter.string(from: Date())
+        var rss = """
+        <?xml version=\"1.0\" encoding=\"UTF-8\"?>
+        <rss version=\"2.0\" xmlns:atom=\"http://www.w3.org/2005/Atom\">\n<channel>
+            <title>\(escapeXML(config.site.title))</title>
+            <link>\(escapeXML(config.site.url))</link>
+            <description>\(escapeXML(config.site.description ?? ""))</description>
+            <language>\(config.site.language ?? "en-US")</language>
+            <lastBuildDate>\(now)</lastBuildDate>
+            <atom:link href=\"\(config.site.url)/rss.xml\" rel=\"self\" type=\"application/rss+xml\" />
+
+        """
+        let sorted = posts.sorted { $0.date > $1.date }.prefix(20)
+        for p in sorted {
+            let link = config.site.url + "/posts/\(p.slug)/"
+            let desc = p.description ?? String(p.content.prefix(200))
+            rss += """
+            <item>
+                <title>\(escapeXML(p.title))</title>
+                <link>\(escapeXML(link))</link>
+                <guid>\(escapeXML(link))</guid>
+                <pubDate>\(dateFormatter.string(from: p.date))</pubDate>
+                <description>\(escapeXML(desc))</description>
+            </item>
+
+            """
         }
+        rss += "</channel>\n</rss>\n"
+        try rss.write(to: outputURL.appendingPathComponent("rss.xml"), atomically: true, encoding: .utf8)
+    }
+
+    private func generateSearchIndex(pages: [Page], posts: [Post], outputURL: URL) throws {
+        struct Entry: Codable { let url: String; let title: String; let content: String; let tags: [String]; let date: Date? }
+        struct Index: Codable { let version: String; let generated: Date; let entries: [Entry] }
+        func stripHTML(_ s: String) -> String {
+            return s.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+                    .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        var entries: [Entry] = []
+        for p in pages {
+            let rel = siteRelativePath(forOutput: p.url)
+            entries.append(Entry(url: rel, title: p.title, content: String(stripHTML(p.content).prefix(200)), tags: [], date: nil))
+        }
+        for p in posts {
+            let rel = siteRelativePath(forOutput: p.url)
+            let tags = p.categories + p.tags
+            entries.append(Entry(url: rel, title: p.title, content: String(stripHTML(p.content).prefix(200)), tags: tags, date: p.date))
+        }
+        let index = Index(version: "1.0", generated: Date(), entries: entries)
+        let data = try JSONEncoder().encode(index)
+        try data.write(to: outputURL.appendingPathComponent("search-index.json"))
+    }
+
+    private func siteRelativePath(forOutput outputPath: String) -> String {
+        var path = outputPath
+        if let range = path.range(of: projectPath) { path.removeSubrange(range) }
+        if path.hasSuffix("/index.html") { path = String(path.dropLast("/index.html".count)) + "/" }
+        if !path.hasPrefix("/") { path = "/" + path }
+        return path
+    }
+
+    private func escapeXML(_ string: String) -> String {
+        string.replacingOccurrences(of: "&", with: "&amp;")
+              .replacingOccurrences(of: "<", with: "&lt;")
+              .replacingOccurrences(of: ">", with: "&gt;")
+              .replacingOccurrences(of: "\"", with: "&quot;")
+              .replacingOccurrences(of: "'", with: "&apos;")
     }
     
     private func printBuildSummary(pages: Int, posts: Int, buildTime: TimeInterval) {

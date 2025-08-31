@@ -76,7 +76,7 @@ public class HTMLRenderer {
             return "<pre><code\(languageAttr)>\(escapeText(codeBlock.code))</code></pre>\n"
         case let table as Markdown.Table:
             return renderTable(table)
-        case let thematicBreak as ThematicBreak:
+        case is ThematicBreak:
             return "<hr>\n"
         default:
             return renderInline(node)

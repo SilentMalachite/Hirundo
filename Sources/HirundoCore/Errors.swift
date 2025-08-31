@@ -114,7 +114,6 @@ public enum ErrorCategory: String, CaseIterable, Sendable {
     case template = "TEMPLATE"
     case build = "BUILD"
     case asset = "ASSET"
-    case plugin = "PLUGIN"
     case hotReload = "HOTRELOAD"
     case server = "SERVER"
     case network = "NETWORK"
@@ -178,12 +177,6 @@ public struct HirundoErrorInfo: HirundoError {
                 "Asset Processing Issue",
                 "Static files couldn't be processed.",
                 suggestedAction: "Check that all referenced assets exist in the static directory"
-            )
-        case .plugin:
-            return formatUserMessage(
-                "Plugin Error",
-                "A plugin failed to execute.",
-                suggestedAction: "Try disabling the plugin in config.yaml or check its configuration"
             )
         case .hotReload:
             return formatUserMessage(

@@ -108,14 +108,8 @@ internal class FSEventsWrapper {
                 continue
             }
             
-            // Skip events that are not file-related
-            if flags & UInt32(kFSEventStreamEventFlagItemIsFile) == 0 && 
-               flags & UInt32(kFSEventStreamEventFlagItemCreated) == 0 &&
-               flags & UInt32(kFSEventStreamEventFlagItemRemoved) == 0 &&
-               flags & UInt32(kFSEventStreamEventFlagItemRenamed) == 0 &&
-               flags & UInt32(kFSEventStreamEventFlagItemModified) == 0 {
-                continue
-            }
+            // Proceed even if specific file flags aren't set; some deletions
+            // may come without ItemIsFile or specific flags.
             
             // Determine the change type based on flags
             // Note: FSEvents doesn't always set flags as expected, so we need to be flexible
@@ -150,13 +144,12 @@ internal class FSEventsWrapper {
             } else if flags & UInt32(kFSEventStreamEventFlagItemXattrMod) != 0 {
                 type = .modified  // Extended attributes change counts as modification
             } else {
-                // For generic events, try to determine based on file existence
-                // This handles cases where FSEvents doesn't set specific flags
+                // For generic events, infer based on file existence.
+                // Some systems may not set specific flags for deletions.
                 if fileExists {
                     type = .modified  // File exists, assume it was modified
                 } else {
-                    // Skip events for non-existent files without specific flags
-                    continue
+                    type = .deleted   // File no longer exists; treat as deletion
                 }
             }
             

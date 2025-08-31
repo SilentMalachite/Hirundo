@@ -4,7 +4,7 @@ This document provides an overview of Hirundo's architecture, design principles,
 
 ## Overview
 
-Hirundo is built with a modular, security-first architecture that prioritizes performance, maintainability, and extensibility.
+Hirundo is built with a modular, clean architecture that prioritizes performance, maintainability, and simplicity.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -99,45 +99,30 @@ Live development server with WebSocket support:
 - Real-time error notifications
 - Request logging
 
-### 6. Plugin System (`PluginManager.swift`, `Plugin.swift`)
+### 6. Built-in Features
 
-Extensible plugin architecture:
-- Built-in plugin registration
-- Dynamic loading (disabled for security)
-- Lifecycle management
-- Dependency resolution
-
-**Built-in Plugins:**
+Hirundo provides built-in features (no dynamic loading) that participate in the build:
 - Sitemap generation
 - RSS feed creation
-- HTML minification
+- HTML/CSS/JS minification
 - Search index generation
+
+Configure these under `features:` in `config.yaml`.
 
 ## Security Architecture
 
-### Input Validation Layer
+### Basic Security Measures
 
-```
-User Input → Validation → Sanitization → Processing
-     ↓           ↓            ↓           ↓
-  - Size       - Path      - Content   - Safe
-  - Format     - Type      - Escape    - Output
-  - Content    - Perms     - Filter    - Monitor
-```
+- Input validation for configuration files
+- Safe file operations with proper error handling
+- Memory-safe resource management
+- WebSocket session cleanup
 
-### Path Security
+### File Operations
 
-1. **Sanitization**: Remove dangerous components (`..`, `~`, etc.)
-2. **Validation**: Check against allowed patterns
-3. **Resolution**: Resolve symlinks safely
-4. **Verification**: Confirm final path is within bounds
-
-### Memory Safety
-
-- Automatic resource cleanup
-- WebSocket session management
-- File handle lifecycle
-- Buffer size limits
+- Standard Swift file operations with error handling
+- Proper resource cleanup
+- Safe path handling
 
 ## Performance Architecture
 

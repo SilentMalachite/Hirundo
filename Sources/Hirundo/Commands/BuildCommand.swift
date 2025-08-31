@@ -48,7 +48,7 @@ struct BuildCommand: AsyncParsableCommand {
                     throw ExitCode.failure
                 }
             } else {
-                try await generator.build(clean: clean, includeDrafts: drafts)
+                try await generator.build(clean: clean, includeDrafts: drafts, environment: environment)
             }
             print("✅ Build finished successfully")
         } catch {
@@ -57,4 +57,3 @@ struct BuildCommand: AsyncParsableCommand {
         }
     }
 }
-

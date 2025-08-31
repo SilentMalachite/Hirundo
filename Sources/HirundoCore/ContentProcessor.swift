@@ -10,15 +10,16 @@ extension Array {
     }
 }
 
+/// Thread-safety: ContentProcessor has no shared mutable state across tasks; per-file processing avoids shared mutation.
 public class ContentProcessor: @unchecked Sendable {
     private let markdownParser: MarkdownParser
     private let config: HirundoConfig
-    private let securityValidator: SecurityValidator
+    private let projectPath: String
     
-    public init(config: HirundoConfig, securityValidator: SecurityValidator) {
+    public init(config: HirundoConfig, projectPath: String) {
         self.config = config
         self.markdownParser = MarkdownParser()
-        self.securityValidator = securityValidator
+        self.projectPath = projectPath
     }
     
     // Process a markdown file and return parsed content
@@ -27,15 +28,10 @@ public class ContentProcessor: @unchecked Sendable {
         projectPath: String,
         includeDrafts: Bool
     ) async throws -> ProcessedContent? {
-        // Validate file path
-        try securityValidator.validatePath(fileURL.path, withinBaseDirectory: projectPath)
-        
-        // Read file content with timeout using async API
+        // Read file content
         let content: String
         do {
-            content = try await TimeoutManager.withFileReadTimeout {
-                try String(contentsOf: fileURL, encoding: .utf8)
-            }
+            content = try String(contentsOf: fileURL, encoding: .utf8)
         } catch {
             // Convert file reading errors to appropriate MarkdownError
             if let nsError = error as NSError? {
@@ -64,7 +60,7 @@ public class ContentProcessor: @unchecked Sendable {
             url: fileURL,
             markdown: result,
             type: contentType,
-            metadata: extractMetadata(from: result.frontMatter ?? [:])
+            metadata: try extractMetadata(from: result.frontMatter ?? [:])
         )
     }
     
@@ -142,7 +138,7 @@ public class ContentProcessor: @unchecked Sendable {
                     group.addTask { [self] in
                         return try await self.processMarkdownFile(
                             at: fileURL,
-                            projectPath: directoryURL.deletingLastPathComponent().path,
+                            projectPath: self.projectPath,
                             includeDrafts: includeDrafts
                         )
                     }
@@ -221,7 +217,7 @@ public class ContentProcessor: @unchecked Sendable {
                         do {
                             let processed = try await self.processMarkdownFile(
                                 at: fileURL,
-                                projectPath: directoryURL.deletingLastPathComponent().path,
+                                projectPath: self.projectPath,
                                 includeDrafts: includeDrafts
                             )
                             return (processed, nil)
@@ -258,55 +254,9 @@ public class ContentProcessor: @unchecked Sendable {
         return (contents: allProcessedContents, errors: allErrors)
     }
     
-    // Render markdown content to HTML
     public func renderMarkdownContent(_ result: MarkdownParseResult) -> String {
-        // Use the built-in HTML formatter from swift-markdown
-        var html = ""
-        for element in result.content {
-            html += renderElement(element)
-        }
-        return html
-    }
-    
-    private func renderElement(_ element: MarkdownElement) -> String {
-        switch element {
-        case .heading(let heading):
-            return "<h\(heading.level)>\(securityValidator.sanitizeForTemplate(heading.text))</h\(heading.level)>\n"
-        case .paragraph(let text):
-            return "<p>\(securityValidator.sanitizeForTemplate(text))</p>\n"
-        case .codeBlock(let codeBlock):
-            let lang = codeBlock.language ?? ""
-            return "<pre><code class=\"language-\(lang)\">\(securityValidator.sanitizeForTemplate(codeBlock.content))</code></pre>\n"
-        case .list(let list):
-            let tag = list.isOrdered ? "ol" : "ul"
-            var html = "<\(tag)>\n"
-            for item in list.items {
-                html += "<li>\(securityValidator.sanitizeForTemplate(item))</li>\n"
-            }
-            html += "</\(tag)>\n"
-            return html
-        case .link(let link):
-            return "<a href=\"\(link.url)\">\(securityValidator.sanitizeForTemplate(link.text))</a>"
-        case .image(let image):
-            return "<img src=\"\(image.url)\" alt=\"\(securityValidator.sanitizeForTemplate(image.alt ?? ""))\" />"
-        case .table(let table):
-            var html = "<table>\n<thead>\n<tr>\n"
-            for header in table.headers {
-                html += "<th>\(securityValidator.sanitizeForTemplate(header))</th>\n"
-            }
-            html += "</tr>\n</thead>\n<tbody>\n"
-            for row in table.rows {
-                html += "<tr>\n"
-                for cell in row {
-                    html += "<td>\(securityValidator.sanitizeForTemplate(cell))</td>\n"
-                }
-                html += "</tr>\n"
-            }
-            html += "</tbody>\n</table>\n"
-            return html
-        case .other:
-            return ""
-        }
+        // Use the built-in HTML formatter from swift-markdown for robustness and accuracy.
+        return result.document?.htmlString ?? ""
     }
     
     private func determineContentType(from url: URL, metadata: [String: Any]) -> ProcessedContentType {
@@ -331,11 +281,32 @@ public class ContentProcessor: @unchecked Sendable {
         return .page
     }
     
-    private func extractMetadata(from metadata: [String: Any]) -> ContentMetadata {
+    private func extractMetadata(from metadata: [String: Any]) throws -> ContentMetadata {
+        let date: Date
+        if let dateValue = metadata["date"] {
+            if let parsedDate = dateValue as? Date {
+                date = parsedDate
+            } else if let dateString = dateValue as? String {
+                // Try to parse common ISO 8601 formats from string values
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime]
+                if let d = formatter.date(from: dateString) {
+                    date = d
+                } else {
+                    throw MarkdownError.invalidFrontMatter("Invalid date format. Expected ISO 8601 format (e.g., YYYY-MM-DDTHH:MM:SSZ).")
+                }
+            } else {
+                throw MarkdownError.invalidFrontMatter("Invalid date value type in front matter")
+            }
+        } else {
+            // Default to the current date if not provided.
+            date = Date()
+        }
+
         return ContentMetadata(
             title: metadata["title"] as? String ?? "Untitled",
             description: metadata["description"] as? String,
-            date: metadata["date"] as? Date ?? Date(),
+            date: date,
             author: metadata["author"] as? String,
             categories: extractStringArray(from: metadata["categories"]),
             tags: extractStringArray(from: metadata["tags"]),

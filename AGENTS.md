@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## プロジェクト構成とモジュール
-- `Package.swift`: SwiftPM マニフェスト（Swift 6、macOS 14+）。
+- `Package.swift`: SwiftPM マニフェスト（Swift 6、macOS 12+）。
 - `Sources/Hirundo/`: CLI 実行ファイル（`hirundo`）。
 - `Sources/HirundoCore/`: コアライブラリ（パーサ、テンプレート、サーバ、プラグイン）。
 - `Tests/HirundoTests/`: XCTest 一式。ファイルは `*Tests.swift`、クラスは `XCTestCase` を継承。

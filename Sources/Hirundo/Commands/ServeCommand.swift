@@ -33,14 +33,17 @@ struct ServeCommand: AsyncParsableCommand {
         let currentDirectory = FileManager.default.currentDirectoryPath
         
         do {
-            // Validate configuration
-            _ = try SiteGenerator(projectPath: currentDirectory)
+            // Load configuration to respect CORS, WS auth, and output directory
+            let configURL = URL(fileURLWithPath: currentDirectory).appendingPathComponent("config.yaml")
+            let config = try HirundoConfig.load(from: configURL)
             
             let server = DevelopmentServer(
                 projectPath: currentDirectory,
                 port: port,
                 host: host,
-                liveReload: !noReload
+                liveReload: !noReload,
+                fileManager: .default,
+                outputDirectory: config.build.outputDirectory
             )
             try await server.start()
             print("✅ Development server is running at http://\(host):\(port)")
@@ -61,5 +64,4 @@ struct ServeCommand: AsyncParsableCommand {
         }
     }
 }
-
 

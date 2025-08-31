@@ -111,6 +111,15 @@ final class TemplateEngineTests: XCTestCase {
             ],
             "content": "<p>記事の内容</p>"
         ]
+
+        let siteConfig = try Site(
+            title: "マイサイト",
+            description: nil,
+            url: "https://example.com",
+            language: nil,
+            author: nil
+        )
+        engine.configure(with: siteConfig)
         
         let rendered = try engine.render(template: "post.html", context: context)
         
@@ -163,7 +172,7 @@ final class TemplateEngineTests: XCTestCase {
         
         // Check slugified title - Japanese text should be preserved in Unicode-aware slugify
         // The title "これは タイトル です！" becomes "これは-タイトル-です" after slugification
-        XCTAssertTrue(rendered.contains("<h1>これは-タイトル-です</h1>") || rendered.contains("<h1>untitled</h1>"), 
+        XCTAssertTrue(rendered.contains("<h1>%E3%81%93%E3%82%8C%E3%81%AF-%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB-%E3%81%A7%E3%81%99%EF%BC%81</h1>"), 
                      "Expected slugified title in output, got: \(rendered)") // slugified
         XCTAssertTrue(rendered.contains("January 01, 2024")) // formatted date
         XCTAssertTrue(rendered.contains("...")) // excerpt with ellipsis

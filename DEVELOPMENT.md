@@ -1,3 +1,4 @@
+
 # Development Guide
 
 This document summarizes common development tasks and local workflows for Hirundo.
@@ -5,7 +6,7 @@ This document summarizes common development tasks and local workflows for Hirund
 ## Environment
 
 - Swift 6.0+
-- macOS 14+ (or Linux for core library)
+- macOS 12+ (or Linux for core library)
 - Xcode 16+ recommended for macOS development
 
 ## Build, Test, Run
@@ -51,4 +52,3 @@ swift run --package-path .. hirundo serve
   - Note breaking changes explicitly.
 
 See also: `CONTRIBUTING.md` for the full contribution flow.
-

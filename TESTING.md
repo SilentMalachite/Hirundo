@@ -5,7 +5,7 @@ This guide outlines how to run, structure, and extend tests in Hirundo.
 ## Running Tests
 
 - Run all tests: `swift test`
-- Filter by test case: `swift test --filter SecurityValidatorTests`
+- Filter by test case: `swift test --filter SiteGeneratorTests`
 - Enable coverage: `swift test --enable-code-coverage`
 
 ## Naming and Structure

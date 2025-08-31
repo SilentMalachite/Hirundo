@@ -1,5 +1,4 @@
 import XCTest
-import XCTest
 import Markdown
 import Yams
 import Stencil

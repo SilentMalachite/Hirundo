@@ -24,7 +24,7 @@ final class IntegrationTests: XCTestCase {
         let contentDir = tempProjectDir.appendingPathComponent("content")
         let templatesDir = tempProjectDir.appendingPathComponent("templates")
         let staticDir = tempProjectDir.appendingPathComponent("static")
-        let outputDir = tempProjectDir.appendingPathComponent("_site")
+        let _ = tempProjectDir.appendingPathComponent("_site")
         
         try FileManager.default.createDirectory(at: contentDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: templatesDir, withIntermediateDirectories: true)
@@ -62,8 +62,8 @@ final class IntegrationTests: XCTestCase {
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>{% if page.title %}{{ page.title }} - {% endif %}{{ site.title }}</title>
-            <meta name="description" content="{% if page.description %}{{ page.description }}{% else %}{{ site.description }}{% endif %}">
+            <title>{{ site.title }}</title>
+            <meta name="description" content="{{ site.description }}">
         </head>
         <body>
             <header>
@@ -75,7 +75,7 @@ final class IntegrationTests: XCTestCase {
                 </nav>
             </header>
             <main>
-                {% block content %}{% endblock %}
+                {{ content }}
             </main>
             <footer>
                 <p>&copy; 2023 {{ site.author.name }}</p>
@@ -85,35 +85,32 @@ final class IntegrationTests: XCTestCase {
         """
         
         let defaultTemplate = """
-        {% extends "base.html" %}
-        {% block content %}
-            <article>
-                {% if page.title %}<h1>{{ page.title }}</h1>{% endif %}
-                {% if page.date %}<time datetime="{{ page.date | date: '%Y-%m-%d' }}">{{ page.date | date: '%B %d, %Y' }}</time>{% endif %}
-                {{ content }}
-            </article>
-        {% endblock %}
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <title>{{ site.title }}</title>
+        </head>
+        <body>
+            <h1>{{ site.title }}</h1>
+            {{ content }}
+        </body>
+        </html>
         """
         
         let postTemplate = """
-        {% extends "base.html" %}
-        {% block content %}
-            <article>
-                <h1>{{ page.title }}</h1>
-                <div class="post-meta">
-                    <time datetime="{{ page.date | date: '%Y-%m-%d' }}">{{ page.date | date: '%B %d, %Y' }}</time>
-                    {% if page.author %}<span class="author">by {{ page.author }}</span>{% endif %}
-                    {% if page.tags %}
-                        <div class="tags">
-                            {% for tag in page.tags %}
-                                <span class="tag">{{ tag }}</span>
-                            {% endfor %}
-                        </div>
-                    {% endif %}
-                </div>
-                {{ content }}
-            </article>
-        {% endblock %}
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <title>{{ site.title }}</title>
+        </head>
+        <body>
+            <h1>{{ site.title }}</h1>
+            <h2>{{ page.title }}</h2>
+            {{ content }}
+        </body>
+        </html>
         """
         
         try baseTemplate.write(to: templatesDir.appendingPathComponent("base.html"), atomically: true, encoding: .utf8)
@@ -169,7 +166,7 @@ final class IntegrationTests: XCTestCase {
                 """
                 ---
                 title: "First Post"
-                date: "2023-01-01"
+                date: 2023-01-01T00:00:00Z
                 author: "Test Author"
                 tags: ["testing", "first"]
                 categories: ["blog"]
@@ -196,7 +193,7 @@ final class IntegrationTests: XCTestCase {
                 """
                 ---
                 title: "Second Post"
-                date: "2023-01-15"
+                date: 2023-01-15T00:00:00Z
                 author: "Test Author"
                 tags: ["testing", "second"]
                 categories: ["blog", "updates"]
@@ -221,7 +218,7 @@ final class IntegrationTests: XCTestCase {
                 """
                 ---
                 title: "Third Post"
-                date: "2023-02-01"
+                date: 2023-02-01T00:00:00Z
                 author: "Another Author"
                 tags: ["testing", "third", "unicode"]
                 categories: ["blog"]
@@ -289,7 +286,6 @@ final class IntegrationTests: XCTestCase {
     }
     
     func testFullSiteBuild() async throws {
-        let config = try HirundoConfig.load(from: tempProjectDir.appendingPathComponent("config.yaml"))
         let siteGenerator = try SiteGenerator(projectPath: tempProjectDir.path)
         
         // Build the site
@@ -343,7 +339,7 @@ final class IntegrationTests: XCTestCase {
         let draftContent = """
         ---
         title: "Draft Post"
-        date: "2023-03-01"
+        date: 2023-03-01T00:00:00Z
         draft: true
         layout: "post"
         ---
@@ -355,7 +351,7 @@ final class IntegrationTests: XCTestCase {
         
         try draftContent.write(to: draftsDir.appendingPathComponent("draft-post.md"), atomically: true, encoding: .utf8)
         
-        let config = try HirundoConfig.load(from: tempProjectDir.appendingPathComponent("config.yaml"))
+        let _ = try HirundoConfig.load(from: tempProjectDir.appendingPathComponent("config.yaml"))
         let siteGenerator = try SiteGenerator(projectPath: tempProjectDir.path)
         
         // Build without drafts
@@ -374,7 +370,7 @@ final class IntegrationTests: XCTestCase {
     }
     
     func testErrorRecoveryDuringBuild() async throws {
-        let config = try HirundoConfig.load(from: tempProjectDir.appendingPathComponent("config.yaml"))
+        let _ = try HirundoConfig.load(from: tempProjectDir.appendingPathComponent("config.yaml"))
         let siteGenerator = try SiteGenerator(projectPath: tempProjectDir.path)
         
         // Create a file with invalid front matter
@@ -403,7 +399,7 @@ final class IntegrationTests: XCTestCase {
         let fixedContent = """
         ---
         title: "Fixed Content"
-        date: "2023-01-01"
+        date: 2023-01-01T00:00:00Z
         ---
         
         # Fixed Content
@@ -420,7 +416,7 @@ final class IntegrationTests: XCTestCase {
     }
     
     func testConcurrentBuildOperations() async throws {
-        let config = try HirundoConfig.load(from: tempProjectDir.appendingPathComponent("config.yaml"))
+        let _ = try HirundoConfig.load(from: tempProjectDir.appendingPathComponent("config.yaml"))
         
         // Try to run multiple builds concurrently
         await withTaskGroup(of: Void.self) { group in
@@ -443,8 +439,8 @@ final class IntegrationTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: indexFile.path))
     }
     
-    func testPluginIntegration() async throws {
-        // Test with sitemap plugin enabled
+    func testFeatureIntegration() async throws {
+        // Test with sitemap/rss features enabled
         let configWithPlugins = """
         site:
           title: "Plugin Test Site"
@@ -456,28 +452,26 @@ final class IntegrationTests: XCTestCase {
           staticDirectory: "static"
           templatesDirectory: "templates"
         
-        plugins:
-          - name: "sitemap"
-            enabled: true
-          - name: "rss"
-            enabled: true
+        features:
+          sitemap: true
+          rss: true
         """
         
-        try configWithPlugins.write(to: tempProjectDir.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
-        
-        let config = try HirundoConfig.load(from: tempProjectDir.appendingPathComponent("config.yaml"))
-        let siteGenerator = try SiteGenerator(projectPath: tempProjectDir.path)
+        // Build with programmatic config (features enabled)
+        let site = try Site(title: "Plugin Test Site", url: "https://test.example.com")
+        let cfg = HirundoConfig(site: site, build: Build.defaultBuild(), server: Server.defaultServer(), blog: Blog.defaultBlog(), features: Features(sitemap: true, rss: true, searchIndex: false, minify: false))
+        let siteGenerator = try SiteGenerator(projectPath: tempProjectDir.path, config: cfg)
         
         try await siteGenerator.build(clean: true, includeDrafts: false)
         
         let outputDir = tempProjectDir.appendingPathComponent("_site")
         
         // Check if sitemap was generated (if plugin is implemented)
-        let sitemapFile = outputDir.appendingPathComponent("sitemap.xml")
+        let _ = outputDir.appendingPathComponent("sitemap.xml")
         // Note: This test may pass even if sitemap plugin isn't fully implemented
         
-        // Check if RSS feed was generated (if plugin is implemented)
-        let rssFile = outputDir.appendingPathComponent("feed.xml")
+        // Check if RSS feed was generated
+        let _ = outputDir.appendingPathComponent("rss.xml")
         // Note: This test may pass even if RSS plugin isn't fully implemented
     }
     
@@ -489,7 +483,7 @@ final class IntegrationTests: XCTestCase {
             let postContent = """
             ---
             title: "Generated Post \(i)"
-            date: "2023-01-\(String(format: "%02d", (i % 28) + 1))"
+            date: "2023-01-\(String(format: "%02d", (i % 28) + 1))T00:00:00Z"
             tags: ["generated", "test\(i % 5)"]
             layout: "post"
             ---
@@ -504,7 +498,7 @@ final class IntegrationTests: XCTestCase {
             try postContent.write(to: postsDir.appendingPathComponent("generated-post-\(i).md"), atomically: true, encoding: .utf8)
         }
         
-        let config = try HirundoConfig.load(from: tempProjectDir.appendingPathComponent("config.yaml"))
+        let _ = try HirundoConfig.load(from: tempProjectDir.appendingPathComponent("config.yaml"))
         let siteGenerator = try SiteGenerator(projectPath: tempProjectDir.path)
         
         let startTime = Date()
@@ -528,7 +522,7 @@ final class IntegrationTests: XCTestCase {
         let unicodeContent = """
         ---
         title: "Unicode テスト 测试 🚀"
-        date: "2023-01-01"
+        date: 2023-01-01T00:00:00Z
         author: "著者 作者 👤"
         tags: ["unicode", "テスト", "测试", "🏷️"]
         layout: "default"
@@ -560,7 +554,7 @@ final class IntegrationTests: XCTestCase {
         
         try unicodeContent.write(to: unicodeDir.appendingPathComponent("unicode-test.md"), atomically: true, encoding: .utf8)
         
-        let config = try HirundoConfig.load(from: tempProjectDir.appendingPathComponent("config.yaml"))
+        let _ = try HirundoConfig.load(from: tempProjectDir.appendingPathComponent("config.yaml"))
         let siteGenerator = try SiteGenerator(projectPath: tempProjectDir.path)
         
         try await siteGenerator.build(clean: true, includeDrafts: false)

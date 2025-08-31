@@ -31,94 +31,64 @@ We take security vulnerabilities seriously. If you discover a security vulnerabi
 
 ### Security Measures in Hirundo
 
-Hirundo includes several built-in security measures:
+Hirundo includes basic security measures appropriate for a static site generator:
 
 #### Input Validation
-- **File Size Limits**: Configurable limits prevent DoS attacks through large files
-- **Path Validation**: Comprehensive protection against path traversal attacks
-- **Content Sanitization**: Safe processing of user-generated content
-- **Frontmatter Validation**: YAML parsing with size and complexity limits
+- **File Size Limits**: Configurable limits for configuration and content files
+- **Basic Path Handling**: Standard Swift file operations with proper error handling
+- **Content Processing**: Safe processing of markdown and template content
 
-#### Path Security
-- **Traversal Protection**: Advanced detection and prevention of `../` attacks
-- **Symlink Resolution**: Safe handling of symbolic links
-- **Sandboxing**: File operations restricted to project directories
-- **Path Sanitization**: Comprehensive cleaning of file paths
-
-#### Asset Processing Security
-- **CSS/JS Validation**: Syntax validation before processing
-- **Minification Safety**: Safe minification without code injection risks
+#### File Operations
+- **Standard APIs**: Uses Swift's built-in file operations with proper error handling
+- **Resource Management**: Automatic cleanup of file handles and resources
 - **Transpilation Disabled**: Potentially unsafe JS transpilation disabled by default
 - **File Type Validation**: Strict file type checking and processing
 
 #### Development Server Security
-- **WebSocket Protection**: Memory-safe session management
-- **Error Isolation**: Secure error reporting without information leakage
-- **Rate Limiting**: Built-in protection against resource exhaustion
-- **CORS Configuration**: Proper handling of cross-origin requests
-
-#### Memory Safety
-- **Resource Management**: Automatic cleanup of file handles and connections
-- **Memory Limits**: Configurable limits to prevent memory exhaustion
-- **Leak Prevention**: Advanced WebSocket session cleanup
-- **Buffer Management**: Safe handling of large file processing
+- **Basic WebSocket**: Simple live reload functionality
+- **Error Handling**: Proper error reporting without sensitive information leakage
 
 ## Security Configuration
 
 ### Recommended Settings
 
 ```yaml
-# Security limits (recommended for production)
+# Basic limits for content files
 limits:
-  maxMarkdownFileSize: 1048576      # 1MB (stricter than default)
-  maxConfigFileSize: 102400         # 100KB (stricter than default)
-  maxFrontMatterSize: 10240         # 10KB (stricter than default)
+  maxMarkdownFileSize: 1048576      # 1MB
+  maxConfigFileSize: 102400         # 100KB
+  maxFrontMatterSize: 10240         # 10KB
   maxFilenameLength: 200            # Reasonable limit
   maxTitleLength: 100               # SEO-friendly limit
   maxDescriptionLength: 300         # Meta description limit
 
-# Plugin security
-plugins:
-  - name: "minify"
-    enabled: true
-    settings:
-      minifyHTML: true
-      minifyCSS: true
-      minifyJS: false  # Keep disabled for security
+# Feature configuration
+features:
+  minify: true
 ```
 
 ### Security Checklist
 
 Before deploying Hirundo in production:
 
-- [ ] Review and configure security limits in `config.yaml`
-- [ ] Ensure JS transpilation remains disabled unless absolutely necessary
+- [ ] Review and configure file size limits in `config.yaml`
+- [ ] Ensure JS minification remains disabled unless necessary
 - [ ] Validate all content sources and inputs
 - [ ] Use HTTPS for the production site
 - [ ] Regularly update Hirundo and its dependencies
 - [ ] Monitor build logs for security warnings
 - [ ] Implement proper file permissions on the server
 
-## Recent Security Updates (2025-08-17)
+## Security Notes (2025-08-17)
 
-### Critical Fixes Applied
-- ✅ **Path Traversal Vulnerabilities**: Fixed critical path traversal issues in SecurityValidator
-- ✅ **Force Unwrapping Removal**: Eliminated dangerous force unwrapping operations that could cause crashes
-- ✅ **Swift 6.0 Concurrency**: Resolved all concurrency safety issues with proper Sendable compliance
-- ✅ **Error Type Consistency**: Improved error handling to prevent information disclosure
-- ✅ **Memory Safety**: Enhanced WebSocket session management to prevent memory leaks
+Hirundo focuses on the minimal, appropriate safeguards for a static site generator. There is no dynamic execution of untrusted code.
 
-### Security Enhancements
-- 🔒 **Enhanced Path Validation**: Absolute paths now properly validated within project directories
-- 🔒 **UTF-8 Error Handling**: Invalid encoding errors now properly typed and handled
-- 🔒 **Front Matter Parsing**: Improved YAML parsing security for edge cases
-- 🔒 **HTML Sanitization**: Strengthened dangerous pattern detection in markdown content
-- 🔒 **Plugin System**: Dynamic loading disabled for security (only built-in plugins allowed)
+- Path handling uses standard Swift file APIs with proper error propagation.
+- WebSocket live-reload is basic and scoped to local development.
+- Dynamic plugin loading is disabled; only built-in, compiled plugins are supported.
 
-### Testing & Validation
-- 🧪 **85+ Security Tests**: Comprehensive test suite now passing with edge case coverage
-- 🧪 **Integration Testing**: End-to-end security validation in realistic scenarios
-- 🧪 **Concurrency Testing**: Swift 6.0 concurrency safety verified
+Testing & Validation:
+- Security-relevant behavior is covered by existing unit/integration tests where applicable. We do not claim a separate “security test suite” size.
 
 ## Security Announcements
 

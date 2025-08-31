@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "Hirundo",
     platforms: [
-        .macOS(.v14)  // Updated for Swift 6 support
+        .macOS(.v12)
     ],
     products: [
         .executable(
@@ -25,6 +25,8 @@ let package = Package(
         .package(url: "https://github.com/jpsim/Yams.git", from: "6.0.2"),
         // Template engine
         .package(url: "https://github.com/stencilproject/Stencil.git", from: "0.15.1"),
+        // Path utilities (used directly in TemplateEngine)
+        .package(url: "https://github.com/kylef/PathKit.git", from: "1.0.0"),
         // HTTP server - fixed to specific version to prevent unexpected breaking changes
         .package(url: "https://github.com/httpswift/swifter.git", from: "1.5.0"),
         // Argument Parser
@@ -38,9 +40,7 @@ let package = Package(
                 "HirundoCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
             ],
-            swiftSettings: [
-                .swiftLanguageMode(.v6)
-            ]
+            swiftSettings: []
         ),
         // Core library target
         .target(
@@ -49,19 +49,16 @@ let package = Package(
                 .product(name: "Markdown", package: "swift-markdown"),
                 .product(name: "Yams", package: "Yams"),
                 .product(name: "Stencil", package: "Stencil"),
+                .product(name: "PathKit", package: "PathKit"),
                 .product(name: "Swifter", package: "swifter")
             ],
-            swiftSettings: [
-                .swiftLanguageMode(.v6)
-            ]
+            swiftSettings: []
         ),
         // Test target
         .testTarget(
             name: "HirundoTests",
             dependencies: ["HirundoCore"],
-            swiftSettings: [
-                .swiftLanguageMode(.v6)
-            ]
+            swiftSettings: []
         )
     ]
 )

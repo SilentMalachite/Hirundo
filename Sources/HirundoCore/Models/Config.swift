@@ -8,13 +8,10 @@ import Yams
 // Blog and BlogConfig are defined in Models/Blog.swift
 
 
-// PluginsConfig and PluginConfiguration are defined in Models/Plugins.swift
+// Plugin system removed in Stage 2; use Features instead
 
 // Security and performance limits configuration
 // Limits is defined in Models/Limits.swift
-
-// Timeout configuration for I/O operations
-// TimeoutConfig is defined in Models/Timeout.swift
 
 public struct HirundoConfig: Codable, Sendable {
     
@@ -22,12 +19,11 @@ public struct HirundoConfig: Codable, Sendable {
     public let build: Build
     public let server: Server
     public let blog: Blog
-    public let plugins: [PluginConfiguration]
+    public let features: Features
     public let limits: Limits
-    public let timeouts: TimeoutConfig
     
     enum CodingKeys: String, CodingKey {
-        case site, build, server, blog, plugins, limits, timeouts
+        case site, build, server, blog, features, limits
     }
     
     public init(
@@ -35,65 +31,35 @@ public struct HirundoConfig: Codable, Sendable {
         build: Build = Build.defaultBuild(),
         server: Server = Server.defaultServer(),
         blog: Blog = Blog.defaultBlog(),
-        plugins: [PluginConfiguration] = [],
-        limits: Limits = Limits(),
-        timeouts: TimeoutConfig = TimeoutConfig.defaultTimeout()
+        features: Features = Features(),
+        limits: Limits = Limits()
     ) {
         self.site = site
         self.build = build
         self.server = server
         self.blog = blog
-        self.plugins = plugins
+        self.features = features
         self.limits = limits
-        self.timeouts = timeouts
     }
     
     /// Create a default configuration for testing and development
     public static func createDefault() -> HirundoConfig {
-        do {
-            let defaultSite = try Site(
-                title: "Test Site",
-                description: "A test site for development",
-                url: "https://localhost:8080",
-                language: "en-US",
-                author: try Author(name: "Test Author", email: "test@example.com")
-            )
-            
-            return HirundoConfig(
-                site: defaultSite,
-                build: Build.defaultBuild(),
-                server: Server.defaultServer(),
-                blog: Blog.defaultBlog(),
-                plugins: [],
-                limits: Limits(),
-                timeouts: TimeoutConfig.defaultTimeout()
-            )
-        } catch {
-            // Fallback with minimal configuration if validation fails
-            do {
-                let fallbackSite = try Site(
-                    title: "Test Site",
-                    description: nil,
-                    url: "https://localhost:8080",
-                    language: "en-US",
-                    author: nil
-                )
-                
-                return HirundoConfig(
-                    site: fallbackSite,
-                    build: Build.defaultBuild(),
-                    server: Server.defaultServer(),
-                    blog: Blog.defaultBlog(),
-                    plugins: [],
-                    limits: Limits(),
-                    timeouts: TimeoutConfig.defaultTimeout()
-                )
-            } catch {
-                // If even the minimal fallback fails, create an absolute minimal config
-                // This should never happen in practice, but provides a safety net
-                fatalError("Unable to create even minimal default configuration: \(error)")
-            }
-        }
+        let defaultSite = try! Site(
+            title: "Test Site",
+            description: "A test site for development",
+            url: "https://localhost:8080",
+            language: "en-US",
+            author: try! Author(name: "Test Author", email: "test@example.com")
+        )
+        
+        return HirundoConfig(
+            site: defaultSite,
+            build: Build.defaultBuild(),
+            server: Server.defaultServer(),
+            blog: Blog.defaultBlog(),
+            features: Features(),
+            limits: Limits()
+        )
     }
     
     public init(from decoder: Decoder) throws {
@@ -103,9 +69,9 @@ public struct HirundoConfig: Codable, Sendable {
         self.build = try container.decodeIfPresent(Build.self, forKey: .build) ?? Build.defaultBuild()
         self.server = try container.decodeIfPresent(Server.self, forKey: .server) ?? Server.defaultServer()
         self.blog = try container.decodeIfPresent(Blog.self, forKey: .blog) ?? Blog.defaultBlog()
-        self.plugins = try container.decodeIfPresent([PluginConfiguration].self, forKey: .plugins) ?? []
+        // Features only (Stage 2)
+        self.features = try container.decodeIfPresent(Features.self, forKey: .features) ?? Features()
         self.limits = try container.decodeIfPresent(Limits.self, forKey: .limits) ?? Limits()
-        self.timeouts = try container.decodeIfPresent(TimeoutConfig.self, forKey: .timeouts) ?? TimeoutConfig.defaultTimeout()
     }
     
     public static func parse(from yaml: String) throws -> HirundoConfig {
@@ -118,24 +84,6 @@ public struct HirundoConfig: Codable, Sendable {
             }
             
             return config
-        } catch let error as ConfigError {
-            throw error
-        } catch let error as DecodingError {
-            switch error {
-            case .keyNotFound(let key, _):
-                if key.stringValue == "url" {
-                    throw ConfigError.missingRequiredField("url")
-                }
-                throw ConfigError.invalidFormat("Missing key: \(key.stringValue)")
-            case .typeMismatch(let type, let context):
-                throw ConfigError.invalidFormat("Type mismatch: expected \(type) at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
-            case .valueNotFound(let type, let context):
-                throw ConfigError.invalidFormat("Value not found: expected \(type) at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
-            case .dataCorrupted(let context):
-                throw ConfigError.invalidFormat("Data corrupted at \(context.codingPath.map { $0.stringValue }.joined(separator: ".")): \(context.debugDescription)")
-            default:
-                throw ConfigError.parseError("YAML parsing failed: \(String(describing: error))")
-            }
         } catch {
             throw ConfigError.parseError(error.localizedDescription)
         }
@@ -147,23 +95,8 @@ public struct HirundoConfig: Codable, Sendable {
         }
         
         do {
-            // Use a reasonable default timeout for config loading
-            let yaml = try TimeoutFileManager.readFile(at: url.path, timeout: 10.0)
-            
-            // Parse config first to get limits
-            let config = try parse(from: yaml)
-            
-            // Validate YAML size using configured limits
-            guard yaml.count <= config.limits.maxConfigFileSize else {
-                let maxSizeMB = config.limits.maxConfigFileSize / 1_048_576
-                throw ConfigError.invalidValue("Configuration file too large (max \(maxSizeMB)MB)")
-            }
-            
-            return config
-        } catch let error as ConfigError {
-            throw error
-        } catch let error as TimeoutError {
-            throw ConfigError.parseError("Configuration file read timed out: \(error.localizedDescription)")
+            let yaml = try String(contentsOf: url, encoding: .utf8)
+            return try parse(from: yaml)
         } catch {
             throw ConfigError.parseError(error.localizedDescription)
         }

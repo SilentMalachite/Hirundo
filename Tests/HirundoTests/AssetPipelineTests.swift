@@ -5,7 +5,6 @@ final class AssetPipelineTests: XCTestCase {
     
     var tempDir: URL!
     var pipeline: AssetPipeline!
-    var pluginManager: PluginManager!
     
     override func setUp() {
         super.setUp()
@@ -13,8 +12,7 @@ final class AssetPipelineTests: XCTestCase {
         tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("asset-pipeline-test-\(UUID())")
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         
-        pluginManager = PluginManager()
-        pipeline = AssetPipeline(pluginManager: pluginManager)
+        pipeline = AssetPipeline()
     }
     
     override func tearDown() {
@@ -86,13 +84,8 @@ final class AssetPipelineTests: XCTestCase {
     }
     
     func testAssetMinification() throws {
-        // Register minify plugin
-        let minifyPlugin = TestMinifyPlugin()
-        try pluginManager.register(minifyPlugin)
-        try pluginManager.initializeAll(context: PluginContext(
-            projectPath: tempDir.path,
-            config: HirundoConfig(site: try Site(title: "Test", url: "https://example.com"))
-        ))
+        // Enable built-in minification
+        pipeline.cssOptions.minify = true
         
         let sourceDir = tempDir.appendingPathComponent("source")
         let destDir = tempDir.appendingPathComponent("dest")
@@ -117,7 +110,7 @@ final class AssetPipelineTests: XCTestCase {
         // Process assets
         let _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
         
-        // Verify minification
+        // Verify minification (no newlines, compact braces)
         let processedCSS = try String(contentsOf: destDir.appendingPathComponent("style.css"), encoding: .utf8)
         XCTAssertFalse(processedCSS.contains("\n"))
         XCTAssertTrue(processedCSS.contains("body{"))
@@ -262,116 +255,27 @@ final class AssetPipelineTests: XCTestCase {
     }
     
     func testAssetPipelineIntegration() throws {
-        // Test the full pipeline with multiple plugins
-        let minifyPlugin = TestMinifyPlugin()
-        let optimizePlugin = TestOptimizePlugin()
-        
-        try pluginManager.register(minifyPlugin)
-        try pluginManager.register(optimizePlugin)
-        try pluginManager.initializeAll(context: PluginContext(
-            projectPath: tempDir.path,
-            config: HirundoConfig(site: try Site(title: "Test", url: "https://example.com"))
-        ))
-        
+        // Test the full pipeline with minify + fingerprinting enabled
         let sourceDir = tempDir.appendingPathComponent("source")
         let destDir = tempDir.appendingPathComponent("dest")
         try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
-        
+
         // Create test assets
         try "body { margin: 0; }".write(to: sourceDir.appendingPathComponent("style.css"), atomically: true, encoding: .utf8)
         try "function test() { return true; }".write(to: sourceDir.appendingPathComponent("script.js"), atomically: true, encoding: .utf8)
-        
-        // Process with all features enabled
+
+        // Enable built-in options
         pipeline.enableFingerprinting = true
-        pipeline.enableSourceMaps = true
-        
+        pipeline.cssOptions.minify = true
+        pipeline.jsOptions.minify = true
+
         let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
-        
+
         // Verify processing
         XCTAssertEqual(manifest.count, 2)
-        XCTAssertTrue(minifyPlugin.processedAssets.count > 0)
-        XCTAssertTrue(optimizePlugin.processedAssets.count > 0)
+        // Check CSS exists and appears minified
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destDir.appendingPathComponent(manifest["style.css"] ?? "style.css").path))
     }
 }
 
-// Test plugin implementations
-
-final class TestMinifyPlugin: @unchecked Sendable, Plugin {
-    let metadata = PluginMetadata(
-        name: "TestMinifyPlugin",
-        version: "1.0.0",
-        author: "Test",
-        description: "Test minification"
-    )
-    
-    private let lock = NSLock()
-    private var _processedAssets: [String] = []
-    
-    var processedAssets: [String] {
-        get {
-            lock.withLock { _processedAssets }
-        }
-        set {
-            lock.withLock { _processedAssets = newValue }
-        }
-    }
-    
-    required init() {}
-    
-    func initialize(context: PluginContext) throws {}
-    func cleanup() throws {}
-    
-    func processAsset(_ asset: AssetItem) throws -> AssetItem {
-        lock.withLock { _processedAssets.append(asset.sourcePath) }
-        
-        var processed = asset
-        
-        if asset.type == .css {
-            let content = try String(contentsOfFile: asset.sourcePath, encoding: .utf8)
-            let minified = content
-                .replacingOccurrences(of: "\n", with: "")
-                .replacingOccurrences(of: "  ", with: "")
-                .replacingOccurrences(of: " {", with: "{")
-                .replacingOccurrences(of: ": ", with: ":")
-                .replacingOccurrences(of: "; ", with: ";")
-            
-            try minified.write(toFile: asset.outputPath, atomically: true, encoding: .utf8)
-            processed.processed = true
-            processed.metadata["minified"] = AnyCodable(true)
-        }
-        
-        return processed
-    }
-}
-
-final class TestOptimizePlugin: @unchecked Sendable, Plugin {
-    let metadata = PluginMetadata(
-        name: "TestOptimizePlugin",
-        version: "1.0.0",
-        author: "Test",
-        description: "Test optimization"
-    )
-    
-    private let lock = NSLock()
-    private var _processedAssets: [String] = []
-    
-    var processedAssets: [String] {
-        get {
-            lock.withLock { _processedAssets }
-        }
-        set {
-            lock.withLock { _processedAssets = newValue }
-        }
-    }
-    
-    required init() {}
-    
-    func initialize(context: PluginContext) throws {}
-    func cleanup() throws {}
-    
-    func processAsset(_ asset: AssetItem) throws -> AssetItem {
-        lock.withLock { _processedAssets.append(asset.sourcePath) }
-        return asset
-    }
-}
-
+// (Plugin-based test helpers removed in Stage 2)

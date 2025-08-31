@@ -37,7 +37,13 @@ A clear and concise description of what actually happened.
 Please share your `config.yaml` (remove any sensitive information):
 
 ```yaml
-# Your configuration here
+site:
+  title: Example
+  url: https://example.com
+
+features:
+  sitemap: true
+  rss: true
 ```
 
 ## Sample Content

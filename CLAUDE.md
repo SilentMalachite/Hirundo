@@ -24,7 +24,7 @@ Swiftで構築された、モダンで高速、かつセキュアな静的サイ
 - **Markdownパーサー**: swift-markdown（Apple製）
 - **テンプレートエンジン**: Stencil
 - **YAML**: Yams
-- **対応OS**: macOS 13+、Linux
+- **対応OS**: macOS 12+、Linux
 
 ## プロジェクト構造
 
@@ -162,7 +162,7 @@ limits:
   maxDescriptionLength: 500
 
 # プラグイン設定（オプション）
-plugins:
+features:
   - name: "sitemap"
     enabled: true
   - name: "rss"

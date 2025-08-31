@@ -7,7 +7,7 @@ Thank you for your interest in contributing to Hirundo! This document provides g
 ### Prerequisites
 
 - **Swift 6.0 or later** (required for concurrency features)
-- macOS 14+ or Linux
+- macOS 12+ or Linux
 - Xcode 16+ (for macOS development)
 - Git
 
@@ -16,7 +16,7 @@ Thank you for your interest in contributing to Hirundo! This document provides g
 1. **Fork the repository**
    ```bash
    # Fork the repo on GitHub, then clone your fork
-   git clone https://github.com/SilentMalachite/hirundo.git
+   git clone https://github.com/SilentMalachite/Hirundo.git
    cd hirundo
    ```
 
