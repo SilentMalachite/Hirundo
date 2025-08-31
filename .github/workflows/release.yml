@@ -4,9 +4,16 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to (re)build and release (e.g., v1.1.0)'
+        required: true
 
 jobs:
   generate-release:
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -17,7 +24,11 @@ jobs:
       - name: Extract tag
         id: tag
         run: |
-          REF="${GITHUB_REF##*/}"
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            REF="${{ github.event.inputs.tag }}"
+          else
+            REF="${GITHUB_REF##*/}"
+          fi
           echo "tag=${REF}" >> $GITHUB_OUTPUT
 
       - name: Extract changelog section
@@ -84,6 +95,7 @@ jobs:
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.generate-release.outputs.tag }}
           files: |
             dist/*.zip
             dist/*.sha256
@@ -122,6 +134,7 @@ jobs:
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.generate-release.outputs.tag }}
           files: |
             dist/*.tar.gz
             dist/*.sha256
