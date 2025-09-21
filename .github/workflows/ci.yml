@@ -11,7 +11,7 @@ jobs:
     runs-on: macos-latest
     strategy:
       matrix:
-        swift-version: ['6.0']
+        swift-version: ['5.10']
     
     steps:
     - uses: actions/checkout@v4
@@ -22,7 +22,7 @@ jobs:
         swift-version: ${{ matrix.swift-version }}
     
     - name: Cache Swift packages
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: .build
         key: ${{ runner.os }}-swift-${{ hashFiles('Package.resolved') }}
@@ -44,7 +44,7 @@ jobs:
     
     - name: Upload coverage to Codecov
       if: matrix.os == 'macos-latest'
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
       with:
         file: ./coverage.lcov
         flags: unittests
@@ -59,7 +59,7 @@ jobs:
     - name: Setup Swift
       uses: swift-actions/setup-swift@v1
       with:
-        swift-version: '6.0'
+        swift-version: '5.10'
     
     - name: SwiftLint
       run: |
@@ -99,13 +99,13 @@ jobs:
     - name: Setup Swift
       uses: swift-actions/setup-swift@v1
       with:
-        swift-version: '6.0'
+        swift-version: '5.10'
     
     - name: Build Release
       run: swift build -c release
     
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: hirundo-${{ matrix.os }}
+        name: hirundo-macos
         path: .build/release/hirundo
