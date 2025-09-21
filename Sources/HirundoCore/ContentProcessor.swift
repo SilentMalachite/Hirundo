@@ -93,33 +93,26 @@ public class ContentProcessor: @unchecked Sendable {
             throw ContentProcessorError.cannotEnumerateDirectory(directoryURL.path)
         }
         
-        // Use manual iteration to avoid makeIterator() async issue
+        // Collect markdown files from directory
         var pendingURLs: [URL] = []
-        let processEnumerator = {
-            while let fileURL = enumerator.nextObject() as? URL {
-                guard fileURL.pathExtension == "md" || fileURL.pathExtension == "markdown" else {
+        while let fileURL = enumerator.nextObject() as? URL {
+            guard fileURL.pathExtension == "md" || fileURL.pathExtension == "markdown" else {
+                continue
+            }
+
+            // Check file size to warn about potentially large files
+            if let fileSize = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+               fileSize > self.config.limits.maxMarkdownFileSize {
+                print("Warning: Large markdown file detected: \(fileURL.lastPathComponent) (\(fileSize) bytes)")
+                // Skip files that are too large to prevent memory issues
+                if fileSize > self.config.limits.maxMarkdownFileSize * 2 {
+                    print("Skipping extremely large file: \(fileURL.lastPathComponent)")
                     continue
                 }
-                
-                // Check file size to warn about potentially large files
-                if let fileSize = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-                   fileSize > self.config.limits.maxMarkdownFileSize {
-                    print("Warning: Large markdown file detected: \(fileURL.lastPathComponent) (\(fileSize) bytes)")
-                    // Skip files that are too large to prevent memory issues
-                    if fileSize > self.config.limits.maxMarkdownFileSize * 2 {
-                        print("Skipping extremely large file: \(fileURL.lastPathComponent)")
-                        continue
-                    }
-                }
-                
-                pendingURLs.append(fileURL)
             }
+
+            pendingURLs.append(fileURL)
         }
-        
-        // Execute enumeration in non-async context
-        await Task {
-            processEnumerator()
-        }.value
         
         markdownURLs = pendingURLs
         
@@ -184,21 +177,14 @@ public class ContentProcessor: @unchecked Sendable {
             throw ContentProcessorError.cannotEnumerateDirectory(directoryURL.path)
         }
         
-        // Use manual iteration to avoid makeIterator() async issue
+        // Collect markdown files from directory
         var pendingURLs: [URL] = []
-        let processEnumerator = {
-            while let fileURL = enumerator.nextObject() as? URL {
-                guard fileURL.pathExtension == "md" || fileURL.pathExtension == "markdown" else {
-                    continue
-                }
-                pendingURLs.append(fileURL)
+        while let fileURL = enumerator.nextObject() as? URL {
+            guard fileURL.pathExtension == "md" || fileURL.pathExtension == "markdown" else {
+                continue
             }
+            pendingURLs.append(fileURL)
         }
-        
-        // Execute enumeration in non-async context
-        await Task {
-            processEnumerator()
-        }.value
         
         markdownURLs = pendingURLs
         
