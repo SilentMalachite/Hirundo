@@ -115,6 +115,8 @@ public class SiteGenerator {
         var errors: [BuildErrorDetail] = []
         var successCount = 0
         var failCount = 0
+        var processedPages: [Page] = []
+        var processedPosts: [Post] = []
         
         // Prepare directories
         let outputURL = URL(fileURLWithPath: projectPath)
@@ -153,13 +155,19 @@ public class SiteGenerator {
         
         for content in processedContents {
             do {
-                _ = try await processIndividualContent(
+                let (page, post) = try await processIndividualContent(
                     content,
                     outputDirectory: outputURL,
-                    allPages: [],
-                    allPosts: []
+                    allPages: processedPages,
+                    allPosts: processedPosts
                 )
                 successCount += 1
+                if let page = page {
+                    processedPages.append(page)
+                }
+                if let post = post {
+                    processedPosts.append(post)
+                }
             } catch {
                 failCount += 1
                 errors.append(BuildErrorDetail(

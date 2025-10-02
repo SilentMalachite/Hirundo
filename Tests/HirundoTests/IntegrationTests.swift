@@ -441,21 +441,6 @@ final class IntegrationTests: XCTestCase {
     
     func testFeatureIntegration() async throws {
         // Test with sitemap/rss features enabled
-        let configWithPlugins = """
-        site:
-          title: "Plugin Test Site"
-          url: "https://test.example.com"
-        
-        build:
-          contentDirectory: "content"
-          outputDirectory: "_site"
-          staticDirectory: "static"
-          templatesDirectory: "templates"
-        
-        features:
-          sitemap: true
-          rss: true
-        """
         
         // Build with programmatic config (features enabled)
         let site = try Site(title: "Plugin Test Site", url: "https://test.example.com")

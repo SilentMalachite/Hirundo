@@ -1,0 +1,2 @@
+a86fdfa ci(release): support workflow_dispatch and pass tag to upload steps
+96cef27 ci(release): build macOS/Linux binaries and upload to GitHub Release

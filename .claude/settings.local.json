@@ -24,7 +24,10 @@
       "mcp__serena__find_file",
       "mcp__serena__activate_project",
       "mcp__serena__check_onboarding_performed",
-      "mcp__serena__read_memory"
+      "mcp__serena__read_memory",
+      "Bash(git push:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run:*)"
     ],
     "deny": []
   }
