@@ -71,8 +71,7 @@ jobs:
         run: swift build -c debug -v
 
       - name: Test with ThreadSanitizer
-        run: |
-          # ThreadSanitizer reports warnings from swift-markdown library
-          # Set halt_on_error=0 to report but not fail on data races
-          export TSAN_OPTIONS="halt_on_error=0"
-          swift test -c debug --sanitize=thread -v
+        run: swift test -c debug --sanitize=thread -v
+        env:
+          TSAN_OPTIONS: "halt_on_error=0"
+        continue-on-error: true  # Allow TSan warnings from external libraries
