@@ -44,13 +44,15 @@ jobs:
           else
             # Find next section header line or EOF
             tail -n +"$start" CHANGELOG.md > _tmp.md
-            end=$(awk '/^## \[/{ if (NR>1) { print NR-1; exit } } END{ if (NR>0 && !found) print NR }' _tmp.md)
+            end=$(awk '/^## \[/{ if (NR>1) { print NR-1; found=1; exit } } END{ if (!found && NR>0) print NR }' _tmp.md)
             if [ -z "$end" ]; then end=$(wc -l < _tmp.md); fi
             head -n "$end" _tmp.md > RELEASE_BODY.txt
           fi
-          echo 'body<<EOF' >> $GITHUB_OUTPUT
-          cat RELEASE_BODY.txt >> $GITHUB_OUTPUT
-          echo 'EOF' >> $GITHUB_OUTPUT
+          {
+            echo 'body<<EOF'
+            cat RELEASE_BODY.txt
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
 
       - name: Create or update GitHub release
         uses: softprops/action-gh-release@v2
