@@ -94,7 +94,7 @@ Live development server with WebSocket support:
 - Memory management
 
 **Features:**
-- FSEvents on macOS, fallback on Linux
+- FSEvents (macOS)
 - WebSocket session cleanup
 - Real-time error notifications
 - Request logging

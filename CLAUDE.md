@@ -24,7 +24,7 @@ Swiftで構築された、モダンで高速、かつセキュアな静的サイ
 - **Markdownパーサー**: swift-markdown（Apple製）
 - **テンプレートエンジン**: Stencil
 - **YAML**: Yams
-- **対応OS**: macOS 12+、Linux
+- **対応OS**: macOS 12+
 
 ## プロジェクト構造
 

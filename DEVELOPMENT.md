@@ -6,7 +6,7 @@ This document summarizes common development tasks and local workflows for Hirund
 ## Environment
 
 - Swift 6.0+
-- macOS 12+ (or Linux for core library)
+- macOS 12+
 - Xcode 16+ recommended for macOS development
 
 ## Build, Test, Run

@@ -7,7 +7,7 @@ Thank you for your interest in contributing to Hirundo! This document provides g
 ### Prerequisites
 
 - **Swift 6.0 or later** (required for concurrency features)
-- macOS 12+ or Linux
+- macOS 12+
 - Xcode 16+ (for macOS development)
 - Git
 

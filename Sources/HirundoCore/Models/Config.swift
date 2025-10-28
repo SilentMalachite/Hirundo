@@ -84,6 +84,8 @@ public struct HirundoConfig: Codable, Sendable {
             }
             
             return config
+        } catch let error as ConfigError {
+            throw error
         } catch {
             throw ConfigError.parseError(error.localizedDescription)
         }

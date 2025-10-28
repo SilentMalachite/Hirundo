@@ -62,15 +62,16 @@ struct ServeCommand: AsyncParsableCommand {
             #endif
             
             print("🔚 Press Ctrl+C to stop")
+            let capturedServer = server
             try await withTaskCancellationHandler {
                 while !Task.isCancelled {
                     try await Task.sleep(nanoseconds: 1_000_000_000)
                 }
             } onCancel: {
                 print("⏹️ Stopping server…")
-                if let server = server {
+                if let capturedServer = capturedServer {
                     Task {
-                        await server.stop()
+                        await capturedServer.stop()
                         print("🛑 Server stopped")
                     }
                 }
