@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **CONCURRENCY**: Improved Swift 6 concurrency compliance across core components
+- **PERFORMANCE**: Replaced DispatchQueue barrier pattern with NSLock in TemplateEngine for simpler synchronization
+- **SIMPLIFICATION**: Removed PathSanitizer cache, converting it to enum-based pure function
+
+### Added
+- **TYPE SAFETY**: Added Sendable conformance to markdown processing components (MarkdownParser, ContentProcessor, FrontMatterProcessor, MarkdownValidator, MarkdownNodeProcessor, HTMLRenderer, StreamingMarkdownParser)
+- **TYPE SAFETY**: Added Sendable conformance to HTMLSanitizer
+
+### Technical Details
+- All changes maintain thread safety while ensuring Swift 6 strict concurrency compliance
+- Tests pass and ThreadSanitizer reports no data races in Hirundo code
+- Note: TSan warnings from swift-markdown library are expected and documented in CI configuration
+
 ## [1.1.3] - 2025-10-28
 
 ### Fixed
@@ -13,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - docs: Updated platform requirements to reflect macOS 12+ only (removed Linux references)
+- ci: Configure ThreadSanitizer to report but not fail on data races from external libraries
 
 ## [1.1.0] - 2025-08-31
 
