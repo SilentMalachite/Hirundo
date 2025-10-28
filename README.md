@@ -88,10 +88,12 @@ Build your static site.
 hirundo build [options]
 
 Options:
-  --config <file>     Configuration file path (default: config.yaml)
-  --environment <env> Build environment (default: production)
-  --drafts           Include draft posts
-  --clean            Clean output before building
+  --config <file>       Configuration file path (default: config.yaml)
+  --environment <env>   Build environment (default: production)
+  --drafts              Include draft posts
+  --clean               Clean output before building
+  --continue-on-error   Continue building even if some files fail (error recovery mode)
+  --verbose             Show verbose error information
 ```
 
 ### `hirundo serve`
@@ -105,6 +107,7 @@ Options:
   --host <host>      Server host (default: localhost)
   --no-reload        Disable live reload
   --no-browser       Don't open browser automatically
+  --verbose          Show verbose error information
 ```
 
 ### `hirundo new`

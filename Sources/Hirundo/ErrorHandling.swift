@@ -1,41 +1,49 @@
 import Foundation
 import HirundoCore
 
+/// Write to standard error with newline
+@inline(__always)
+private func eprint(_ message: String) {
+    if let data = (message + "\n").data(using: .utf8) {
+        try? FileHandle.standardError.write(contentsOf: data)
+    }
+}
+
 /// Error handling helper function for CLI commands
 func handleError(_ error: Error, context: String, verbose: Bool = false) {
     if let hirundoError = error as? HirundoErrorInfo {
-        print(hirundoError.userMessage)
+        eprint(hirundoError.userMessage)
         if verbose {
-            print("\nDebug Details:")
-            print("  Error Code: \(hirundoError.category.rawValue)-\(hirundoError.code)")
-            print("  Details: \(hirundoError.details)")
+            eprint("\nDebug Details:")
+            eprint("  Error Code: \(hirundoError.category.rawValue)-\(hirundoError.code)")
+            eprint("  Details: \(hirundoError.details)")
             if !hirundoError.debugInfo.isEmpty {
-                print("  Debug Info: \(hirundoError.debugInfo)")
+                eprint("  Debug Info: \(hirundoError.debugInfo)")
             }
         }
     } else if let configError = error as? ConfigError {
         let hirundoError = configError.toHirundoError()
-        print(hirundoError.userMessage)
-        print("\n📍 Specific issue: \(configError.localizedDescription)")
+        eprint(hirundoError.userMessage)
+        eprint("\n📍 Specific issue: \(configError.localizedDescription)")
     } else if let markdownError = error as? MarkdownError {
         let hirundoError = markdownError.toHirundoError()
-        print(hirundoError.userMessage)
-        print("\n📍 Specific issue: \(markdownError.localizedDescription)")
+        eprint(hirundoError.userMessage)
+        eprint("\n📍 Specific issue: \(markdownError.localizedDescription)")
     } else if let templateError = error as? TemplateError {
         let hirundoError = templateError.toHirundoError()
-        print(hirundoError.userMessage)
-        print("\n📍 Specific issue: \(templateError.localizedDescription)")
+        eprint(hirundoError.userMessage)
+        eprint("\n📍 Specific issue: \(templateError.localizedDescription)")
     } else if let buildError = error as? BuildError {
         let hirundoError = buildError.toHirundoError()
-        print(hirundoError.userMessage)
-        print("\n📍 Specific issue: \(buildError.localizedDescription)")
+        eprint(hirundoError.userMessage)
+        eprint("\n📍 Specific issue: \(buildError.localizedDescription)")
     } else {
         // Generic error handling
-        print("\n❌ \(context) failed")
-        print("\n📍 Error: \(error.localizedDescription)")
-        print("\n💡 Suggestion: Check the error message above for details")
+        eprint("\n❌ \(context) failed")
+        eprint("\n📍 Error: \(error.localizedDescription)")
+        eprint("\n💡 Suggestion: Check the error message above for details")
         if verbose {
-            print("\nFull error: \(error)")
+            eprint("\nFull error: \(error)")
         }
     }
 }

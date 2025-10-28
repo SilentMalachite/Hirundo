@@ -23,21 +23,27 @@ struct ServeCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Don't open browser")
     var noBrowser: Bool = false
     
+    @Flag(name: .long, help: "Show verbose error information")
+    var verbose: Bool = false
+    
     mutating func run() async throws {
         print("🌐 Starting development server…")
         print("🏠 Host: \(host)")
         print("🔌 Port: \(port)")
-        print("🔄 Live reload: \(!noReload ? "enabled" : "disabled")")
-        print("🌍 Open browser: \(!noBrowser ? "yes" : "no")")
+        let liveReloadStatus = !noReload ? "enabled" : "disabled"
+        print("🔄 Live reload: \(liveReloadStatus)")
+        let openBrowserStatus = !noBrowser ? "yes" : "no"
+        print("🌍 Open browser: \(openBrowserStatus)")
         
         let currentDirectory = FileManager.default.currentDirectoryPath
         
+        var server: DevelopmentServer?
         do {
             // Load configuration to respect CORS, WS auth, and output directory
             let configURL = URL(fileURLWithPath: currentDirectory).appendingPathComponent("config.yaml")
             let config = try HirundoConfig.load(from: configURL)
             
-            let server = DevelopmentServer(
+            let s = DevelopmentServer(
                 projectPath: currentDirectory,
                 port: port,
                 host: host,
@@ -45,7 +51,8 @@ struct ServeCommand: AsyncParsableCommand {
                 fileManager: .default,
                 outputDirectory: config.build.outputDirectory
             )
-            try await server.start()
+            server = s
+            try await s.start()
             print("✅ Development server is running at http://\(host):\(port)")
             
             #if os(macOS)
@@ -55,11 +62,29 @@ struct ServeCommand: AsyncParsableCommand {
             #endif
             
             print("🔚 Press Ctrl+C to stop")
-            while true {
-                try await Task.sleep(nanoseconds: 1_000_000_000)
+            try await withTaskCancellationHandler {
+                while !Task.isCancelled {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+            } onCancel: {
+                print("⏹️ Stopping server…")
+                if let server = server {
+                    Task {
+                        await server.stop()
+                        print("🛑 Server stopped")
+                    }
+                }
+            }
+            // If the loop exited without cancellation, ensure server is stopped
+            if let server = server {
+                await server.stop()
             }
         } catch {
-            handleError(error, context: "Serve")
+            // Ensure server is stopped even on error
+            if let server = server {
+                await server.stop()
+            }
+            handleError(error, context: "Serve", verbose: verbose)
             throw ExitCode.failure
         }
     }

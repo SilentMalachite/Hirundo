@@ -14,6 +14,9 @@ struct CleanCommand: ParsableCommand {
     @Flag(name: .long, help: "Skip confirmation")
     var force: Bool = false
     
+    @Flag(name: .long, help: "Show verbose error information")
+    var verbose: Bool = false
+    
     mutating func run() throws {
         print("🧹 Cleaning...")
         print("🗂️ Clean cache: \(cache ? "yes" : "no")")
@@ -53,7 +56,7 @@ struct CleanCommand: ParsableCommand {
                     try fileManager.removeItem(at: outputURL)
                     print("✅ Removed output directory")
                 } catch {
-                    print("❌ Failed to remove output directory: \(error)")
+                    handleError(error, context: "Clean", verbose: verbose)
                 }
             }
             
@@ -63,7 +66,7 @@ struct CleanCommand: ParsableCommand {
                     try fileManager.removeItem(at: cacheURL)
                     print("✅ Removed cache directory")
                 } catch {
-                    print("❌ Failed to remove cache directory: \(error)")
+                    handleError(error, context: "Clean", verbose: verbose)
                 }
             }
         }

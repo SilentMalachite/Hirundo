@@ -88,10 +88,12 @@ hirundo init [パス] [オプション]
 hirundo build [オプション]
 
 オプション:
-  --config <ファイル>    設定ファイルのパス（デフォルト: config.yaml）
-  --environment <環境>   ビルド環境（デフォルト: production）
-  --drafts              下書き記事を含める
-  --clean               ビルド前に出力をクリーン
+  --config <ファイル>       設定ファイルのパス（デフォルト: config.yaml）
+  --environment <環境>      ビルド環境（デフォルト: production）
+  --drafts                  下書き記事を含める
+  --clean                   ビルド前に出力をクリーン
+  --continue-on-error       一部のファイルで失敗してもビルドを継続（エラーリカバリモード）
+  --verbose                 詳細なエラー情報を表示
 ```
 
 ### `hirundo serve`
@@ -105,6 +107,7 @@ hirundo serve [オプション]
   --host <ホスト>       サーバーホスト（デフォルト: localhost）
   --no-reload          ライブリロードを無効化
   --no-browser         ブラウザを自動で開かない
+  --verbose            詳細なエラー情報を表示
 ```
 
 ### `hirundo new`
@@ -189,16 +192,12 @@ limits:
   maxTitleLength: 200
   maxDescriptionLength: 500
 
-# プラグイン設定（オプション）
+# 機能設定（オプション）
 features:
   sitemap: true
   rss: true
-  - name: "minify"
-    enabled: true
-    settings:
-      minifyHTML: true
-      minifyCSS: true
-      minifyJS: false  # 安全のため無効
+  searchIndex: true
+  minify: true
 ```
 
 ## フロントマター

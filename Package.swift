@@ -40,7 +40,9 @@ let package = Package(
                 "HirundoCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
             ],
-            swiftSettings: []
+            swiftSettings: [
+                .unsafeFlags(["-Xfrontend", "-warn-concurrency", "-Xfrontend", "-enable-actor-data-race-checks"], .when(configuration: .debug))
+            ]
         ),
         // Core library target
         .target(
@@ -52,7 +54,9 @@ let package = Package(
                 .product(name: "PathKit", package: "PathKit"),
                 .product(name: "Swifter", package: "swifter")
             ],
-            swiftSettings: []
+            swiftSettings: [
+                .unsafeFlags(["-Xfrontend", "-warn-concurrency", "-Xfrontend", "-enable-actor-data-race-checks"], .when(configuration: .debug))
+            ]
         ),
         // Test target
         .testTarget(

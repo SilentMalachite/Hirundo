@@ -111,7 +111,8 @@ public class SiteGenerator {
     }
     
     // Build with error recovery
-    public func buildWithRecovery(clean: Bool = false, includeDrafts: Bool = false) async throws -> BuildResult {
+    public func buildWithRecovery(clean: Bool = false, includeDrafts: Bool = false, environment: String = "production") async throws -> BuildResult {
+        // Note: environment is reserved for future conditional behaviors
         var errors: [BuildErrorDetail] = []
         var successCount = 0
         var failCount = 0
@@ -155,6 +156,7 @@ public class SiteGenerator {
         
         for content in processedContents {
             do {
+                try Task.checkCancellation()
                 let (page, post) = try await processIndividualContent(
                     content,
                     outputDirectory: outputURL,
@@ -205,6 +207,7 @@ public class SiteGenerator {
         
         // Render and write each content
         for content in processedContents {
+            try Task.checkCancellation()
             let (page, post) = try await processIndividualContent(
                 content,
                 outputDirectory: outputDirectory,
@@ -353,11 +356,13 @@ public class SiteGenerator {
         let base = config.site.url
         let enumerator = fm.enumerator(at: outputURL, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles])
         while let fileURL = enumerator?.nextObject() as? URL {
+            try Task.checkCancellation()
             guard fileURL.pathExtension == "html" else { continue }
             var rel = fileURL.path.replacingOccurrences(of: outputURL.path, with: "")
             rel = rel.replacingOccurrences(of: "/index.html", with: "/")
             let mod = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
-            urls.append((loc: base + rel, lastmod: mod))
+            let loc = URLUtils.joinSiteURL(base: base, path: rel)
+            urls.append((loc: loc, lastmod: mod))
         }
         let dateFormatter = ISO8601DateFormatter()
         var xml = """
@@ -383,6 +388,7 @@ public class SiteGenerator {
     private func generateRSS(posts: [Post], outputURL: URL) throws {
         let dateFormatter = ISO8601DateFormatter()
         let now = dateFormatter.string(from: Date())
+        let selfHref = URLUtils.joinSiteURL(base: config.site.url, path: "/rss.xml")
         var rss = """
         <?xml version=\"1.0\" encoding=\"UTF-8\"?>
         <rss version=\"2.0\" xmlns:atom=\"http://www.w3.org/2005/Atom\">\n<channel>
@@ -391,12 +397,13 @@ public class SiteGenerator {
             <description>\(escapeXML(config.site.description ?? ""))</description>
             <language>\(config.site.language ?? "en-US")</language>
             <lastBuildDate>\(now)</lastBuildDate>
-            <atom:link href=\"\(config.site.url)/rss.xml\" rel=\"self\" type=\"application/rss+xml\" />
+            <atom:link href=\"\(escapeXML(selfHref))\" rel=\"self\" type=\"application/rss+xml\" />
 
         """
         let sorted = posts.sorted { $0.date > $1.date }.prefix(20)
         for p in sorted {
-            let link = config.site.url + "/posts/\(p.slug)/"
+            let itemPath = "/posts/\(p.slug)/"
+            let link = URLUtils.joinSiteURL(base: config.site.url, path: itemPath)
             let desc = p.description ?? String(p.content.prefix(200))
             rss += """
             <item>
@@ -414,8 +421,18 @@ public class SiteGenerator {
     }
 
     private func generateSearchIndex(pages: [Page], posts: [Post], outputURL: URL) throws {
-        struct Entry: Codable { let url: String; let title: String; let content: String; let tags: [String]; let date: Date? }
-        struct Index: Codable { let version: String; let generated: Date; let entries: [Entry] }
+        struct Entry: Codable {
+            let url: String
+            let title: String
+            let content: String
+            let tags: [String]
+            let date: Date?
+        }
+        struct Index: Codable {
+            let version: String
+            let generated: Date
+            let entries: [Entry]
+        }
         func stripHTML(_ s: String) -> String {
             return s.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
                     .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)

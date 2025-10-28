@@ -36,6 +36,9 @@ struct NewPostCommand: ParsableCommand {
     @Flag(name: .long, help: "Open in editor")
     var open: Bool = false
     
+    @Flag(name: .long, help: "Show verbose error information")
+    var verbose: Bool = false
+    
     mutating func run() throws {
         print("📝 Creating new blog post...")
         print("📄 Title: \(title)")
@@ -54,7 +57,7 @@ struct NewPostCommand: ParsableCommand {
             try fileManager.createDirectory(at: postsURL, withIntermediateDirectories: true)
             print("✅ Posts directory ready: \(postsURL.path)")
         } catch {
-            print("❌ Failed to create posts directory: \(error)")
+            handleError(error, context: "New post", verbose: verbose)
             throw ExitCode.failure
         }
         
@@ -81,6 +84,9 @@ struct NewPageCommand: ParsableCommand {
     @Flag(name: .long, help: "Open in editor")
     var open: Bool = false
     
+    @Flag(name: .long, help: "Show verbose error information")
+    var verbose: Bool = false
+    
     mutating func run() throws {
         print("📄 Creating new page...")
         print("📝 Title: \(title)")
@@ -97,7 +103,7 @@ struct NewPageCommand: ParsableCommand {
             try fileManager.createDirectory(at: contentURL, withIntermediateDirectories: true)
             print("✅ Content directory ready: \(contentURL.path)")
         } catch {
-            print("❌ Failed to create content directory: \(error)")
+            handleError(error, context: "New page", verbose: verbose)
             throw ExitCode.failure
         }
         

@@ -19,6 +19,9 @@ struct InitCommand: ParsableCommand {
     @Flag(name: .long, help: "Force creation in non-empty directory")
     var force: Bool = false
     
+    @Flag(name: .long, help: "Show verbose error information")
+    var verbose: Bool = false
+    
     mutating func run() throws {
         print("🚀 Creating new Hirundo site at: \(path)")
         print("📝 Title: \(title)")
@@ -33,11 +36,12 @@ struct InitCommand: ParsableCommand {
             do {
                 let contents = try fileManager.contentsOfDirectory(at: siteURL, includingPropertiesForKeys: nil)
                 if !contents.isEmpty && !force {
-                    print("❌ Directory is not empty. Use --force to override.")
+                    let err = NSError(domain: "Init", code: 1, userInfo: [NSLocalizedDescriptionKey: "Directory is not empty. Use --force to override."])
+                    handleError(err, context: "Init", verbose: verbose)
                     throw ExitCode.failure
                 }
             } catch {
-                print("❌ Failed to check directory contents: \(error)")
+                handleError(error, context: "Init", verbose: verbose)
                 throw ExitCode.failure
             }
         }

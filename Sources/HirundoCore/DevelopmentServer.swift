@@ -10,6 +10,17 @@ public final class DevelopmentServer: @unchecked Sendable {
     private let fileManager: FileManager
     private var hotReloadManager: HotReloadManager?
     private let outputPath: String
+
+    // Concurrency: lifecycle guard to make stop() idempotent and thread-safe
+    private actor LifecycleState {
+        private(set) var stopped = false
+        func markStoppingIfNeeded() -> Bool {
+            if stopped { return false }
+            stopped = true
+            return true
+        }
+    }
+    private let lifecycle = LifecycleState()
     
     public init(
         projectPath: String,
@@ -36,7 +47,15 @@ public final class DevelopmentServer: @unchecked Sendable {
         print("Development server started at http://\(host):\(port)")
     }
     
-
+    /// Gracefully stop the server and related resources (idempotent)
+    public func stop() async {
+        let shouldStop = await lifecycle.markStoppingIfNeeded()
+        guard shouldStop else { return }
+        server.stop()
+        if let hotReloadManager {
+            await hotReloadManager.stop()
+        }
+    }
     
     private func setupRoutes() {
         // Main route handler for static files
@@ -108,11 +127,13 @@ public final class DevelopmentServer: @unchecked Sendable {
         }
     }
     
-
+    
     
     deinit {
+        // Ensure resources are released, idempotently
         server.stop()
-        Task { [hotReloadManager] in
+        Task { [lifecycle, hotReloadManager] in
+            _ = await lifecycle.markStoppingIfNeeded()
             await hotReloadManager?.stop()
         }
     }
