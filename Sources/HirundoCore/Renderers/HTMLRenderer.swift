@@ -8,7 +8,7 @@ import Markdown
 /// 3. URLスキーム検証
 /// 4. イベントハンドラー削除
 /// 5. HTMLエンティティデコード（エンコードされた攻撃を検出）
-public class HTMLRenderer {
+public final class HTMLRenderer: Sendable {
     private let sanitizer: HTMLSanitizer
     
     // 許可されたHTMLタグ（安全なサブセット）

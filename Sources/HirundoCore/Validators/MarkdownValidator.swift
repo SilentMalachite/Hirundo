@@ -1,7 +1,7 @@
 import Foundation
 
 /// マークダウンコンテンツのセキュリティ検証を行うクラス
-public class MarkdownValidator {
+public final class MarkdownValidator: Sendable {
     private let limits: Limits
     private let skipContentValidation: Bool
     

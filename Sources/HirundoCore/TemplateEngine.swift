@@ -2,12 +2,12 @@ import Foundation
 import Stencil
 import PathKit
 
-/// Thread-safety: mutations of environment and siteConfig are guarded by environmentQueue with .barrier; other properties are immutable after init.
-public class TemplateEngine: @unchecked Sendable {
+/// Thread-safe template engine using synchronized access to mutable state
+public final class TemplateEngine: @unchecked Sendable {
     private var environment: Environment
     private let templatesDirectory: String
     private var siteConfig: Site?
-    private let environmentQueue = DispatchQueue(label: "com.hirundo.environment", attributes: .concurrent)
+    private let lock = NSLock()
     
     // Component managers
     private let templateCache: TemplateCache
@@ -28,24 +28,25 @@ public class TemplateEngine: @unchecked Sendable {
     }
     
     public func configure(with siteConfig: Site) {
-        environmentQueue.sync(flags: .barrier) {
-            self.siteConfig = siteConfig
-            
-            // Re-register filters with site config
-            var ext = Extension()
-            TemplateFilters.registerStaticFilters(to: &ext)
-            TemplateFilters.registerDynamicFilters(to: &ext, siteConfig: siteConfig)
-            
-            // Update environment with new extension
-            let loader = FileSystemLoader(paths: [Path(templatesDirectory)])
-            self.environment = Environment(
-                loader: loader,
-                extensions: [ext]
-            )
-            
-            // Clear template cache since environment changed
-            templateCache.clearCache()
-        }
+        lock.lock()
+        defer { lock.unlock() }
+        
+        self.siteConfig = siteConfig
+        
+        // Re-register filters with site config
+        var ext = Extension()
+        TemplateFilters.registerStaticFilters(to: &ext)
+        TemplateFilters.registerDynamicFilters(to: &ext, siteConfig: siteConfig)
+        
+        // Update environment with new extension
+        let loader = FileSystemLoader(paths: [Path(templatesDirectory)])
+        self.environment = Environment(
+            loader: loader,
+            extensions: [ext]
+        )
+        
+        // Clear template cache since environment changed
+        templateCache.clearCache()
     }
     
     public func render(template: String, context: [String: Any]) throws -> String {
@@ -60,6 +61,8 @@ public class TemplateEngine: @unchecked Sendable {
     }
     
     public func clearCache() {
+        lock.lock()
+        defer { lock.unlock() }
         templateCache.clearCache()
     }
     
@@ -84,6 +87,9 @@ public class TemplateEngine: @unchecked Sendable {
     }
     
     private func getTemplate(name: String) throws -> Template {
+        lock.lock()
+        defer { lock.unlock() }
+        
         // First, check cache
         if let cached = templateCache.getTemplate(for: name) {
             return cached

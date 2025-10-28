@@ -1,7 +1,7 @@
 import Foundation
 
-/// HTMLコンテンツのサニタイゼーションを行うクラス
-public class HTMLSanitizer {
+/// Thread-safe HTML content sanitizer (stateless)
+public final class HTMLSanitizer: Sendable {
     
     /// HTMLをサニタイズ
     /// - Parameter html: サニタイズするHTML文字列

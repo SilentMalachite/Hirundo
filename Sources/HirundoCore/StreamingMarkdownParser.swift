@@ -3,7 +3,7 @@ import Markdown
 import Yams
 
 /// Simplified parser stub that maintains the same API but parses in-memory.
-public final class StreamingMarkdownParser {
+public final class StreamingMarkdownParser: Sendable {
     private let chunkSize: Int // kept for API compatibility (unused)
     private let maxMetadataSize: Int // kept for API compatibility (unused)
 

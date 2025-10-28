@@ -1,88 +1,16 @@
 import Foundation
 
-/// Thread-safe path sanitization with caching for performance optimization
-public final class PathSanitizer: @unchecked Sendable {
-    public static let shared = PathSanitizer()
+/// Thread-safe path sanitization (pure function, no caching)
+public enum PathSanitizer {
     
-    // Cache for sanitized paths with LRU eviction
-    private var cache = [String: String]()
-    private var accessOrder = [String]()
-    private let maxCacheSize = 1000
-    private let queue = DispatchQueue(label: "com.hirundo.pathsanitizer", attributes: .concurrent)
-    
-    // Statistics for monitoring
-    private var cacheHits = 0
-    private var cacheMisses = 0
-    
-    private init() {}
-    
-    /// Sanitizes a path and caches the result for performance
+    /// Sanitizes a path to make it safe for file operations
     /// - Parameter path: The path to sanitize
     /// - Returns: A sanitized path safe for file operations
     public static func sanitize(_ path: String) -> String {
-        return shared.sanitizePath(path)
+        return performSanitization(path)
     }
     
-    /// Clears the sanitization cache
-    public static func clearCache() {
-        shared.clearCacheInternal()
-    }
-    
-    /// Gets cache statistics for monitoring
-    public static func getCacheStatistics() -> (hits: Int, misses: Int, size: Int) {
-        return shared.getStatistics()
-    }
-    
-    private func sanitizePath(_ path: String) -> String {
-        // Check cache first
-        if let cached = getCached(path) {
-            return cached
-        }
-        
-        // Perform sanitization
-        let sanitized = performSanitization(path)
-        
-        // Cache the result
-        setCached(path, sanitized)
-        
-        return sanitized
-    }
-    
-    private func getCached(_ path: String) -> String? {
-        return queue.sync {
-            if let cached = cache[path] {
-                cacheHits += 1
-                // Update access order for LRU
-                if let index = accessOrder.firstIndex(of: path) {
-                    accessOrder.remove(at: index)
-                }
-                accessOrder.append(path)
-                return cached
-            }
-            cacheMisses += 1
-            return nil
-        }
-    }
-    
-    private func setCached(_ path: String, _ sanitized: String) {
-        queue.async(flags: .barrier) { [weak self] in
-            guard let self = self else { return }
-            
-            // Add to cache
-            self.cache[path] = sanitized
-            self.accessOrder.append(path)
-            
-            // Evict oldest entries if cache is too large
-            while self.cache.count > self.maxCacheSize {
-                if let oldest = self.accessOrder.first {
-                    self.accessOrder.removeFirst()
-                    self.cache.removeValue(forKey: oldest)
-                }
-            }
-        }
-    }
-    
-    private func performSanitization(_ path: String) -> String {
+    private static func performSanitization(_ path: String) -> String {
         // Early return for obviously invalid paths
         if path.isEmpty || path.contains("\0") {
             return ""
@@ -129,21 +57,6 @@ public final class PathSanitizer: @unchecked Sendable {
         }
         
         return result
-    }
-    
-    private func clearCacheInternal() {
-        queue.async(flags: .barrier) { [weak self] in
-            self?.cache.removeAll()
-            self?.accessOrder.removeAll()
-            self?.cacheHits = 0
-            self?.cacheMisses = 0
-        }
-    }
-    
-    private func getStatistics() -> (hits: Int, misses: Int, size: Int) {
-        return queue.sync {
-            (hits: cacheHits, misses: cacheMisses, size: cache.count)
-        }
     }
 }
 

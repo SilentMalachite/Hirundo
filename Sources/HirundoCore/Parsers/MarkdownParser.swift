@@ -2,14 +2,14 @@ import Foundation
 import Markdown
 import Yams
 
-/// マークダウンコンテンツを解析するメインクラス
-public class MarkdownParser {
+/// Thread-safe markdown parser with immutable configuration
+public final class MarkdownParser: Sendable {
     private let limits: Limits
     private let skipContentValidation: Bool
     private let streamingParser: StreamingMarkdownParser
     private let enableStreaming: Bool
     
-    // コンポーネント
+    // Component instances (all Sendable or value types)
     private let frontMatterProcessor: FrontMatterProcessor
     private let validator: MarkdownValidator
     private let nodeProcessor: MarkdownNodeProcessor

@@ -22,7 +22,12 @@ public class SiteTemplateRenderer {
         self.cacheManager = TemplateCacheManager()
         self.htmlGenerator = DefaultHTMLGenerator()
         
-        // Configure template engine with site config
+        // Configure template engine with site config (async initialization not allowed in init)
+        // Must be called separately via configureEngine()
+    }
+    
+    /// Configure template engine (must be called after init)
+    public func configureEngine() {
         templateEngine.configure(with: config.site)
     }
     

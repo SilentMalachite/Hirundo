@@ -2,7 +2,7 @@ import Foundation
 import Markdown
 
 /// マークダウンノードの処理を行うクラス
-public class MarkdownNodeProcessor {
+public final class MarkdownNodeProcessor: Sendable {
     
     /// マークアップノードを処理
     /// - Parameters:

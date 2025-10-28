@@ -10,8 +10,8 @@ extension Array {
     }
 }
 
-/// Thread-safety: ContentProcessor has no shared mutable state across tasks; per-file processing avoids shared mutation.
-public class ContentProcessor: @unchecked Sendable {
+/// Thread-safe content processor with immutable configuration
+public final class ContentProcessor: Sendable {
     private let markdownParser: MarkdownParser
     private let config: HirundoConfig
     private let projectPath: String

@@ -2,7 +2,7 @@ import Foundation
 import Yams
 
 /// フロントマターの処理を行うクラス
-public class FrontMatterProcessor {
+public final class FrontMatterProcessor: Sendable {
     private let limits: Limits
     
     public init(limits: Limits = Limits()) {
