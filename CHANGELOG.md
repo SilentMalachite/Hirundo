@@ -5,12 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.4] - 2025-10-28
 
 ### Changed
 - **CONCURRENCY**: Improved Swift 6 concurrency compliance across core components
 - **PERFORMANCE**: Replaced DispatchQueue barrier pattern with NSLock in TemplateEngine for simpler synchronization
 - **SIMPLIFICATION**: Removed PathSanitizer cache, converting it to enum-based pure function
+- **CI**: Fixed ThreadSanitizer configuration to properly handle external library warnings
 
 ### Added
 - **TYPE SAFETY**: Added Sendable conformance to markdown processing components (MarkdownParser, ContentProcessor, FrontMatterProcessor, MarkdownValidator, MarkdownNodeProcessor, HTMLRenderer, StreamingMarkdownParser)
