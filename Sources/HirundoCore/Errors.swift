@@ -98,6 +98,51 @@ public enum BuildError: Error, LocalizedError {
     }
 }
 
+/// Errors raised while scaffolding a new Hirundo site.
+public enum ScaffoldError: Error, LocalizedError, Equatable, Sendable {
+    case destinationNotEmpty(String)
+    case destinationIsFile(String)
+    case invalidTitle(String)
+    case cannotCreateDirectory(String)
+    case cannotWriteFile(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .destinationNotEmpty(let path):
+            return "Directory is not empty: \(path). Use --force to override."
+        case .destinationIsFile(let path):
+            return "Destination exists and is a file: \(path)"
+        case .invalidTitle(let details):
+            return "Invalid site title: \(details)"
+        case .cannotCreateDirectory(let path):
+            return "Could not create directory: \(path)"
+        case .cannotWriteFile(let path):
+            return "Could not write file: \(path)"
+        }
+    }
+}
+
+extension ScaffoldError {
+    /// Converts this scaffold error into the unified Hirundo error representation.
+    /// - Returns: A `HirundoErrorInfo` with filesystem category and a stable code.
+    public func toHirundoError() -> HirundoErrorInfo {
+        let code: String
+        switch self {
+        case .destinationNotEmpty: code = "DEST_NOT_EMPTY"
+        case .destinationIsFile: code = "DEST_IS_FILE"
+        case .invalidTitle: code = "INVALID_TITLE"
+        case .cannotCreateDirectory: code = "CREATE_DIR_FAILED"
+        case .cannotWriteFile: code = "WRITE_FAILED"
+        }
+        return HirundoErrorInfo(
+            category: .filesystem,
+            code: code,
+            details: self.localizedDescription,
+            underlyingError: self
+        )
+    }
+}
+
 // Unified error system for consistent error handling
 public protocol HirundoError: Error, LocalizedError {
     var category: ErrorCategory { get }
