@@ -9,13 +9,11 @@ Swiftで構築された、モダンで高速、かつセキュアな静的サイ
 - **📝 Markdown**: Apple swift-markdownを使用したフロントマター付きCommonMarkサポート
 - **🎨 テンプレート**: カスタムフィルター付きの強力なStencilベースのテンプレートエンジン
 - **🔄 ライブリロード**: リアルタイムエラー報告機能付き自動再構築開発サーバー
-- **🌐 CORS対応**: 開発サーバーでの設定可能なCORS（Cross-Origin Resource Sharing）サポート
-- **🧩 拡張可能**: セキュア検証付きカスタム機能プラグインアーキテクチャ
+- **🧩 機能フラグ**: sitemap / rss / searchIndex / minify を `features` で切り替え
 - **💾 スマートキャッシング**: 超高速再構築のためのインテリジェント無効化キャッシング
 - **📦 型安全**: 包括的検証付きの強く型付けされた設定とモデル
-- **⚡ 設定可能**: カスタマイズ可能なセキュリティ制限とパフォーマンス設定
+- **⚡ 設定可能**: カスタマイズ可能なセキュリティ制限（`limits`）
 - **🛡️ メモリ安全**: WebSocket接続とファイル監視の高度なメモリ管理
-- **⏱️ タイムアウト保護**: すべてのI/O操作に対する設定可能なタイムアウトによるDoS攻撃防護
 
 ## 技術スタック
 
@@ -108,23 +106,27 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 - 入力検証とサニタイゼーション
 - セキュアなファイルパーミッション
 
-### 5. プラグインシステム
-組み込みプラグイン：
+### 5. 機能フラグ（features）
+`config.yaml` の `features` ブロックで有効・無効を切り替えます（すべてデフォルト `false`）：
 - **sitemap**: sitemap.xml生成
 - **rss**: ブログのRSSフィード生成
+- **searchIndex**: 検索インデックス（JSON）の生成
 - **minify**: HTML出力の最小化
-- **imageOptimization**: 画像最適化とレスポンシブ画像作成
-- **syntaxHighlight**: 拡張コードシンタックスハイライト
 
 ## 設定ファイル（config.yaml）
+
+`hirundo init` が生成する `config.yaml` が正となる形式です。トップレベルで解釈されるキーは
+`site` / `build` / `server` / `blog` / `features` / `limits` の6つのみで、`site` 以外はすべて
+オプションです（省略時は下記のデフォルト値が使われます）。未知のキーは無視されるため、
+綴り間違いはエラーにならず黙って無視される点に注意してください。
 
 ```yaml
 site:
   title: "サイトタイトル"
-  description: "サイトの説明"
+  description: "サイトの説明"        # オプション（最大500文字）
   url: "https://example.com"
-  language: "ja-JP"
-  author:
+  language: "ja-JP"                 # オプション（デフォルト: "en-US"）
+  author:                           # オプション
     name: "著者名"
     email: "email@example.com"
 
@@ -137,22 +139,21 @@ build:
 server:
   port: 8080
   liveReload: true
-  cors:
-    enabled: true
-    allowedOrigins: ["http://localhost:*", "https://localhost:*"]
-    allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-    allowedHeaders: ["Content-Type", "Authorization"]
-    exposedHeaders: ["X-Response-Time"]  # オプション
-    maxAge: 3600
-    allowCredentials: false
 
 blog:
-  postsPerPage: 10
+  postsPerPage: 10                  # 1〜100
   generateArchive: true
   generateCategories: true
   generateTags: true
 
-# セキュリティとパフォーマンス制限（オプション）
+# 機能フラグ（オプション。マッピング形式で、ブロックごと省略した場合はすべて false）
+features:
+  sitemap: true
+  rss: true
+  searchIndex: false
+  minify: false
+
+# セキュリティとパフォーマンス制限（オプション。以下の値はいずれも省略時のデフォルト）
 limits:
   maxMarkdownFileSize: 10485760     # 10MB
   maxConfigFileSize: 1048576        # 1MB
@@ -160,29 +161,25 @@ limits:
   maxFilenameLength: 255
   maxTitleLength: 200
   maxDescriptionLength: 500
-
-# プラグイン設定（オプション）
-features:
-  - name: "sitemap"
-    enabled: true
-  - name: "rss"
-    enabled: true
-  - name: "minify"
-    enabled: true
-    settings:
-      minifyHTML: true
-      minifyCSS: true
-      minifyJS: false  # 安全のため無効
-
-# タイムアウト設定（オプション）
-timeouts:
-  fileReadTimeout: 30.0              # ファイル読み込みタイムアウト（秒）
-  fileWriteTimeout: 30.0             # ファイル書き込みタイムアウト（秒）
-  directoryOperationTimeout: 15.0    # ディレクトリ操作タイムアウト（秒）
-  httpRequestTimeout: 10.0           # HTTPリクエストタイムアウト（秒）
-  fsEventsTimeout: 5.0              # ファイル監視開始タイムアウト（秒）
-  serverStartTimeout: 30.0          # サーバー起動タイムアウト（秒）
+  maxUrlLength: 2000
+  maxAuthorNameLength: 100
+  maxEmailLength: 254
+  maxLanguageCodeLength: 10
 ```
+
+`hirundo init` は `features` までを書き出し、`limits` は出力しません（デフォルト値で動作します）。
+`--blog` を付けずに初期化した場合は、`features.rss` と `blog.generateArchive` /
+`generateCategories` / `generateTags` がまとめて `false` になります。
+
+各ブロックのデフォルト値：
+
+| ブロック | 省略時の挙動 |
+|---------|-------------|
+| `build` | `content` / `_site` / `static` / `templates`（4つのディレクトリはすべて別名である必要あり） |
+| `server` | `port: 8080`、`liveReload: true` |
+| `blog` | `postsPerPage: 10`、`generate*` はすべて `true` |
+| `features` | すべて `false` |
+| `limits` | 上記YAML例に記載した値 |
 
 ## テンプレート変数
 
@@ -202,38 +199,15 @@ timeouts:
 - `absolute_url`: 絶対URL作成
 - `markdown`: Markdownレンダリング
 
-## タイムアウト設定
-
-Hirundoは、DoS攻撃や意図しないリソース消費を防ぐため、すべてのI/O操作に対してタイムアウト設定を提供します。
-
-### 設定可能なタイムアウト
-
-- **fileReadTimeout**: ファイル読み込み操作（Markdownファイル、設定ファイルなど）
-- **fileWriteTimeout**: ファイル書き込み操作（HTML出力、キャッシュファイルなど）
-- **directoryOperationTimeout**: ディレクトリ操作（ディレクトリ作成、一覧取得など）
-- **httpRequestTimeout**: HTTPリクエスト（開発サーバーでの外部API呼び出しなど）
-- **fsEventsTimeout**: ファイル監視システムの初期化
-- **serverStartTimeout**: 開発サーバーの起動
-
-### デフォルト値
-
-- ファイル操作: 30秒
-- ディレクトリ操作: 15秒
-- HTTPリクエスト: 10秒
-- ファイル監視: 5秒
-- サーバー起動: 30秒
-
-### 制限
-
-- 最小値: 0.1秒
-- 最大値: 600秒（10分）
-
-これらの制限により、システムが適切に応答し続けることが保証され、悪意あるファイルや環境の問題による無限ハング状態を防ぎます。
-
 ## 今後の拡張予定
 
 - 国際化（i18n）サポート
 - CSS/JS処理のためのアセットパイプライン
 - 高度なキャッシング戦略
 - カスタムプラグイン開発サポート
+- I/O操作のタイムアウト設定（`timeouts` ブロック）
+  - 現在 `config.yaml` の `timeouts` は解釈されません（`ConfigValidation.validateTimeout`
+    のみが存在する未配線の状態です）。記述しても無視されます。
+- 開発サーバーのCORS設定（`server.cors` ブロック）
+  - 現在 `server` が解釈するのは `port` と `liveReload` のみです。
 - 複数テーマサポート

@@ -8,6 +8,16 @@ This guide outlines how to run, structure, and extend tests in Hirundo.
 - Filter by test case: `swift test --filter SiteGeneratorTests`
 - Enable coverage: `swift test --enable-code-coverage`
 
+### Current State of the Suite
+
+`swift test` currently runs **210 tests with 6 failures**, all in
+`HotReloadManagerTests`. These 6 are pre-existing — they fail on unmodified
+`HEAD` too — and stem from FSEvents timing plus sandbox `.sb-` temporary-file
+artifacts that break the tests' exact-path assertions. They are not yet fixed.
+
+Treat them as the known baseline: a change is clean when it introduces no
+failures beyond those 6.
+
 ## Naming and Structure
 
 - Place tests under `Tests/HirundoTests/`.
@@ -22,13 +32,25 @@ This guide outlines how to run, structure, and extend tests in Hirundo.
 
 ## Categories (reference)
 
+The files that actually exist under `Tests/HirundoTests/`:
+
 - AssetPipelineTests — asset processing and minification
-- ConfigTests — configuration validation and parsing
-- ContentProcessor/MarkdownParserTests — markdown processing and validation
-- EdgeCaseTests — error handling and edge scenarios
-- Security*Tests — security validation and protection
+- ConfigTests, ConfigParseTests — configuration validation and parsing
+- MarkdownParserTests, SimpleMarkdownTest — markdown processing and validation
+- SiteGeneratorTests — build orchestration and output
+- TemplateEngineTests — Stencil rendering and custom filters
+- SiteScaffolderTests, ScaffoldErrorMappingTests, InitDestinationResolverTests —
+  `hirundo init` scaffolding, destination resolution, and error categorisation
+- DevelopmentServerTests — static file serving and path resolution
+- HotReloadManagerTests, HotReloadIntegrationTest, FSEventsMemoryTests — file
+  watching and live reload
+- SecurityTests — security validation and protection
+- ErrorRecoveryTests — error handling and partial-failure recovery
+- EditorCommandValidationTests — editor command validation (command injection,
+  path traversal, null bytes, control characters)
+- DependencyCompatibilityTests — swift-markdown / Yams / Stencil behaviour
 - IntegrationTests — end-to-end flows
-- WebSocketAuthenticationTests — live reload security
+- TestHelpers, ThreadSafeBox — shared test utilities, not test cases
 
 ## Integration Fixture
 

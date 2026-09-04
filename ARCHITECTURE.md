@@ -22,7 +22,7 @@ Hirundo is built with a modular, clean architecture that prioritizes performance
 │  │ MarkdownParser│  │ AssetPipeline │  │ HotReloadManager │ │
 │  └───────────────┘  └───────────────┘  └──────────────────┘ │
 │  ┌───────────────┐  ┌───────────────┐  ┌──────────────────┐ │
-│  │ PluginManager │  │   FSEvents    │  │  Error Handling  │ │
+│  │SiteScaffolder │  │   FSEvents    │  │  Error Handling  │ │
 │  └───────────────┘  └───────────────┘  └──────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -36,12 +36,12 @@ The central orchestrator responsible for:
 - Template rendering
 - Asset processing
 - Output generation
-- Plugin coordination
+- Built-in feature generation (sitemap, RSS, search index)
 
 **Key Features:**
-- Parallel content processing
-- Intelligent caching
-- Error recovery
+- Batched concurrent content processing (`withThrowingTaskGroup` in `ContentProcessor`)
+- Template caching
+- Error recovery (`buildWithRecovery`)
 - Progress reporting
 
 ### 2. Markdown Parser (`MarkdownParser.swift`)
@@ -77,7 +77,14 @@ Processes static assets with security focus:
 - CSS/JS minification with validation
 - Path sanitization
 - File type validation
-- Fingerprinting support
+- Content fingerprinting and concatenation
+
+Fingerprinting, source maps, and concatenation are library-level options on
+`AssetPipeline`/`AssetConcatenator`. The matching `build:` keys
+(`enableAssetFingerprinting`, `enableSourceMaps`, `concatenateJS`,
+`concatenateCSS`) are decoded by `Models/Build.swift` but nothing outside the
+model reads them yet, so they cannot be turned on from `config.yaml`. The only
+asset option wired to configuration is `features.minify`.
 
 **Security Measures:**
 - Path traversal prevention
@@ -87,7 +94,8 @@ Processes static assets with security focus:
 
 ### 5. Development Server (`DevelopmentServer.swift`)
 
-Live development server with WebSocket support:
+Serves the build output over HTTP, with a WebSocket live-reload channel:
+- Static file serving from the output directory
 - File system watching
 - Live reload functionality
 - Error reporting
@@ -99,15 +107,40 @@ Live development server with WebSocket support:
 - Real-time error notifications
 - Request logging
 
+**Routing:** the `/livereload` WebSocket route is registered first, and static
+files are served from `HttpServer.notFoundHandler` so they only run after the
+explicit routes have had their chance. Swifter's router matches literal path
+segments and `:name` variables — it does not interpret regular expressions — so
+a catch-all route cannot be expressed as `/(.*)`.
+
+`resolveFilePath(forRequestPath:)` maps a request to a file: directory requests
+(`/`, `/about`, `/about/`) resolve to that directory's `index.html`, and any
+path that standardizes outside the output directory is rejected.
+
 ### 6. Built-in Features
 
 Hirundo provides built-in features (no dynamic loading) that participate in the build:
 - Sitemap generation
 - RSS feed creation
-- HTML/CSS/JS minification
+- CSS/JS minification
 - Search index generation
 
-Configure these under `features:` in `config.yaml`.
+Configure these under `features:` in `config.yaml`. Each is a plain boolean
+(`sitemap`, `rss`, `searchIndex`, `minify`), all defaulting to `false`. Note
+that `minify` sets `minify` on the CSS and JS asset options together; there is
+no HTML minification and no separate per-language toggle.
+
+### 7. Site Scaffolder (`Scaffold/`)
+
+Backs `hirundo init`:
+- `SiteScaffolder.swift` — creates the site tree and reports each written path
+- `ScaffoldTemplates.swift` — the file bodies it writes
+- `InitDestinationResolver.swift` — resolves and validates the destination path
+
+An existing `.gitignore` is merged rather than overwritten (including under
+`--force`); merged files are reported as `📝 Updated <path>` instead of created.
+An empty destination path is rejected, and directories created during a run
+that fails partway are rolled back.
 
 ## Security Architecture
 
@@ -117,6 +150,7 @@ Configure these under `features:` in `config.yaml`.
 - Safe file operations with proper error handling
 - Memory-safe resource management
 - WebSocket session cleanup
+- Development server requests that escape the output directory are rejected
 
 ### File Operations
 
@@ -128,47 +162,55 @@ Configure these under `features:` in `config.yaml`.
 
 ### Caching Strategy
 
+One cache is wired into the build today: templates.
+
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│  Parse Cache    │    │  Render Cache    │    │ Template Cache  │
-│                 │    │                  │    │                 │
-│ • Markdown AST  │    │ • Rendered HTML  │    │ • Compiled      │
-│ • Frontmatter   │    │ • Processed CSS  │    │   Templates     │
-│ • Metadata      │    │ • Optimized JS   │    │ • Filter Chain  │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-         ↑                       ↑                       ↑
-         └───────────────────────┼───────────────────────┘
-                                 ↓
-                    ┌─────────────────────────┐
-                    │   Intelligent           │
-                    │   Invalidation          │
-                    │                         │
-                    │ • File change detection │
-                    │ • Dependency tracking   │
-                    │ • Incremental updates   │
-                    └─────────────────────────┘
+┌────────────────────────────────┐
+│  Template Cache                │
+│  Templates/TemplateCache*      │
+│                                │
+│ • Loaded template sources      │
+│ • Used by SiteTemplateRenderer │
+└────────────────────────────────┘
 ```
+
+`MemoryEfficientCacheManager.swift` implements the general size-bounded cache with
+dependency-based invalidation that backs it: `Templates/TemplateCacheManager.swift`
+owns an instance, and `SiteTemplateRenderer.getCacheStatistics()` surfaces its
+statistics. Templates are its only client. There is no parsed-content cache and no
+rendered-page cache; every build reparses and rerenders content. Multi-level caching
+and incremental rebuilds remain future work (see below).
 
 ### Parallel Processing
 
-- Concurrent content parsing
-- Parallel asset processing
-- Async I/O operations
-- Worker pool management
+- Concurrent content parsing — `ContentProcessor` processes files in batches via
+  `withThrowingTaskGroup` / `withTaskGroup`
+- Async I/O operations throughout the build (`SiteGenerator.build` is `async`)
+
+Asset processing is currently sequential, and there is no worker-pool
+abstraction.
 
 ## Configuration System
 
 ### Type-Safe Configuration
 
+`HirundoConfig` decodes exactly six top-level keys. Unknown keys are silently
+ignored.
+
 ```swift
 HirundoConfig
-├── Site (required)
-├── Build (optional, defaults)
-├── Server (optional, defaults)
-├── Blog (optional, defaults)
-├── Limits (optional, defaults)
-└── Plugins (optional, empty)
+├── site     (required)
+├── build    (optional, defaults)
+├── server   (optional, defaults)
+├── blog     (optional, defaults)
+├── features (optional, all false)
+└── limits   (optional, defaults)
 ```
+
+Notable absences, so they are not looked for: there is no `plugins` block (the
+plugin system was removed — `features` replaces it), no `timeouts` block, and
+no CORS or WebSocket-authentication configuration. `server` decodes only `port`
+(default `8080`) and `liveReload` (default `true`).
 
 ### Validation Pipeline
 
@@ -191,16 +233,27 @@ HirundoError Protocol
 └── Debug Info
 ```
 
+`HirundoErrorInfo` is the concrete conforming type. It adds an optional
+per-error `suggestion`; `suggestedAction` returns that suggestion when present
+and otherwise falls back to the category's default advice.
+
 ### Error Categories
+
+Defined by `ErrorCategory` in `Sources/HirundoCore/Errors.swift`:
 
 - `CONFIG`: Configuration issues
 - `MARKDOWN`: Content processing
 - `TEMPLATE`: Template rendering
 - `BUILD`: Site generation
 - `ASSET`: Asset processing
-- `PLUGIN`: Plugin system
 - `HOTRELOAD`: File watching
 - `SERVER`: Development server
+- `NETWORK`: Network operations
+- `FILESYSTEM`: File operations
+
+Category choice reflects the real cause rather than the throwing subsystem: for
+example `ScaffoldError.invalidTitle` and `.emptyDestinationPath` are reported as
+`CONFIG` (a usage mistake), while the remaining scaffold errors are `FILESYSTEM`.
 
 ## Dependencies
 
@@ -208,6 +261,7 @@ HirundoError Protocol
 
 - **swift-markdown**: Apple's CommonMark parser
 - **Stencil**: Template engine
+- **PathKit**: Path utilities (used directly by `TemplateEngine`)
 - **Yams**: YAML parser
 - **Swifter**: HTTP server
 - **swift-argument-parser**: CLI interface
@@ -229,12 +283,16 @@ HirundoError Protocol
 4. **Performance Tests**: Benchmark validation
 5. **End-to-End Tests**: Full workflow validation
 
-### Test Coverage
+### Test Coverage Targets
+
+These are goals, not measured figures; coverage is not currently enforced in CI.
 
 - Core functionality: >90%
 - Security functions: 100%
 - Error paths: >80%
 - CLI interface: >85%
+
+See `TESTING.md` for the current state of the suite, including known failures.
 
 ## Build System
 
@@ -247,19 +305,26 @@ HirundoError Protocol
 
 ### CI/CD Pipeline
 
-1. **Build**: Multi-platform compilation
-2. **Test**: Comprehensive test suite
-3. **Security**: Vulnerability scanning
-4. **Performance**: Benchmark validation
-5. **Release**: Artifact generation
+`.github/workflows/ci.yml` runs on macOS only:
+
+1. **Build and test**: `swift build` then `swift test`, across an Xcode 16.1 /
+   16.2 matrix
+2. **ThreadSanitizer**: `swift test --sanitize=thread`, `continue-on-error` so
+   warnings from external libraries do not fail the run
+
+`.github/workflows/release.yml` handles release artifacts. There is no
+vulnerability-scanning or benchmarking job.
 
 ## Future Architecture
 
 ### Planned Improvements
 
-- **Incremental Builds**: File-level change detection
+- **Incremental Builds**: File-level change detection, backed by parsed-content
+  and rendered-page caches
 - **Distributed Caching**: Network cache sharing
-- **Advanced Plugins**: WebAssembly support
+- **Extensibility**: The plugin system was removed in favour of built-in
+  features; any future extension mechanism (e.g. WebAssembly-sandboxed) would be
+  a new design, not a revival of the old one
 - **Performance Monitoring**: Built-in profiling
 - **Advanced Security**: Code signing, sandboxing
 

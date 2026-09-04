@@ -45,8 +45,13 @@ Hirundo includes basic security measures appropriate for a static site generator
 - **File Type Validation**: Strict file type checking and processing
 
 #### Development Server Security
-- **Basic WebSocket**: Simple live reload functionality
+- **Basic WebSocket**: Simple live reload functionality on `/livereload`
+- **Output-Directory Confinement**: Requests whose resolved path falls outside
+  the configured output directory are rejected
 - **Error Handling**: Proper error reporting without sensitive information leakage
+
+There is no CORS configuration and no WebSocket authentication; the server is
+intended for local development only.
 
 ## Security Configuration
 
@@ -72,7 +77,8 @@ features:
 Before deploying Hirundo in production:
 
 - [ ] Review and configure file size limits in `config.yaml`
-- [ ] Ensure JS minification remains disabled unless necessary
+- [ ] Decide whether `features.minify` should be on — it enables CSS *and* JS
+      minification together; there is no separate JS toggle
 - [ ] Validate all content sources and inputs
 - [ ] Use HTTPS for the production site
 - [ ] Regularly update Hirundo and its dependencies
@@ -85,7 +91,10 @@ Hirundo focuses on the minimal, appropriate safeguards for a static site generat
 
 - Path handling uses standard Swift file APIs with proper error propagation.
 - WebSocket live-reload is basic and scoped to local development.
-- Dynamic plugin loading is disabled; only built-in, compiled plugins are supported.
+- There is no plugin system at all. It was removed in Stage 2 and replaced by
+  compiled-in feature toggles (`features:` in `config.yaml`), so there is no
+  dynamic loading path to secure.
+- There is no configurable timeout system; `config.yaml` has no `timeouts` block.
 
 Testing & Validation:
 - Security-relevant behavior is covered by existing unit/integration tests where applicable. We do not claim a separate “security test suite” size.
@@ -122,7 +131,9 @@ We appreciate security researchers and users who help keep Hirundo secure. Respo
 4. **Regular Updates**: Keep Hirundo and dependencies updated
 
 ### Development Security
-1. **Trusted Sources**: Only use plugins and themes from trusted sources
+1. **Trusted Sources**: Only use templates and static assets from trusted
+   sources — Hirundo renders whatever is in `templates/` and copies whatever is
+   in `static/`
 2. **Code Review**: Review any custom code or configurations
 3. **Environment Separation**: Keep development and production environments separate
 4. **Backup Strategy**: Maintain secure backups of your site content

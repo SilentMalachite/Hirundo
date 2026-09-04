@@ -40,14 +40,17 @@ swift run --package-path .. hirundo serve
 - Coding style: Swift API Design Guidelines; 4-space indent; ~120 col.
 - Public API: add `///` doc comments with parameters/returns.
 - Errors: prefer typed `Error` enums; propagate via `throws` and test both success and failure.
-- Layout: organize files by feature (e.g., `Models/`, `Plugins/`, `Utilities/`).
+- Layout: organize files by feature. Existing groups under `Sources/HirundoCore/`
+  are `Models/`, `Parsers/`, `Processors/`, `Renderers/`, `Sanitizers/`,
+  `Scaffold/`, `Templates/`, `Assets/`, `Validators/`, `Utils/`, and `Utilities/`.
 
 ## Commit and PR
 
-- Use Conventional Commits, e.g. `feat: add RSS plugin option`, `fix: prevent path traversal`.
+- Use Conventional Commits, e.g. `feat: merge existing .gitignore on init`, `fix: prevent path traversal`.
 - Keep changes focused and documented.
 - Before opening a PR:
-  - Run `swift test` and ensure all tests pass.
+  - Run `swift test`. See `TESTING.md` for the known pre-existing failures in
+    `HotReloadManagerTests`; no *new* failures should appear.
   - Update docs (README/ARCHITECTURE/SECURITY/CHANGELOG) if behavior changes.
   - Note breaking changes explicitly.
 

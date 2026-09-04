@@ -2,7 +2,7 @@
 
 Swiftで構築された、モダンで高速、かつセキュアな静的サイトジェネレーター。
 
-[![Swift Version](https://img.shields.io/badge/Swift-5.9%2B-orange.svg)](https://swift.org)
+[![Swift Version](https://img.shields.io/badge/Swift-6.0%2B-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%2012%2B-blue.svg)](https://github.com/SilentMalachite/Hirundo)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Build](https://img.shields.io/badge/Build-See_CI-blue.svg)](https://github.com/SilentMalachite/Hirundo/actions)
@@ -12,23 +12,26 @@ Swiftで構築された、モダンで高速、かつセキュアな静的サイ
 
 ## 主な機能
 
-- **🚀 高速**: マルチレベルキャッシング付きSwiftによる最適なパフォーマンス
-- **📝 Markdown**: Apple swift-markdownを使用したフロントマター付きCommonMarkサポート
-- **🎨 テンプレート**: カスタムフィルター付きの強力なStencilベースのテンプレートエンジン
-- **🔄 ライブリロード**: 自動再構築とリアルタイムエラー報告機能付き開発サーバー
-- **🧩 拡張可能**: 組み込みプラグイン付きカスタム機能プラグインアーキテクチャ
-- **💾 スマートキャッシング**: 超高速再構築のためのマルチレベルインテリジェントキャッシング
-- **📦 型安全**: 包括的検証付きの強く型付けされた設定とモデル
-- **⚡ シンプル**: 不要な複雑さのない、クリーンで使いやすい設定
-- **🛡️ メモリ安全**: WebSocket接続とファイル監視の高度なメモリ管理
+- **🚀 高速**: Swiftによる実装。パース済みコンテンツ、レンダリング済みページ、テンプレートをキャッシュします
+- **📝 Markdown**: Apple製swift-markdownによる、YAMLフロントマター付きCommonMarkサポート
+- **🎨 テンプレート**: 20種類のカスタムフィルターを備えたStencilベースのテンプレートエンジン
+- **🔄 ライブリロード**: 変更を検知して再ビルドし、WebSocket経由でリロードを通知する開発サーバー
+- **🧩 組み込み機能**: サイトマップ、RSS、検索インデックス、アセット最小化を単純なオン/オフフラグで提供
+- **📦 型安全**: 強く型付けされ、検証される設定とモデル
+- **⚡ シンプル**: 設定項目はトップレベル6キーのみ。管理すべきプラグインランタイムはありません
 
 ## 目次
 
 - [主な機能](#主な機能)
 - [クイックスタート](#クイックスタート)
+- [コマンド](#コマンド)
+- [プロジェクト構造](#プロジェクト構造)
 - [設定](#設定)
 - [フロントマター](#フロントマター)
 - [テンプレート](#テンプレート)
+- [組み込み機能](#組み込み機能)
+- [未実装の項目](#未実装の項目)
+- [セキュリティ](#セキュリティ)
 - [開発](#開発)
 - [テスト](#テスト)
 - [ライセンス](#ライセンス)
@@ -37,19 +40,11 @@ Swiftで構築された、モダンで高速、かつセキュアな静的サイ
 
 ### インストール
 
-#### Swift Package Managerを使用
-
 ```bash
 git clone https://github.com/SilentMalachite/Hirundo.git
-cd hirundo
+cd Hirundo
 swift build -c release
 cp .build/release/hirundo /usr/local/bin/
-```
-
-#### ソースからビルド
-
-```bash
-swift build -c release
 ```
 
 ### 最初のサイトを作成
@@ -61,13 +56,23 @@ hirundo init my-site --blog
 # サイトディレクトリに移動
 cd my-site
 
+# ビルド
+hirundo build
+
 # 開発サーバーを起動
 hirundo serve
 ```
 
 サイトは `http://localhost:8080` でライブリロード機能と共に利用できます。
 
+> `hirundo serve` は出力ディレクトリにあるファイルをそのまま配信します。最初に `serve`
+> する前に必ず一度 `hirundo build` を実行してください。配信対象が存在しないと、すべての
+> リクエストが404になります。
+
 ## コマンド
+
+すべてのコマンドは `--verbose` を受け付けます。指定すると、要約されたメッセージではなく
+元のエラー内容が表示されます。
 
 ### `hirundo init`
 新しいHirundoサイトを作成します。
@@ -75,11 +80,45 @@ hirundo serve
 ```bash
 hirundo init [パス] [オプション]
 
+引数:
+  パス                 サイトを作成する場所（デフォルト: "."）
+
 オプション:
   --title <タイトル>   サイトタイトル（デフォルト: "My Hirundo Site"）
-  --blog              ブログ機能を含める
-  --force             空でないディレクトリでも強制作成
+  --blog               ブログ機能を含める
+  --force              空でないディレクトリへの作成を許可する
+  --verbose            詳細なエラー情報を表示
 ```
+
+押さえておきたい挙動:
+
+- **空文字列のパスはエラーになります**。ディレクトリパス、またはカレントディレクトリを
+  表す `.` を指定してください。
+- 既存の `.gitignore` は**上書きされず、マージされます**（`--force` 指定時も同様）。
+  マージされたファイルは `📝 Updated <パス>`、新規作成されたファイルは
+  `✅ Created <パス>` として報告されます。
+- `.git`、`.gitignore`、`.DS_Store`、`.svn`、`.hg` しか存在しないディレクトリは空とみなされる
+  ため、クローンしたばかりのリポジトリには `--force` なしで初期化できます。
+- 途中で失敗した場合、その実行で作成したディレクトリは**ロールバック**され、中途半端な
+  状態が残りません。
+- `--blog` を指定した場合、サンプル記事の日付は生成時刻になります。
+
+`hirundo init --blog` が書き出すファイル:
+
+```
+.gitignore
+config.yaml
+content/index.md
+content/about.md
+content/posts/hello-world.md   # --blog 指定時のみ
+static/css/style.css
+templates/base.html
+templates/default.html
+templates/post.html            # --blog 指定時のみ
+```
+
+`--blog` を付けない場合、`features.rss` と `blog.generateArchive` / `generateCategories` /
+`generateTags` はいずれも `false` として書き出されます。
 
 ### `hirundo build`
 静的サイトをビルドします。
@@ -89,12 +128,16 @@ hirundo build [オプション]
 
 オプション:
   --config <ファイル>       設定ファイルのパス（デフォルト: config.yaml）
-  --environment <環境>      ビルド環境（デフォルト: production）
+  --environment <環境>      ビルド環境 development/production（デフォルト: production）
   --drafts                  下書き記事を含める
   --clean                   ビルド前に出力をクリーン
   --continue-on-error       一部のファイルで失敗してもビルドを継続（エラーリカバリモード）
   --verbose                 詳細なエラー情報を表示
 ```
+
+設定ファイルが存在しない場合はエラーにならず、プロジェクトのデフォルト設定にフォール
+バックします。`--environment` は現在のところ記録・表示されるだけで出力内容を変えません。
+将来の条件分岐のために予約されています。
 
 ### `hirundo serve`
 ライブリロード付きの開発サーバーを起動します。
@@ -105,21 +148,34 @@ hirundo serve [オプション]
 オプション:
   --port <ポート>       サーバーポート（デフォルト: 8080）
   --host <ホスト>       サーバーホスト（デフォルト: localhost）
-  --no-reload          ライブリロードを無効化
-  --no-browser         ブラウザを自動で開かない
-  --verbose            詳細なエラー情報を表示
+  --no-reload           ライブリロードを無効化
+  --no-browser          ブラウザを自動で開かない
+  --verbose             詳細なエラー情報を表示
 ```
+
+サーバーはカレントディレクトリの `config.yaml` を読んで出力ディレクトリを特定し、
+その中のファイルを配信します。
+
+- ディレクトリへのリクエストは、そのディレクトリの `index.html` に解決されます。
+  `/`、`/about`、`/about/` はいずれも動作します。
+- 出力ディレクトリの外へ出るリクエスト（`/../../etc/passwd` など）は拒否されます。
+- ライブリロードが有効な場合、`/livereload` にWebSocketエンドポイントが公開されます。
+
+`--port` と `--host` はコマンドラインからのみ指定できます。`config.yaml` の `server.port`
+は `serve` からは参照されません。
 
 ### `hirundo new`
 新しいコンテンツを作成します。
 
 ```bash
-# 新しいブログ記事を作成
-hirundo new post "記事タイトル" --tags "swift,web" --categories "開発"
-
-# 新しいページを作成
-hirundo new page "私たちについて" --layout "default"
+hirundo new post <タイトル> [--slug <スラグ>] [--categories <一覧>] [--tags <一覧>] [--draft] [--open] [--verbose]
+hirundo new page <タイトル> [--path <パス>] [--layout <レイアウト>] [--open] [--verbose]
 ```
+
+> ⚠️ **未完成です。** 現状どちらのサブコマンドも、引数を検証し、`content/posts`（または
+> `content/`）が存在することを確認して、実行内容を表示するだけです。Markdownファイルは
+> **作成されません**。当面は手作業でコンテンツファイルを作成してください。書式は
+> [フロントマター](#フロントマター)を参照してください。
 
 ### `hirundo clean`
 出力ディレクトリとキャッシュをクリーンします。
@@ -128,41 +184,54 @@ hirundo new page "私たちについて" --layout "default"
 hirundo clean [オプション]
 
 オプション:
-  --cache    アセットキャッシュもクリーン
-  --force    確認をスキップ
+  --cache    .hirundo-cache ディレクトリもクリーンする
+  --force    実際に削除する（指定しない場合は削除対象を表示するだけ）
+  --verbose  詳細なエラー情報を表示
 ```
+
+> `clean` は**デフォルトではドライラン**です。対話的な確認プロンプトはありません。
+> `--force` を付けない限り、削除対象のパスを一覧表示するだけです。出力ディレクトリは
+> `config.yaml` の `build.outputDirectory` から読み取られ、無ければ `_site` になります。
 
 ## プロジェクト構造
 
 ```
 my-site/
-├── config.yaml          # サイト設定
+├── config.yaml           # サイト設定
 ├── content/              # Markdownコンテンツ
-│   ├── index.md         # ホームページ
-│   ├── about.md         # Aboutページ
-│   └── posts/           # ブログ記事
-├── templates/            # HTMLテンプレート
-│   ├── base.html        # ベースレイアウト
-│   ├── default.html     # デフォルトページテンプレート
-│   └── post.html        # ブログ記事テンプレート
-├── static/              # 静的アセット
-│   ├── css/            # スタイルシート
-│   ├── js/             # JavaScript
-│   └── images/         # 画像
-└── _site/              # 生成された出力（gitignore対象）
+│   ├── index.md          # ホームページ
+│   ├── about.md          # Aboutページ
+│   └── posts/            # ブログ記事
+├── templates/            # Stencilテンプレート
+│   ├── base.html         # ベースレイアウト
+│   ├── default.html      # デフォルトページテンプレート
+│   └── post.html         # ブログ記事テンプレート
+├── static/               # 静的アセット（出力のルート直下にコピーされます）
+│   └── css/
+└── _site/                # 生成された出力（gitignore対象）
 ```
+
+`static/` 配下のファイルは出力ディレクトリの**ルート**にコピーされます。
+`static/css/style.css` は `/static/css/style.css` ではなく `/css/style.css` として配信されます。
+`hirundo init` が作成するのは `static/css/` のみです。`js/` や `images/` などは必要に応じて
+追加してください。
 
 ## 設定
 
-### サイト設定 (`config.yaml`)
+`config.yaml` のトップレベルキーは `site`、`build`、`server`、`blog`、`features`、`limits`
+のちょうど6つです。必須は `site` のみで、他のブロックは省略するとデフォルト値になります。
+
+> ⚠️ **未知のトップレベルキーは黙って無視されます。** ブロック名のタイプミス（`serverr:`）や、
+> 存在しないブロック（`timeouts:`、`plugins:`）はエラーにならず、単に無視されます。設定が
+> 効いていないように見えるときは、上記の一覧と綴りを照合してください。
 
 ```yaml
 site:
-  title: "マイサイト"
-  description: "Hirundoで構築されたサイト"
-  url: "https://example.com"
-  language: "ja-JP"
-  author:
+  title: "マイサイト"                 # 必須
+  url: "https://example.com"         # 必須
+  description: "Hirundoで構築されたサイト"   # オプション（最大500文字）
+  language: "ja-JP"                  # オプション（デフォルト: "en-US"）
+  author:                            # オプション
     name: "あなたの名前"
     email: "your.email@example.com"
 
@@ -177,41 +246,86 @@ server:
   liveReload: true
 
 blog:
-  postsPerPage: 10
+  postsPerPage: 10                   # 1〜100
   generateArchive: true
   generateCategories: true
   generateTags: true
-  rssEnabled: true
 
-# パフォーマンス制限（オプション）
-limits:
-  maxMarkdownFileSize: 10485760     # 10MB
-  maxConfigFileSize: 1048576        # 1MB
-  maxFrontMatterSize: 100000        # 100KB
-  maxFilenameLength: 255
-  maxTitleLength: 200
-  maxDescriptionLength: 500
-
-# 機能設定（オプション）
+# 組み込み機能のフラグ。リストではなくマッピング形式です。
+# ブロックごと省略した場合は4つとも false になります。
 features:
   sitemap: true
   rss: true
   searchIndex: true
   minify: true
+
+# セキュリティとパフォーマンスの制限。このブロックを書く場合は10キーすべてが必要です。
+# 以下の値はいずれも省略時のデフォルトです。
+limits:
+  maxMarkdownFileSize: 10485760      # 10MB
+  maxConfigFileSize: 1048576         # 1MB
+  maxFrontMatterSize: 100000         # 100KB
+  maxFilenameLength: 255
+  maxTitleLength: 200
+  maxDescriptionLength: 500
+  maxUrlLength: 2000
+  maxAuthorNameLength: 100
+  maxEmailLength: 254
+  maxLanguageCodeLength: 10
 ```
+
+最小限の設定は、必須の2項目だけです。
+
+```yaml
+site:
+  title: "マイサイト"
+  url: "https://example.com"
+```
+
+### 注意点
+
+- **`limits` はオール・オア・ナッシングです。** 他のブロックと異なり、キー単位のデフォルト値が
+  ありません。`limits:` ブロックを書く場合は**10キーすべて**を列挙する必要があります。1つでも
+  欠けると `Failed to parse configuration: The data couldn't be read because it is missing.`
+  でビルドが失敗します。デフォルト値のままでよい場合は、ブロックごと省略してください。
+- **`features` はリストではなくマッピングです。** 旧来のプラグイン形式はもはや受け付けられず、
+  パースエラーになります。
+  ```yaml
+  # ✗ 現在はパースできません
+  features:
+    - name: "sitemap"
+      enabled: true
+  ```
+- **`blog.rssEnabled` は存在しません。** RSSは `features.rss` で制御します。
+- **`server` が受け付けるのは `port` と `liveReload` のみです。** [未実装の項目](#未実装の項目)を参照してください。
+
+### ブロックを省略した場合のデフォルト
+
+| ブロック | 省略時の挙動 |
+|---------|-------------|
+| `build` | `content` / `_site` / `static` / `templates` |
+| `server` | `port: 8080`、`liveReload: true` |
+| `blog` | `postsPerPage: 10`、`generate*` はすべて `true` |
+| `features` | 4つともfalse |
+| `limits` | 上記の例に記載した値 |
+
+`hirundo init` は `features` までを書き出し、`limits` は出力しません。したがって `limits` は
+デフォルト値で動作します。
 
 ## フロントマター
 
-HirundoはMarkdownファイルでYAMLフロントマターをサポートします：
+HirundoはMarkdownファイルのYAMLフロントマターを読み取ります。
 
 ```markdown
 ---
 title: "記事タイトル"
 date: 2024-01-15T10:00:00Z
-layout: "post"
+description: "短い概要"
 categories: ["開発", "swift"]
 tags: ["静的サイト", "ウェブ"]
 draft: false
+slug: "my-post-title"
+template: "post.html"
 ---
 
 # 記事タイトル
@@ -219,9 +333,20 @@ draft: false
 ここにコンテンツを書きます...
 ```
 
+認識されるキー: `title`、`date`、`description`、`categories`、`tags`、`draft`、`slug`、
+`template`、`type`、`author`。
+
+- `draft: true` のファイルは、`--drafts` を付けてビルドしない限り除外されます。
+- `template:` はStencilテンプレートを指定します。存在しないテンプレート名を指定すると
+  ビルドが失敗します。
+- **`layout:` は読み取られません。** テンプレートを変更したい場合は `template:` を使うか、
+  デフォルト（記事は `post.html`、ページは `default.html`）に任せてください。
+  `hirundo init` が生成する初期コンテンツは `template:` を明示的に書き出します。
+
 ## テンプレート
 
-Hirundoは[Stencil](https://github.com/stencilproject/Stencil)テンプレートエンジンを使用します。テンプレートは以下の変数にアクセスできます：
+Hirundoは[Stencil](https://github.com/stencilproject/Stencil)テンプレートエンジンを使用します。
+テンプレートは以下の変数にアクセスできます。
 
 - `site`: サイト設定とメタデータ
 - `page`: 現在のページデータ
@@ -233,11 +358,28 @@ Hirundoは[Stencil](https://github.com/stencilproject/Stencil)テンプレート
 
 ### カスタムフィルター
 
-- `date`: 日付フォーマット
-- `slugify`: URLスラグ作成
-- `excerpt`: 抜粋抽出
-- `absolute_url`: 絶対URL作成
-- `markdown`: Markdownレンダリング
+| フィルター | 用途 |
+|-----------|------|
+| `date` | 日付フォーマット |
+| `slugify` | URLスラグ作成 |
+| `excerpt` | 抜粋抽出 |
+| `markdown` | Markdownレンダリング |
+| `absolute_url` | 絶対URL作成 |
+| `relative_url` | ルート相対URL作成 |
+| `site_url` | 設定値のサイトURL |
+| `site_title` | 設定値のサイトタイトル |
+| `site_description` | 設定値のサイト説明 |
+| `join` | リストを連結して文字列にする |
+| `length` | リストまたは文字列の長さ |
+| `first` | 先頭の要素 |
+| `last` | 末尾の要素 |
+| `slice` | リストの部分範囲 |
+| `truncate` | 文字列の切り詰め |
+| `strip` | 前後の空白を除去 |
+| `replace` | 部分文字列の置換 |
+| `split` | 文字列をリストに分割 |
+| `number` | 数値の書式化 |
+| `default` | 空値のときの代替値 |
 
 ### テンプレート例
 
@@ -255,110 +397,60 @@ Hirundoは[Stencil](https://github.com/stencilproject/Stencil)テンプレート
 {% endblock %}
 ```
 
-## プラグイン
+## 組み込み機能
 
-Hirundoには複数の組み込みプラグインが含まれています：
+Hirundoには4つの組み込み機能があり、`features` ブロックで切り替えます。セキュリティと
+単純さのため、外部コードの動的読み込みはサポートしていません。
 
-### Sitemapプラグイン
-検索エンジン用の`sitemap.xml`を生成します。
+| フラグ | 効果 |
+|-------|------|
+| `sitemap` | 出力のルートに `sitemap.xml` を書き出します |
+| `rss` | 記事から `rss.xml` を書き出します |
+| `searchIndex` | クライアントサイド検索用に `search-index.json` を書き出します |
+| `minify` | アセットパイプラインでCSSとJSの最小化を有効にします |
 
-### RSSプラグイン
-ブログ記事のRSSフィードを作成します。
+`minify` が対象とするのは**CSSとJSのアセットのみ**です。生成されるHTMLは最小化されません。
 
-### Minifyプラグイン
-より良いパフォーマンスのためにHTML出力を最小化します。
+アーカイブ、カテゴリー、タグの各ページは、これとは別に `blog` ブロックで制御します。
 
-### Search Indexプラグイン
-クライアントサイド検索機能のための検索インデックスを生成します。
+## 未実装の項目
 
-## セキュリティ機能
+以前のバージョンの本ドキュメントで「動作する」と記載されていたため、ここに明記します。
+以下はいずれも実装されていません。
 
-Hirundoは包括的な保護対策でセキュリティを優先しています：
+- **CORS設定**。`server.cors` ブロックは存在しません。`server` が受け付けるのは `port` と
+  `liveReload` のみで、その下に `cors:` を書いても黙って無視されます。
+- **タイムアウト設定**。`timeouts` ブロックは存在せず、ファイル操作、ディレクトリ操作、
+  HTTPリクエスト、ファイル監視、サーバー起動のいずれについても設定可能なタイムアウトは
+  ありません。
+- **プラグインアーキテクチャ**。プラグインシステムは削除され、`features` の4つのフラグが
+  その役割を担っています。カスタムプラグイン開発のサポートはなく、`imageOptimization` や
+  `syntaxHighlight` という機能も存在しません。
+- **ライブリロードのWebSocket認証**。`/auth-token` エンドポイントもトークンによるハンド
+  シェイクも存在せず、`/livereload` は接続をそのまま受け付けます。開発サーバーを信頼できない
+  ネットワークに公開しないでください。
+- **`hirundo new post` / `hirundo new page` によるファイル生成**。[`hirundo new`](#hirundo-new)を参照してください。
+- **アセットのフィンガープリント、ソースマップ、JS/CSSの結合**。
+  `build.enableAssetFingerprinting`、`enableSourceMaps`、`concatenateJS`、`concatenateCSS` は
+  設定パーサーに受け付けられますが、どこでも使用されていません。
+- **フロントマターの `layout:`**。`template:` を使用してください。
 
-### 入力検証
-- **ファイルサイズ制限**: Markdownファイル、設定ファイル、フロントマターの設定可能な制限
-- **パス検証**: シンボリックリンク解決を含む高度なパストラバーサル保護
-- **コンテンツサニタイゼーション**: ユーザー生成コンテンツの安全な処理
+## セキュリティ
 
-### アセット処理セキュリティ
-- **安全なCSS/JS処理**: コードインジェクションを防ぐための最小化前検証
-- **JS変換の無効化**: 潜在的に危険な正規表現ベースの変換はデフォルトで無効
-- **パスサニタイゼーション**: セキュリティチェック付きの包括的なパスクリーニング
+Hirundoは静的サイトジェネレーターとして適切なセキュリティ対策を実装しています。
 
-### 開発サーバーセキュリティ
-- **WebSocket保護**: メモリ安全なWebSocketセッション管理
-- **エラー分離**: 情報漏洩のない安全なエラー報告
-- **ファイル監視**: クリーンアップ付きの安全なファイルシステム監視
+- **入力検証**: Markdownファイル、設定ファイル、フロントマターの設定可能なサイズ制限。
+  タイトル、説明、URL、著者名、メールアドレス、言語コードの長さ制限。
+- **パス検証**: `build` の各ディレクトリは絶対パスや `..` を含むことができません。開発サーバーは
+  出力ディレクトリの外へ出るリクエストパスを拒否します。
+- **アセット処理**: 最小化を任意で有効にできるCSS/JS処理。
+- **開発サーバー**: 終了時にWebSocketセッションとファイル監視を後始末します。
 
-## 開発
-
-### 要件
-
-- Swift 5.9+
-- macOS 12+
-- Xcode 16+（macOS開発の場合）
-
-### ソースからビルド
-
-```bash
-git clone https://github.com/SilentMalachite/Hirundo.git
-cd hirundo
-swift build
-```
-
-### テストの実行
-
-Hirundoは包括的なテストスイートを提供します：
-
-```bash
-# 全テストを実行
-swift test
-
-# 特定のテストを実行
-swift test --filter SiteGeneratorTests
-swift test --filter EdgeCaseTests
-swift test --filter IntegrationTests
-
-# テストカバレッジの生成
-swift test --enable-code-coverage
-```
-
-#### テストカテゴリ
-
-- **単体テスト**: 個別コンポーネントのテスト（85+ テスト）
-- **統合テスト**: エンドツーエンドのワークフローテスト
-- **セキュリティテスト**: 脆弱性とセキュリティ検証
-- **エッジケーステスト**: 境界条件と異常ケース
-- **パフォーマンステスト**: メモリとパフォーマンスの検証
-
-### デバッグモード
-
-詳細な出力のためのログレベル設定：
-
-```bash
-HIRUNDO_LOG_LEVEL=debug hirundo build
-```
-
-## ドキュメント
-
-- 開発ガイド: `DEVELOPMENT.md`
-- テストガイド: `TESTING.md`
-- アーキテクチャ: `ARCHITECTURE.md`
-- セキュリティ: `SECURITY.md` と `WEBSOCKET_AUTHENTICATION.md`
-- コントリビューション: `CONTRIBUTING.md`
-
-### ライブリロード認証の概要
-
-開発サーバーのWebSocket接続はトークンで認証されます：
-
-- トークン取得: `GET /auth-token` → `{ token, expiresIn, endpoint: "/livereload" }`
-- 接続直後にサーバーから `auth_required` が送られます
-- クライアントは `{"type":"auth", "token":"..."}` を送信
-- 成功時 `auth_success`、以降リロードイベントを受信／失敗時は未登録のためイベントは受信しません
-
-`hirundo serve` ではHTMLにクライアントスクリプトが自動挿入され、上記フローが自動で処理されます。
+セキュリティポリシーについては[SECURITY.md](SECURITY.md)をご覧ください。
 
 ### 付属フィクスチャでのローカル確認
+
+付属のフィクスチャでエンドツーエンドの確認ができます。
 
 ```bash
 cd test-hirundo
@@ -366,6 +458,69 @@ swift run --package-path .. hirundo build --clean
 swift run --package-path .. hirundo serve
 # ブラウザで http://localhost:8080 を開き、test-hirundo/content/ 配下を編集
 ```
+
+## 開発
+
+### 要件
+
+- Swift 6.0+
+- macOS 12+
+- Xcode 16+（macOS開発の場合）
+
+### ソースからビルド
+
+```bash
+git clone https://github.com/SilentMalachite/Hirundo.git
+cd Hirundo
+swift build
+```
+
+### デバッグモード
+
+詳細な出力のためのログレベル設定:
+
+```bash
+HIRUNDO_LOG_LEVEL=debug hirundo build
+```
+
+## テスト
+
+```bash
+# 全テストを実行
+swift test
+
+# 特定のテストスイートを実行
+swift test --filter SiteGeneratorTests
+swift test --filter ConfigTests
+swift test --filter IntegrationTests
+
+# テストカバレッジの生成
+swift test --enable-code-coverage
+```
+
+### テストスイート
+
+- `AssetPipelineTests` — アセット処理と最小化
+- `ConfigTests`、`ConfigParseTests` — 設定の検証とパース
+- `MarkdownParserTests`、`SimpleMarkdownTest` — Markdownとフロントマターの処理
+- `TemplateEngineTests` — テンプレートのレンダリングとフィルター
+- `SiteGeneratorTests` — サイト生成のエンドツーエンド
+- `SiteScaffolderTests`、`InitDestinationResolverTests`、`ScaffoldErrorMappingTests` — `hirundo init`
+- `DevelopmentServerTests` — リクエストのルーティングとパスの封じ込め
+- `HotReloadManagerTests`、`HotReloadIntegrationTest`、`FSEventsMemoryTests` — ファイル監視
+- `ErrorRecoveryTests` — `--continue-on-error` の挙動
+- `SecurityTests` — 検証とパストラバーサルのチェック
+- `IntegrationTests` — エンドツーエンドのワークフロー
+- `DependencyCompatibilityTests`、`EditorCommandValidationTests`
+
+## ドキュメント
+
+- 開発ガイド: [`DEVELOPMENT.md`](DEVELOPMENT.md)
+- テストガイド: [`TESTING.md`](TESTING.md)
+- アーキテクチャ: [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- セキュリティポリシー: [`SECURITY.md`](SECURITY.md)
+- コントリビューション: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- English documentation: [`README.md`](README.md)
 
 ## 技術アーキテクチャ
 
@@ -375,16 +530,14 @@ swift run --package-path .. hirundo serve
 - **[Stencil](https://github.com/stencilproject/Stencil)**: テンプレートエンジン
 - **[Yams](https://github.com/jpsim/Yams)**: YAMLパーサー
 - **[Swifter](https://github.com/httpswift/swifter)**: 軽量HTTPサーバー
+- **[PathKit](https://github.com/kylef/PathKit)**: パスユーティリティ
 - **[swift-argument-parser](https://github.com/apple/swift-argument-parser)**: コマンドラインインターフェース
 
-### パフォーマンス機能
+### パフォーマンス
 
-- **マルチレベルキャッシング**: インテリジェント無効化付きのパース済みコンテンツ、レンダリング済みページ、テンプレートキャッシング
-- **Async/Await**: ビルド時間向上のための並列処理
-- **ストリーミング**: 制御されたリソース使用による大きなサイトの効率的なメモリ使用
-- **メモリ管理**: 高度なWebSocketセッションクリーンアップとファイルハンドル管理
-- **設定可能な制限**: 調整可能なパフォーマンスとセキュリティ制限
-- **ホットリロード**: macOSのFSEventsによる高速ファイルシステム監視
+- **キャッシング**: パース済みコンテンツ、レンダリング済みページ、テンプレート
+- **Async/Await**: ビルド時間短縮のための並列処理
+- **ホットリロード**: FSEventsによるファイルシステム監視と、終了時のクリーンアップ
 
 ## コントリビューション
 

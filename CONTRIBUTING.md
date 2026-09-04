@@ -107,14 +107,26 @@ public func generateSite(config: SiteConfig, clean: Bool = false) throws {
 
 ```
 Sources/
-├── Hirundo/           # CLI executable
-│   └── main.swift     # Command line interface
-├── HirundoCore/       # Core library
-│   ├── Models/        # Data models
-│   ├── Plugins/       # Plugin system
-│   ├── Utilities/     # Helper utilities
-│   └── *.swift        # Core functionality
+├── Hirundo/                # CLI executable
+│   ├── CommandMain.swift   # @main entry point, subcommand registration
+│   ├── ErrorHandling.swift # Shared CLI error reporting
+│   └── Commands/           # init, build, serve, new, clean
+├── HirundoCore/            # Core library
+│   ├── Models/             # Config and data models
+│   ├── Parsers/            # Front matter and markdown parsing
+│   ├── Processors/         # Markdown node processing
+│   ├── Renderers/          # HTML rendering
+│   ├── Sanitizers/         # HTML sanitization
+│   ├── Scaffold/           # `hirundo init` site scaffolding
+│   ├── Templates/          # Stencil cache, filters, context building
+│   ├── Assets/             # Asset processing and concatenation
+│   ├── Validators/         # Markdown validation
+│   ├── Utils/, Utilities/  # Helper utilities
+│   └── *.swift             # Core functionality
 ```
+
+The CLI exposes five subcommands: `init`, `build`, `serve`, `new`
+(`new post` / `new page`), and `clean`.
 
 ## Testing Guidelines
 
@@ -129,7 +141,7 @@ Sources/
 
 - Test command-line interface
 - Test with real markdown files
-- Test plugin functionality
+- Test built-in features (`features:` toggles in `config.yaml`)
 - Test development server
 
 ### Test Structure
@@ -161,17 +173,18 @@ final class SiteGeneratorTests: XCTestCase {
 
 We follow Conventional Commits. Examples:
 
-- `feat: add RSS plugin option`
+- `feat: merge existing .gitignore on init`
 - `fix: prevent path traversal`
 - `docs: add DEVELOPMENT and TESTING guides`
 - `refactor: simplify template cache keys`
-- `test: cover websocket auth edge cases`
+- `test: cover scaffold error mapping edge cases`
 
 Use imperative tone and scope when helpful, and reference issues when applicable, e.g. `Fixes #123`.
 
 ## Pre-PR Checklist
 
-- All tests pass locally: `swift test`
+- `swift test` shows no failures beyond the known baseline (6 pre-existing
+  failures in `HotReloadManagerTests` — see `TESTING.md`)
 - Documentation updated as needed (README/ARCHITECTURE/SECURITY/CHANGELOG)
 - Public APIs include `///` docs for new/changed symbols
 - Breaking changes clearly called out in the PR description
@@ -193,35 +206,55 @@ Use imperative tone and scope when helpful, and reference issues when applicable
 - Update command help text
 - Consider adding to wiki for complex features
 
-## Plugin Development
+## Built-in Features
 
-### Creating a Plugin
+Hirundo has no plugin architecture. The plugin system was removed in Stage 2 and
+replaced by compiled-in feature toggles; there is no `Plugin` protocol,
+`PluginContext`, or dynamic loading, and no `plugins:` config block.
 
-1. Implement the `Plugin` protocol:
+### Adding a Feature
+
+1. Add a `Bool` to `Features` in `Sources/HirundoCore/Models/Features.swift`.
+   All toggles default to `false`:
 
 ```swift
-import HirundoCore
-
-public struct MyPlugin: Plugin {
-    public let name = "MyPlugin"
-    public let version = "1.0.0"
-    
-    public func process(site: Site, context: PluginContext) throws -> Site {
-        // Plugin implementation
-        return site
-    }
+public struct Features: Codable, Sendable, Equatable {
+    public var sitemap: Bool
+    public var rss: Bool
+    public var searchIndex: Bool
+    public var minify: Bool
 }
 ```
 
-2. Add tests for your plugin
-3. Update documentation
-4. Consider making it a separate package
+2. Branch on it in `SiteGenerator`, alongside the existing feature generators:
 
-### Built-in Plugins
+```swift
+if config.features.sitemap {
+    try generateSitemap(outputURL: outputURL)
+}
+```
 
-- Keep core plugins minimal and focused
+3. Add tests covering both the enabled and disabled paths
+4. Document the new key in README and `ARCHITECTURE.md`
+
+Users enable features under `features:` in `config.yaml`:
+
+```yaml
+features:
+  sitemap: true
+  rss: true
+  searchIndex: false
+  minify: true
+```
+
+Note that `minify` enables CSS and JS asset minification together; it does not
+minify HTML, and there is no separate per-language toggle.
+
+### Guidelines
+
+- Keep built-in features minimal and focused
 - Ensure good test coverage
-- Follow the existing plugin patterns
+- Follow the existing feature-generator patterns in `SiteGenerator`
 
 ## Submitting Changes
 
@@ -336,7 +369,8 @@ We follow [Semantic Versioning](https://semver.org/):
 
 - Monitor development server startup time
 - Test live reload responsiveness
-- Consider plugin performance impact
+- Consider the cost of built-in features that walk the output tree (sitemap,
+  search index)
 
 ## Security Considerations
 

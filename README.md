@@ -12,23 +12,26 @@ A modern, fast, and secure static site generator built with Swift.
 
 ## Features
 
-- **🚀 Blazing Fast**: Built with Swift for optimal performance with multi-level caching
-- **📝 Markdown**: Full CommonMark support with frontmatter using Apple's swift-markdown
-- **🎨 Templates**: Powerful Stencil-based templating engine with custom filters
-- **🔄 Live Reload**: Development server with automatic rebuilding and real-time error reporting
-- **🧩 Built-in Features**: Useful capabilities like sitemap/RSS/search/minify are available out of the box
-- **💾 Smart Caching**: Multi-level intelligent caching for lightning-fast rebuilds
-- **📦 Type Safe**: Strongly typed configuration and models with comprehensive validation
-- **⚡ Simple**: Clean, easy-to-use configuration without unnecessary complexity
-- **🛡️ Memory Safe**: Advanced memory management for WebSocket connections and file watching
+- **🚀 Fast**: Built with Swift, with caching for parsed content, rendered pages, and templates
+- **📝 Markdown**: CommonMark support with YAML frontmatter using Apple's swift-markdown
+- **🎨 Templates**: Stencil-based templating engine with 20 custom filters
+- **🔄 Live Reload**: Development server that rebuilds on change and pushes reloads over WebSocket
+- **🧩 Built-in Features**: Sitemap, RSS, search index, and asset minification as simple on/off flags
+- **📦 Type Safe**: Strongly typed, validated configuration and models
+- **⚡ Simple**: A small configuration surface — six top-level keys, no plugin runtime to manage
 
 ## Table of Contents
 
 - [Features](#features)
 - [Quick Start](#quick-start)
+- [Commands](#commands)
+- [Project Structure](#project-structure)
 - [Configuration](#configuration)
 - [Frontmatter](#frontmatter)
 - [Templates](#templates)
+- [Built-in Features](#built-in-features)
+- [Not Yet Implemented](#not-yet-implemented)
+- [Security](#security)
 - [Development](#development)
 - [Testing](#testing)
 - [License](#license)
@@ -37,19 +40,11 @@ A modern, fast, and secure static site generator built with Swift.
 
 ### Installation
 
-#### Using Swift Package Manager
-
 ```bash
 git clone https://github.com/SilentMalachite/Hirundo.git
-cd hirundo
+cd Hirundo
 swift build -c release
 cp .build/release/hirundo /usr/local/bin/
-```
-
-#### From Source
-
-```bash
-swift build -c release
 ```
 
 ### Create Your First Site
@@ -61,13 +56,23 @@ hirundo init my-site --blog
 # Navigate to your site
 cd my-site
 
+# Build it
+hirundo build
+
 # Start the development server
 hirundo serve
 ```
 
 Your site will be available at `http://localhost:8080` with live reload enabled.
 
+> `hirundo serve` serves whatever is already in the output directory. Run `hirundo build`
+> at least once before the first `serve`, otherwise every request returns 404 because
+> there is nothing to serve yet.
+
 ## Commands
+
+Every command also accepts `--verbose`, which prints the underlying error instead of
+just the friendly summary.
 
 ### `hirundo init`
 Create a new Hirundo site.
@@ -75,11 +80,44 @@ Create a new Hirundo site.
 ```bash
 hirundo init [path] [options]
 
+Arguments:
+  path                Path where the new site will be created (default: ".")
+
 Options:
   --title <title>     Site title (default: "My Hirundo Site")
-  --blog             Include blog functionality
-  --force            Force creation in non-empty directory
+  --blog              Include blog functionality
+  --force             Allow scaffolding into a non-empty directory
+  --verbose           Show verbose error information
 ```
+
+Behaviour worth knowing:
+
+- An **empty path argument is rejected**. Pass a directory path, or `.` for the current
+  directory.
+- An existing `.gitignore` is **merged, not overwritten** — including under `--force`.
+  Merged files are reported as `📝 Updated <path>`, newly written ones as `✅ Created <path>`.
+- A directory containing only `.git`, `.gitignore`, `.DS_Store`, `.svn`, or `.hg` still
+  counts as empty, so you can initialise into a freshly cloned repository without `--force`.
+- If scaffolding fails partway through, directories that this run created are **rolled back**
+  rather than left behind half-populated.
+- With `--blog`, the sample post is dated at generation time.
+
+Files written by `hirundo init --blog`:
+
+```
+.gitignore
+config.yaml
+content/index.md
+content/about.md
+content/posts/hello-world.md   # --blog only
+static/css/style.css
+templates/base.html
+templates/default.html
+templates/post.html            # --blog only
+```
+
+Without `--blog`, `features.rss` and `blog.generateArchive` / `generateCategories` /
+`generateTags` are all written as `false`.
 
 ### `hirundo build`
 Build your static site.
@@ -89,12 +127,16 @@ hirundo build [options]
 
 Options:
   --config <file>       Configuration file path (default: config.yaml)
-  --environment <env>   Build environment (default: production)
+  --environment <env>   Build environment, development/production (default: production)
   --drafts              Include draft posts
   --clean               Clean output before building
   --continue-on-error   Continue building even if some files fail (error recovery mode)
   --verbose             Show verbose error information
 ```
+
+If the configuration file does not exist, the build falls back to project defaults rather
+than failing. `--environment` is currently recorded and printed but does not change the
+output; it is reserved for future conditional behaviour.
 
 ### `hirundo serve`
 Start the development server with live reload.
@@ -110,16 +152,29 @@ Options:
   --verbose          Show verbose error information
 ```
 
+The server reads `config.yaml` from the current directory to find the output directory,
+then serves files out of it:
+
+- Directory requests resolve to that directory's `index.html`, so `/`, `/about`, and
+  `/about/` all work.
+- Requests that would climb out of the output directory (`/../../etc/passwd`) are rejected.
+- With live reload on, a WebSocket endpoint is exposed at `/livereload`.
+
+`--port` and `--host` are command-line only — `server.port` in `config.yaml` is not
+consulted by `serve`.
+
 ### `hirundo new`
 Create new content.
 
 ```bash
-# Create a new blog post
-hirundo new post "My Post Title" --tags "swift,web" --categories "development"
-
-# Create a new page
-hirundo new page "About Us" --layout "default"
+hirundo new post <title> [--slug <slug>] [--categories <list>] [--tags <list>] [--draft] [--open] [--verbose]
+hirundo new page <title> [--path <path>] [--layout <layout>] [--open] [--verbose]
 ```
+
+> ⚠️ **Not fully implemented.** Both subcommands currently only validate their arguments,
+> ensure `content/posts` (or `content/`) exists, and print what they would do — they do
+> **not** write a Markdown file yet. Create content files by hand for now; see
+> [Frontmatter](#frontmatter) for the shape.
 
 ### `hirundo clean`
 Clean output directory and caches.
@@ -128,41 +183,53 @@ Clean output directory and caches.
 hirundo clean [options]
 
 Options:
-  --cache    Also clean asset cache
-  --force    Skip confirmation
+  --cache    Also clean the .hirundo-cache directory
+  --force    Actually delete (without this, the command only reports what it would delete)
+  --verbose  Show verbose error information
 ```
+
+> `clean` is a **dry run by default**. There is no interactive confirmation prompt:
+> without `--force` it just lists the paths it would remove. The output directory is read
+> from `build.outputDirectory` in `config.yaml`, falling back to `_site`.
 
 ## Project Structure
 
 ```
 my-site/
-├── config.yaml          # Site configuration
+├── config.yaml           # Site configuration
 ├── content/              # Markdown content
-│   ├── index.md         # Home page
-│   ├── about.md         # About page
-│   └── posts/           # Blog posts
-├── templates/            # HTML templates
-│   ├── base.html        # Base layout
-│   ├── default.html     # Default page template
-│   └── post.html        # Blog post template
-├── static/              # Static assets
-│   ├── css/            # Stylesheets
-│   ├── js/             # JavaScript
-│   └── images/         # Images
-└── _site/              # Generated output (git ignored)
+│   ├── index.md          # Home page
+│   ├── about.md          # About page
+│   └── posts/            # Blog posts
+├── templates/            # Stencil templates
+│   ├── base.html         # Base layout
+│   ├── default.html      # Default page template
+│   └── post.html         # Blog post template
+├── static/               # Static assets, copied to the output root
+│   └── css/
+└── _site/                # Generated output (git ignored)
 ```
+
+Anything under `static/` is copied to the **root** of the output directory — `static/css/style.css`
+is served at `/css/style.css`, not `/static/css/style.css`. `hirundo init` creates only
+`static/css/`; add `js/`, `images/`, or anything else as you need them.
 
 ## Configuration
 
-### Site Configuration (`config.yaml`)
+`config.yaml` has exactly six top-level keys: `site`, `build`, `server`, `blog`, `features`,
+and `limits`. Only `site` is required; every other block falls back to its defaults.
+
+> ⚠️ **Unknown top-level keys are silently ignored.** A misspelled block (`serverr:`) or a
+> block that does not exist (`timeouts:`, `plugins:`) is not an error — it simply has no
+> effect. Check spelling against the list above if a setting seems not to apply.
 
 ```yaml
 site:
-  title: "My Site"
-  description: "A site built with Hirundo"
-  url: "https://example.com"
-  language: "en-US"
-  author:
+  title: "My Site"                  # required
+  url: "https://example.com"        # required
+  description: "A site built with Hirundo"   # optional, max 500 chars
+  language: "en-US"                 # optional, default "en-US"
+  author:                           # optional
     name: "Your Name"
     email: "your.email@example.com"
 
@@ -177,13 +244,20 @@ server:
   liveReload: true
 
 blog:
-  postsPerPage: 10
+  postsPerPage: 10                  # 1-100
   generateArchive: true
   generateCategories: true
   generateTags: true
-  rssEnabled: true
 
-# Performance limits (optional)
+# Built-in feature flags. A mapping, not a list. Omit the block and all four are false.
+features:
+  sitemap: true
+  rss: true
+  searchIndex: true
+  minify: true
+
+# Security and performance limits. All ten keys are required if this block is present.
+# The values below are the defaults.
 limits:
   maxMarkdownFileSize: 10485760     # 10MB
   maxConfigFileSize: 1048576        # 1MB
@@ -191,29 +265,64 @@ limits:
   maxFilenameLength: 255
   maxTitleLength: 200
   maxDescriptionLength: 500
-
-# Features (optional)
-features:
-  sitemap: true
-  rss: true
-  searchIndex: true
-  minify: true
-
-
+  maxUrlLength: 2000
+  maxAuthorNameLength: 100
+  maxEmailLength: 254
+  maxLanguageCodeLength: 10
 ```
+
+A minimal configuration is just the two required fields:
+
+```yaml
+site:
+  title: "My Site"
+  url: "https://example.com"
+```
+
+### Gotchas
+
+- **`limits` is all-or-nothing.** Unlike every other block, it has no per-key defaults when
+  decoding. If you include a `limits:` block you must list **all ten** keys — omitting even
+  one fails the build with `Failed to parse configuration: The data couldn't be read because
+  it is missing.` If you only want the defaults, omit the block entirely.
+- **`features` is a mapping, not a list.** The legacy plugin form is no longer accepted and
+  is a hard parse error:
+  ```yaml
+  # ✗ No longer parses
+  features:
+    - name: "sitemap"
+      enabled: true
+  ```
+- **There is no `blog.rssEnabled`.** RSS is `features.rss`.
+- **`server` supports only `port` and `liveReload`.** See [Not Yet Implemented](#not-yet-implemented).
+
+### Defaults when a block is omitted
+
+| Block | Behaviour when absent |
+|-------|-----------------------|
+| `build` | `content` / `_site` / `static` / `templates` |
+| `server` | `port: 8080`, `liveReload: true` |
+| `blog` | `postsPerPage: 10`, all `generate*` true |
+| `features` | all four false |
+| `limits` | the values shown in the example above |
+
+`hirundo init` writes everything through `features` and omits `limits`, which therefore
+runs on the defaults.
 
 ## Frontmatter
 
-Hirundo supports YAML frontmatter in your Markdown files:
+Hirundo reads YAML frontmatter from your Markdown files:
 
 ```markdown
 ---
 title: "My Post Title"
 date: 2024-01-15T10:00:00Z
-layout: "post"
+description: "A short summary"
 categories: ["development", "swift"]
 tags: ["static-site", "web"]
 draft: false
+slug: "my-post-title"
+template: "post.html"
 ---
 
 # My Post Title
@@ -221,9 +330,20 @@ draft: false
 Your content here...
 ```
 
+Recognised keys: `title`, `date`, `description`, `categories`, `tags`, `draft`, `slug`,
+`template`, `type`, `author`.
+
+- `draft: true` excludes the file unless you build with `--drafts`.
+- `template:` selects the Stencil template. It must name a template that exists, or the
+  build fails.
+- **`layout:` is not read.** Use `template:` to override the template, or rely on the
+  default (`post.html` for posts, `default.html` for pages). The starter content generated
+  by `hirundo init` writes an explicit `template:` key.
+
 ## Templates
 
-Hirundo uses the [Stencil](https://github.com/stencilproject/Stencil) templating engine. Templates have access to these variables:
+Hirundo uses the [Stencil](https://github.com/stencilproject/Stencil) templating engine.
+Templates have access to these variables:
 
 - `site`: Site configuration and metadata
 - `page`: Current page data
@@ -235,11 +355,28 @@ Hirundo uses the [Stencil](https://github.com/stencilproject/Stencil) templating
 
 ### Custom Filters
 
-- `date`: Format dates
-- `slugify`: Create URL slugs
-- `excerpt`: Extract excerpts
-- `absolute_url`: Create absolute URLs
-- `markdown`: Render Markdown
+| Filter | Purpose |
+|--------|---------|
+| `date` | Format dates |
+| `slugify` | Create URL slugs |
+| `excerpt` | Extract excerpts |
+| `markdown` | Render Markdown |
+| `absolute_url` | Create absolute URLs |
+| `relative_url` | Create root-relative URLs |
+| `site_url` | Site URL from configuration |
+| `site_title` | Site title from configuration |
+| `site_description` | Site description from configuration |
+| `join` | Join a list into a string |
+| `length` | Length of a list or string |
+| `first` | First element |
+| `last` | Last element |
+| `slice` | Sub-range of a list |
+| `truncate` | Truncate a string |
+| `strip` | Trim whitespace |
+| `replace` | Substring replacement |
+| `split` | Split a string into a list |
+| `number` | Numeric formatting |
+| `default` | Fallback for an empty value |
 
 ### Example Template
 
@@ -257,42 +394,60 @@ Hirundo uses the [Stencil](https://github.com/stencilproject/Stencil) templating
 {% endblock %}
 ```
 
-## Features
+## Built-in Features
 
-Hirundo provides built-in features. Dynamic loading of external code is not supported for security and simplicity.
+Hirundo ships four built-in features, toggled by the `features` block. Dynamic loading of
+external code is not supported, for security and simplicity.
 
-### Sitemap
-Generates `sitemap.xml` for search engines.
+| Flag | Effect |
+|------|--------|
+| `sitemap` | Writes `sitemap.xml` to the output root |
+| `rss` | Writes `rss.xml` from your posts |
+| `searchIndex` | Writes `search-index.json` for client-side search |
+| `minify` | Enables CSS and JS minification in the asset pipeline |
 
-### RSS
-Creates `rss.xml` for your blog posts.
+Note that `minify` applies to **CSS and JS assets only** — generated HTML is not minified.
 
-### Minify
-Minifies CSS/JS assets for better performance.
+Archive, category, and tag pages are controlled separately, by the `blog` block.
 
-### Search Index
-Generates a search index for client-side search functionality.
+## Not Yet Implemented
 
-## Security Features
+These are documented here because earlier versions of this README described them as working.
+They are not:
 
-Hirundo implements appropriate security measures for a static site generator:
+- **CORS configuration.** There is no `server.cors` block. `server` accepts only `port` and
+  `liveReload`; a `cors:` key under it is silently ignored.
+- **Timeout configuration.** There is no `timeouts` block and no configurable timeouts for
+  file, directory, HTTP, file-watching, or server-start operations.
+- **Plugin architecture.** The plugin system was removed; the four flags under `features`
+  replace it. There is no custom-plugin development support, and no `imageOptimization` or
+  `syntaxHighlight` feature.
+- **WebSocket authentication for live reload.** There is no `/auth-token` endpoint and no
+  token handshake; `/livereload` accepts connections directly. Do not expose the development
+  server to an untrusted network.
+- **`hirundo new post` / `hirundo new page` file creation.** See [`hirundo new`](#hirundo-new).
+- **Asset fingerprinting, source maps, and JS/CSS concatenation.** `build.enableAssetFingerprinting`,
+  `enableSourceMaps`, `concatenateJS`, and `concatenateCSS` are accepted by the config parser
+  but are not acted on anywhere.
+- **`layout:` in frontmatter.** Use `template:`.
 
-### Input Validation
-- **File Size Limits**: Configurable limits for markdown files and frontmatter
-- **Path Validation**: Standard path traversal protection
-- **Content Processing**: Safe processing of user-generated content
+## Security
 
-### Asset Processing
-- **CSS/JS Processing**: Standard processing with minification support
-- **Path Sanitization**: Basic path cleaning and validation
+Hirundo implements security measures appropriate to a static site generator:
 
-### Development Server
-- **WebSocket Management**: Clean WebSocket connection handling
-- **Live Reload**: Simple file watching with automatic cleanup
-- **Error Handling**: Secure error reporting
+- **Input validation**: configurable size limits for Markdown files, the config file, and
+  frontmatter; length limits on titles, descriptions, URLs, author names, e-mail addresses,
+  and language codes.
+- **Path validation**: `build` directories may not be absolute or contain `..`; the
+  development server rejects request paths that escape the output directory.
+- **Asset processing**: CSS/JS processing with optional minification.
+- **Development server**: WebSocket session cleanup and file-watcher teardown on shutdown.
+
+See [SECURITY.md](SECURITY.md) for the security policy.
 
 ### Local Verification with Fixture
-You can quickly verify end-to-end using the provided fixture:
+
+You can verify end-to-end using the provided fixture:
 
 ```bash
 cd test-hirundo
@@ -313,43 +468,9 @@ swift run --package-path .. hirundo serve
 
 ```bash
 git clone https://github.com/SilentMalachite/Hirundo.git
-cd hirundo
+cd Hirundo
 swift build
 ```
-
-### Running Tests
-
-```bash
-swift test
-```
-
-## Documentation
-
-- Development Guide: see `DEVELOPMENT.md`
-- Testing Guide: see `TESTING.md`
-- Architecture: see `ARCHITECTURE.md`
-- Security Policy and guidance: see `SECURITY.md` and `WEBSOCKET_AUTHENTICATION.md`
-- Contributing Guide: see `CONTRIBUTING.md`
-- 日本語ドキュメント: `README.ja.md`
-
-## Testing
-
-Hirundo includes a test suite that covers core functionality:
-
-- **Unit Tests**: Individual component testing
-- **Integration Tests**: End-to-end workflow validation
-- **Edge Case Tests**: Error handling and edge case scenarios
-
-### Test Categories
-
-- `AssetPipelineTests` - Asset processing and minification
-- `ConfigTests` - Configuration validation and parsing
-- `ContentProcessorTests` - Markdown processing and validation
-- `EdgeCaseTests` - Error handling and edge case scenarios
-- `IntegrationTests` - End-to-end functionality
-- `HotReloadManagerTests` - File watching functionality
-
-All tests are expected to pass. Run `swift test` to verify on your environment.
 
 ### Debug Mode
 
@@ -359,6 +480,45 @@ Set the log level for detailed output:
 HIRUNDO_LOG_LEVEL=debug hirundo build
 ```
 
+## Testing
+
+```bash
+# Run all tests
+swift test
+
+# Run a specific suite
+swift test --filter SiteGeneratorTests
+swift test --filter ConfigTests
+swift test --filter IntegrationTests
+
+# Generate test coverage
+swift test --enable-code-coverage
+```
+
+### Test Suites
+
+- `AssetPipelineTests` — asset processing and minification
+- `ConfigTests`, `ConfigParseTests` — configuration validation and parsing
+- `MarkdownParserTests`, `SimpleMarkdownTest` — Markdown and frontmatter processing
+- `TemplateEngineTests` — template rendering and filters
+- `SiteGeneratorTests` — end-to-end site generation
+- `SiteScaffolderTests`, `InitDestinationResolverTests`, `ScaffoldErrorMappingTests` — `hirundo init`
+- `DevelopmentServerTests` — request routing and path containment
+- `HotReloadManagerTests`, `HotReloadIntegrationTest`, `FSEventsMemoryTests` — file watching
+- `ErrorRecoveryTests` — `--continue-on-error` behaviour
+- `SecurityTests` — validation and path-traversal checks
+- `IntegrationTests` — end-to-end workflows
+- `DependencyCompatibilityTests`, `EditorCommandValidationTests`
+
+## Documentation
+
+- Development Guide: [`DEVELOPMENT.md`](DEVELOPMENT.md)
+- Testing Guide: [`TESTING.md`](TESTING.md)
+- Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- Security Policy: [`SECURITY.md`](SECURITY.md)
+- Contributing Guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- 日本語ドキュメント: [`README.ja.md`](README.ja.md)
+
 ## Technical Architecture
 
 ### Dependencies
@@ -367,15 +527,14 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 - **[Stencil](https://github.com/stencilproject/Stencil)**: Template engine
 - **[Yams](https://github.com/jpsim/Yams)**: YAML parser
 - **[Swifter](https://github.com/httpswift/swifter)**: Lightweight HTTP server
+- **[PathKit](https://github.com/kylef/PathKit)**: Path utilities
 - **[swift-argument-parser](https://github.com/apple/swift-argument-parser)**: Command-line interface
 
-### Performance Features
+### Performance
 
-- **Multi-level Caching**: Parsed content, rendered pages, and template caching
-- **Async/Await**: Parallel processing for improved build times
-- **Streaming**: Efficient memory usage for large sites
-- **Memory Management**: Clean resource management and file handle handling
-- **Hot Reload**: File system monitoring with automatic cleanup
+- **Caching**: parsed content, rendered pages, and templates
+- **Async/Await**: parallel processing for improved build times
+- **Hot Reload**: FSEvents-based file system monitoring with cleanup on shutdown
 
 ## Contributing
 
