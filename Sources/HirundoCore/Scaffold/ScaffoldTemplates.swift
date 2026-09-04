@@ -11,7 +11,9 @@ enum ScaffoldTemplates {
 
     static func configYAML(title: String, includeBlog: Bool) -> String {
         let quotedTitle = yamlQuoted(title)
-        let rssEnabled = includeBlog ? "true" : "false"
+        // Every blog-derived flag reads from this one binding, so RSS and the three
+        // `blog.generate*` switches can never drift apart.
+        let blogFlag = includeBlog ? "true" : "false"
         return """
         site:
           title: \(quotedTitle)
@@ -34,13 +36,13 @@ enum ScaffoldTemplates {
 
         blog:
           postsPerPage: 10
-          generateArchive: \(includeBlog ? "true" : "false")
-          generateCategories: \(includeBlog ? "true" : "false")
-          generateTags: \(includeBlog ? "true" : "false")
+          generateArchive: \(blogFlag)
+          generateCategories: \(blogFlag)
+          generateTags: \(blogFlag)
 
         features:
           sitemap: true
-          rss: \(rssEnabled)
+          rss: \(blogFlag)
           searchIndex: false
           minify: false
 
@@ -51,7 +53,7 @@ enum ScaffoldTemplates {
         return """
         ---
         title: "Home"
-        layout: "default"
+        template: "default.html"
         ---
 
         # Welcome to \(title)
@@ -64,7 +66,7 @@ enum ScaffoldTemplates {
     static let aboutMarkdown = """
     ---
     title: "About"
-    layout: "default"
+    template: "default.html"
     ---
 
     # About
@@ -89,7 +91,7 @@ enum ScaffoldTemplates {
                 <h1><a href="/">{{ site.title }}</a></h1>
                 <nav>
                     <a href="/">Home</a>
-                    <a href="/about">About</a>\(blogNav)
+                    <a href="/about/">About</a>\(blogNav)
                 </nav>
             </header>
             <main>
@@ -200,12 +202,20 @@ enum ScaffoldTemplates {
 
     """
 
-    static func helloWorldPost() -> String {
+    /// The sample blog post written by `--blog`.
+    ///
+    /// `date` is emitted as ISO 8601 UTC (`YYYY-MM-DDTHH:MM:SSZ`), the format
+    /// `ContentProcessor` accepts for front-matter dates. It defaults to the moment of
+    /// scaffolding so a freshly created site never opens on a stale sample post.
+    static func helloWorldPost(date: Date = Date()) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
         return """
         ---
         title: "Hello World"
-        date: 2026-01-01T00:00:00Z
-        layout: "post"
+        date: \(formatter.string(from: date))
+        template: "post.html"
         ---
 
         # Hello World

@@ -30,19 +30,21 @@ struct InitCommand: ParsableCommand {
         if force { print("💪 Force mode: enabled") }
 
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        let destination = URL(fileURLWithPath: path, relativeTo: cwd).standardizedFileURL
         do {
+            let destination = try InitDestinationResolver.resolve(path: path, currentDirectory: cwd)
             let result = try SiteScaffolder().scaffold(
-                at: destination,
+                at: destination.url,
                 options: SiteScaffoldOptions(title: title, includeBlog: blog, force: force)
             )
             for relative in result.createdRelativePaths.sorted() {
                 print("✅ Created \(relative)")
             }
+            for relative in result.modifiedRelativePaths.sorted() {
+                print("📝 Updated \(relative)")
+            }
             print("✅ Site created. Next:")
-            let isCurrent = (path == "." || destination.path == cwd.path)
-            if !isCurrent {
-                print("   cd \(path.posixShellQuoted)")
+            if let changeDirectory = destination.changeDirectoryCommand {
+                print("   \(changeDirectory)")
             }
             print("   hirundo serve")
         } catch {
