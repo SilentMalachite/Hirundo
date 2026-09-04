@@ -58,11 +58,6 @@ public final class DevelopmentServer: @unchecked Sendable {
     }
     
     private func setupRoutes() {
-        // Main route handler for static files
-        server["/(.*)"] = { [weak self] request in
-            return self?.handleStaticFileRequest(request) ?? .notFound
-        }
-        
         if liveReload {
             // WebSocket endpoint for live reload
             server["/livereload"] = websocket(
@@ -71,18 +66,59 @@ public final class DevelopmentServer: @unchecked Sendable {
                 }
             )
         }
+
+        // Static files are served from the not-found handler, which runs after the
+        // routes above have had their chance. Swifter's router matches literal path
+        // segments and `:name` variables — it does not interpret regular expressions,
+        // so a `/(.*)` route would only ever match the literal path `/(.*)`.
+        server.notFoundHandler = { [weak self] request in
+            self?.handleStaticFileRequest(request) ?? .notFound
+        }
     }
     
     // MARK: - Private Methods
     
+    /// Maps a request path to the file to serve from the output directory.
+    ///
+    /// Directory requests (`/about`, `/about/`, `/`) resolve to the directory's
+    /// `index.html`, which is the layout `SiteGenerator` produces for every page.
+    /// - Parameter requestPath: Path component of the incoming request.
+    /// - Returns: Absolute path of the file to serve, or `nil` when nothing matches
+    ///   or the path escapes the output directory.
+    func resolveFilePath(forRequestPath requestPath: String) -> String? {
+        let root = URL(fileURLWithPath: outputPath, isDirectory: true).standardizedFileURL
+        // `HttpRequest.path` is already percent-decoded and query-stripped by Swifter's parser.
+        var candidate = root
+        for component in requestPath.split(separator: "/") {
+            candidate.appendPathComponent(String(component))
+        }
+        candidate.standardize()
+
+        // Reject anything that climbs out of the output directory, e.g. `/../../etc/passwd`.
+        guard candidate.path == root.path || candidate.path.hasPrefix(root.path + "/") else {
+            return nil
+        }
+
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory) else {
+            return nil
+        }
+        guard isDirectory.boolValue else {
+            return candidate.path
+        }
+
+        let index = candidate.appendingPathComponent("index.html")
+        guard fileManager.fileExists(atPath: index.path) else {
+            return nil
+        }
+        return index.path
+    }
+
     private func handleStaticFileRequest(_ request: HttpRequest) -> HttpResponse {
-        let requestPath = request.path == "/" ? "/index.html" : request.path
-        let filePath = outputPath + requestPath
-        
-        guard fileManager.fileExists(atPath: filePath) else {
+        guard let filePath = resolveFilePath(forRequestPath: request.path) else {
             return .notFound
         }
-        
+
         do {
             let data = try Data(contentsOf: URL(fileURLWithPath: filePath))
             let fileExtension = URL(fileURLWithPath: filePath).pathExtension
