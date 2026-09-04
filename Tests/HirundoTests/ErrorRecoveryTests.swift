@@ -299,16 +299,16 @@ final class ErrorRecoveryTests: XCTestCase {
         XCTAssertFalse(buildResult.success)
     }
     
-    // MARK: - Test 5: Partial build recovery with plugin errors
-    
-    func testPartialBuildRecoveryWithPluginErrors() async throws {
-        // Create content that will trigger plugin errors
-        let contentWithPluginIssue = """
+    // MARK: - Test 5: Partial build recovery with unrecognized front matter
+
+    func testPartialBuildRecoveryWithUnknownFrontMatterKeys() async throws {
+        // Front matter carrying a key no model decodes must not abort the build
+        let contentWithUnknownKey = """
         ---
-        title: Plugin Error Page
-        custom_plugin_data: "trigger-error"
+        title: Unknown Front Matter Page
+        custom_data: "not-a-known-key"
         ---
-        # Plugin Error Page
+        # Unknown Front Matter Page
         """
         
         let validContent = """
@@ -320,8 +320,8 @@ final class ErrorRecoveryTests: XCTestCase {
         
         // Write files
         let contentDir = tempDirectory.appendingPathComponent("content")
-        try contentWithPluginIssue.write(
-            to: contentDir.appendingPathComponent("plugin-error.md"),
+        try contentWithUnknownKey.write(
+            to: contentDir.appendingPathComponent("unknown-front-matter.md"),
             atomically: true,
             encoding: .utf8
         )

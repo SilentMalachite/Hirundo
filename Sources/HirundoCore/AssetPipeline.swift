@@ -130,7 +130,7 @@ public class AssetPipeline {
             withIntermediateDirectories: true
         )
         
-        // Create asset item for plugin processing
+        // Describe the asset for the built-in processor
         let asset = AssetItem(
             sourcePath: fileURL.path,
             outputPath: outputPath,
@@ -139,8 +139,6 @@ public class AssetPipeline {
         
         // Process through built-in pipeline first
         try processor.processAssetContent(asset, cssOptions: cssOptions, jsOptions: jsOptions)
-        
-        // No external plugins in Stage 2; built-in pipeline already wrote output
         
         // Update manifest
         if enableFingerprinting {

@@ -345,10 +345,6 @@ public class SiteGenerator {
         }
     }
     
-    private func loadPlugins() throws {
-        // Stage 2: No plugins to load.
-    }
-
     // MARK: - Built-in feature generators (sitemap, RSS, search index)
     private func generateSitemap(outputURL: URL) throws {
         let fm = FileManager.default

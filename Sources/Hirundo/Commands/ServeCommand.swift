@@ -39,7 +39,7 @@ struct ServeCommand: AsyncParsableCommand {
         
         var server: DevelopmentServer?
         do {
-            // Load configuration to respect CORS, WS auth, and output directory
+            // Load configuration to respect the configured output directory
             let configURL = URL(fileURLWithPath: currentDirectory).appendingPathComponent("config.yaml")
             let config = try HirundoConfig.load(from: configURL)
             

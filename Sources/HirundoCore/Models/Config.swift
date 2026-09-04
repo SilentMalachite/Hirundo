@@ -3,7 +3,8 @@ import Yams
 
 // Build and BuildConfig are defined in Models/Build.swift
 
-// Server, WebSocketAuthConfig, CorsConfig, and ServerConfig are defined in Models/Server.swift
+// Server and ServerConfig are defined in Models/Server.swift.
+// Server decodes only `port` and `liveReload` — there is no CORS or WebSocket auth configuration.
 
 // Blog and BlogConfig are defined in Models/Blog.swift
 

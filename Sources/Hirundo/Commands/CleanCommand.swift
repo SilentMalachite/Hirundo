@@ -11,7 +11,7 @@ struct CleanCommand: ParsableCommand {
     @Flag(name: .long, help: "Also clean asset cache")
     var cache: Bool = false
     
-    @Flag(name: .long, help: "Skip confirmation")
+    @Flag(name: .long, help: "Actually delete; without this the command only lists what would be removed")
     var force: Bool = false
     
     @Flag(name: .long, help: "Show verbose error information")
