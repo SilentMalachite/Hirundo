@@ -49,4 +49,73 @@ final class SiteScaffolderTests: XCTestCase {
         XCTAssertFalse(config.features.rss)
         XCTAssertFalse(config.features.minify)
     }
+
+    func testScaffold_whenBlogEnabled_createsPostTemplateAndSamplePost() throws {
+        let dest = tempDir.appendingPathComponent("blog")
+        _ = try SiteScaffolder().scaffold(
+            at: dest,
+            options: SiteScaffoldOptions(includeBlog: true)
+        )
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: dest.appendingPathComponent("templates/post.html").path))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: dest.appendingPathComponent("content/posts/hello-world.md").path))
+        let config = try HirundoConfig.load(from: dest.appendingPathComponent("config.yaml"))
+        XCTAssertTrue(config.features.rss)
+        let base = try String(contentsOf: dest.appendingPathComponent("templates/base.html"), encoding: .utf8)
+        XCTAssertTrue(base.contains("/archive/"))
+    }
+
+    func testScaffold_whenDestinationHasOnlyGit_succeedsWithoutForce() throws {
+        let dest = tempDir.appendingPathComponent("repo")
+        try FileManager.default.createDirectory(at: dest.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        _ = try SiteScaffolder().scaffold(at: dest, options: SiteScaffoldOptions())
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent("config.yaml").path))
+    }
+
+    func testScaffold_whenDestinationNotEmpty_throwsWithoutForce() throws {
+        let dest = tempDir.appendingPathComponent("full")
+        try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        try "keep".write(to: dest.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(
+            try SiteScaffolder().scaffold(at: dest, options: SiteScaffoldOptions())
+        ) { error in
+            guard case ScaffoldError.destinationNotEmpty = error else {
+                return XCTFail("expected destinationNotEmpty, got \(error)")
+            }
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent("notes.txt").path))
+    }
+
+    func testScaffold_whenForce_overwritesOwnedFilesAndKeepsOthers() throws {
+        let dest = tempDir.appendingPathComponent("full")
+        try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        try "keep".write(to: dest.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+        try "old".write(to: dest.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+        _ = try SiteScaffolder().scaffold(at: dest, options: SiteScaffoldOptions(title: "Forced", force: true))
+        let yaml = try String(contentsOf: dest.appendingPathComponent("config.yaml"), encoding: .utf8)
+        XCTAssertTrue(yaml.contains("Forced"))
+        XCTAssertEqual(try String(contentsOf: dest.appendingPathComponent("notes.txt"), encoding: .utf8), "keep")
+    }
+
+    func testScaffold_whenTitleEmpty_throwsInvalidTitle() {
+        let dest = tempDir.appendingPathComponent("t")
+        XCTAssertThrowsError(
+            try SiteScaffolder().scaffold(at: dest, options: SiteScaffoldOptions(title: "   "))
+        ) { error in
+            guard case ScaffoldError.invalidTitle = error else {
+                return XCTFail("expected invalidTitle, got \(error)")
+            }
+        }
+    }
+
+    func testScaffold_whenTitleContainsQuotes_writesValidYAML() throws {
+        let dest = tempDir.appendingPathComponent("q")
+        _ = try SiteScaffolder().scaffold(
+            at: dest,
+            options: SiteScaffoldOptions(title: #"Alice's "Blog""#)
+        )
+        let config = try HirundoConfig.load(from: dest.appendingPathComponent("config.yaml"))
+        XCTAssertEqual(config.site.title, #"Alice's "Blog""#)
+    }
 }
