@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import HirundoCore
 
 struct InitCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
@@ -26,28 +27,28 @@ struct InitCommand: ParsableCommand {
         print("🚀 Creating new Hirundo site at: \(path)")
         print("📝 Title: \(title)")
         print("📚 Blog functionality: \(blog ? "enabled" : "disabled")")
-        print("💪 Force mode: \(force ? "enabled" : "disabled")")
-        
-        let fileManager = FileManager.default
-        let siteURL = URL(fileURLWithPath: path)
-        
-        // Check if directory exists and is not empty
-        if fileManager.fileExists(atPath: path) {
-            do {
-                let contents = try fileManager.contentsOfDirectory(at: siteURL, includingPropertiesForKeys: nil)
-                if !contents.isEmpty && !force {
-                    let err = NSError(domain: "Init", code: 1, userInfo: [NSLocalizedDescriptionKey: "Directory is not empty. Use --force to override."])
-                    handleError(err, context: "Init", verbose: verbose)
-                    throw ExitCode.failure
-                }
-            } catch {
-                handleError(error, context: "Init", verbose: verbose)
-                throw ExitCode.failure
+        if force { print("💪 Force mode: enabled") }
+
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let destination = URL(fileURLWithPath: path, relativeTo: cwd).standardizedFileURL
+        do {
+            let result = try SiteScaffolder().scaffold(
+                at: destination,
+                options: SiteScaffoldOptions(title: title, includeBlog: blog, force: force)
+            )
+            for relative in result.createdRelativePaths.sorted() {
+                print("✅ Created \(relative)")
             }
+            print("✅ Site created. Next:")
+            let isCurrent = (path == "." || destination.path == cwd.path)
+            if !isCurrent {
+                print("   cd \(path)")
+            }
+            print("   hirundo serve")
+        } catch {
+            handleError(error, context: "Init", verbose: verbose)
+            throw ExitCode.failure
         }
-        
-        print("✅ Init command executed successfully!")
-        print("💡 Full implementation would create directory structure and files")
     }
 }
 
