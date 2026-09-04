@@ -118,4 +118,20 @@ final class SiteScaffolderTests: XCTestCase {
         let config = try HirundoConfig.load(from: dest.appendingPathComponent("config.yaml"))
         XCTAssertEqual(config.site.title, #"Alice's "Blog""#)
     }
+
+    func testScaffold_whenBlogEnabled_siteGeneratorBuildSucceeds() async throws {
+        let dest = tempDir.appendingPathComponent("built")
+        _ = try SiteScaffolder().scaffold(
+            at: dest,
+            options: SiteScaffoldOptions(title: "Built Site", includeBlog: true)
+        )
+        let generator = try SiteGenerator(projectPath: dest.path)
+        try await generator.build(clean: true)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: dest.appendingPathComponent("_site/index.html").path))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: dest.appendingPathComponent("_site/about/index.html").path))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: dest.appendingPathComponent("_site/posts/hello-world/index.html").path))
+    }
 }
