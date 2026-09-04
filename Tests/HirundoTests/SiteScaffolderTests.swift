@@ -35,4 +35,18 @@ final class SiteScaffolderTests: XCTestCase {
         XCTAssertFalse(fm.fileExists(atPath: dest.appendingPathComponent("content/posts").path))
         XCTAssertTrue(result.createdRelativePaths.contains("config.yaml"))
     }
+
+    func testScaffold_whenDefaultOptions_writesParseableConfig() throws {
+        let dest = tempDir.appendingPathComponent("site")
+        _ = try SiteScaffolder().scaffold(at: dest, options: SiteScaffoldOptions())
+        let config = try HirundoConfig.load(from: dest.appendingPathComponent("config.yaml"))
+        XCTAssertEqual(config.site.title, "My Hirundo Site")
+        XCTAssertEqual(config.site.url, "https://example.com")
+        XCTAssertEqual(config.site.language, "en-US")
+        XCTAssertEqual(config.build.contentDirectory, "content")
+        XCTAssertEqual(config.server.port, 8080)
+        XCTAssertTrue(config.features.sitemap)
+        XCTAssertFalse(config.features.rss)
+        XCTAssertFalse(config.features.minify)
+    }
 }
