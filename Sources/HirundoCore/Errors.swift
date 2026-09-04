@@ -100,14 +100,19 @@ public enum BuildError: Error, LocalizedError {
 
 /// Errors raised while scaffolding a new Hirundo site.
 public enum ScaffoldError: Error, LocalizedError, Equatable, Sendable {
+    case emptyDestinationPath
     case destinationNotEmpty(String)
     case destinationIsFile(String)
     case invalidTitle(String)
     case cannotCreateDirectory(String)
     case cannotWriteFile(String)
+    case cannotReadDirectory(String)
+    case cannotReadFile(String)
 
     public var errorDescription: String? {
         switch self {
+        case .emptyDestinationPath:
+            return "Destination path is empty. Pass a directory path, or \".\" for the current directory."
         case .destinationNotEmpty(let path):
             return "Directory is not empty: \(path). Use --force to override."
         case .destinationIsFile(let path):
@@ -118,26 +123,68 @@ public enum ScaffoldError: Error, LocalizedError, Equatable, Sendable {
             return "Could not create directory: \(path)"
         case .cannotWriteFile(let path):
             return "Could not write file: \(path)"
+        case .cannotReadDirectory(let path):
+            return "Could not read directory: \(path)"
+        case .cannotReadFile(let path):
+            return "Could not read file: \(path)"
         }
     }
 }
 
 extension ScaffoldError {
     /// Converts this scaffold error into the unified Hirundo error representation.
-    /// - Returns: A `HirundoErrorInfo` with filesystem category and a stable code.
+    ///
+    /// The category decides the headline the CLI prints, so usage mistakes (an unusable
+    /// `--title`) are reported as configuration problems rather than disk failures, and the
+    /// cases a user can act on carry their own suggestion instead of the generic
+    /// "check permissions and disk space" advice.
+    /// - Returns: A `HirundoErrorInfo` with a stable code, a category matching the real
+    ///   cause, and an error-specific suggestion where one is useful.
     public func toHirundoError() -> HirundoErrorInfo {
         let code: String
+        let category: ErrorCategory
+        let suggestion: String?
         switch self {
-        case .destinationNotEmpty: code = "DEST_NOT_EMPTY"
-        case .destinationIsFile: code = "DEST_IS_FILE"
-        case .invalidTitle: code = "INVALID_TITLE"
-        case .cannotCreateDirectory: code = "CREATE_DIR_FAILED"
-        case .cannotWriteFile: code = "WRITE_FAILED"
+        case .emptyDestinationPath:
+            code = "EMPTY_PATH"
+            category = .configuration
+            suggestion = "Pass a directory path such as 'my-site', or '.' to scaffold "
+                + "into the current directory"
+        case .destinationNotEmpty:
+            code = "DEST_NOT_EMPTY"
+            category = .filesystem
+            suggestion = "Re-run with --force to scaffold into the existing directory, "
+                + "or choose an empty directory"
+        case .destinationIsFile:
+            code = "DEST_IS_FILE"
+            category = .filesystem
+            suggestion = "Choose a directory path, or move the existing file out of the way"
+        case .invalidTitle:
+            code = "INVALID_TITLE"
+            category = .configuration
+            suggestion = "Pass a usable --title, for example --title \"My Site\""
+        case .cannotCreateDirectory:
+            code = "CREATE_DIR_FAILED"
+            category = .filesystem
+            suggestion = nil
+        case .cannotWriteFile:
+            code = "WRITE_FAILED"
+            category = .filesystem
+            suggestion = nil
+        case .cannotReadDirectory:
+            code = "READ_DIR_FAILED"
+            category = .filesystem
+            suggestion = nil
+        case .cannotReadFile:
+            code = "READ_FILE_FAILED"
+            category = .filesystem
+            suggestion = nil
         }
         return HirundoErrorInfo(
-            category: .filesystem,
+            category: category,
             code: code,
             details: self.localizedDescription,
+            suggestion: suggestion,
             underlyingError: self
         )
     }
@@ -165,23 +212,90 @@ public enum ErrorCategory: String, CaseIterable, Sendable {
     case filesystem = "FILESYSTEM"
 }
 
+extension ErrorCategory {
+    /// Headline shown to the user for errors in this category.
+    var userFacingTitle: String {
+        switch self {
+        case .configuration: return "Configuration Issue"
+        case .markdown: return "Content Processing Issue"
+        case .template: return "Template Issue"
+        case .build: return "Build Failed"
+        case .asset: return "Asset Processing Issue"
+        case .hotReload: return "Live Reload Issue"
+        case .server: return "Server Error"
+        case .network: return "Network Error"
+        case .filesystem: return "File System Error"
+        }
+    }
+
+    /// One-line, jargon-free explanation of what went wrong in this category.
+    var userFacingDescription: String {
+        switch self {
+        case .configuration: return "Check your config.yaml file for errors."
+        case .markdown: return "One of your markdown files couldn't be processed."
+        case .template: return "A template file has errors or is missing."
+        case .build: return "The site couldn't be built due to an error."
+        case .asset: return "Static files couldn't be processed."
+        case .hotReload: return "File watching encountered a problem."
+        case .server: return "The development server encountered an issue."
+        case .network: return "A network operation failed."
+        case .filesystem: return "A file operation failed."
+        }
+    }
+
+    /// Fallback next step, used when an error carries no more specific suggestion.
+    var defaultSuggestedAction: String {
+        switch self {
+        case .configuration: return "Run 'hirundo validate' to check your configuration"
+        case .markdown: return "Check the file mentioned in the error for syntax issues"
+        case .template: return "Ensure all required templates exist in the templates directory"
+        case .build: return "Review the error details above and fix the mentioned issues"
+        case .asset: return "Check that all referenced assets exist in the static directory"
+        case .hotReload: return "Try restarting the development server"
+        case .server: return "Check if the port is already in use or try a different port"
+        case .network: return "Check your internet connection and try again"
+        case .filesystem: return "Check file permissions and available disk space"
+        }
+    }
+}
+
 public struct HirundoErrorInfo: HirundoError {
     public let category: ErrorCategory
     public let code: String
     public let details: String
     public let underlyingError: Error?
     public let debugInfo: [String: AnyCodable]
-    
+
+    /// Error-specific next step, overriding the category default when present.
+    public let suggestion: String?
+
+    /// The action recommended to the user: the error's own `suggestion` when it has one,
+    /// otherwise the default suggestion for its category.
+    public var suggestedAction: String {
+        suggestion ?? category.defaultSuggestedAction
+    }
+
+    /// Creates a unified error description.
+    /// - Parameters:
+    ///   - category: Broad area the failure belongs to; drives the headline shown to users.
+    ///   - code: Stable, machine-readable identifier for this failure.
+    ///   - details: Human-readable description of what went wrong.
+    ///   - suggestion: Error-specific next step. When `nil`, the category's default
+    ///     suggestion is used instead.
+    ///   - underlyingError: The originating error, if any.
+    ///   - debugInfo: Extra context surfaced in verbose mode.
     public init(
         category: ErrorCategory,
         code: String,
         details: String,
+        suggestion: String? = nil,
         underlyingError: Error? = nil,
         debugInfo: [String: AnyCodable] = [:]
     ) {
         self.category = category
         self.code = code
         self.details = details
+        self.suggestion = suggestion
         self.underlyingError = underlyingError
         self.debugInfo = debugInfo
     }
@@ -192,62 +306,11 @@ public struct HirundoErrorInfo: HirundoError {
     
     public var userMessage: String {
         // Provide helpful, actionable messages without technical jargon
-        switch category {
-        case .configuration:
-            return formatUserMessage(
-                "Configuration Issue",
-                "Check your config.yaml file for errors.",
-                suggestedAction: "Run 'hirundo validate' to check your configuration"
-            )
-        case .markdown:
-            return formatUserMessage(
-                "Content Processing Issue",
-                "One of your markdown files couldn't be processed.",
-                suggestedAction: "Check the file mentioned in the error for syntax issues"
-            )
-        case .template:
-            return formatUserMessage(
-                "Template Issue",
-                "A template file has errors or is missing.",
-                suggestedAction: "Ensure all required templates exist in the templates directory"
-            )
-        case .build:
-            return formatUserMessage(
-                "Build Failed",
-                "The site couldn't be built due to an error.",
-                suggestedAction: "Review the error details above and fix the mentioned issues"
-            )
-        case .asset:
-            return formatUserMessage(
-                "Asset Processing Issue",
-                "Static files couldn't be processed.",
-                suggestedAction: "Check that all referenced assets exist in the static directory"
-            )
-        case .hotReload:
-            return formatUserMessage(
-                "Live Reload Issue",
-                "File watching encountered a problem.",
-                suggestedAction: "Try restarting the development server"
-            )
-        case .server:
-            return formatUserMessage(
-                "Server Error",
-                "The development server encountered an issue.",
-                suggestedAction: "Check if the port is already in use or try a different port"
-            )
-        case .network:
-            return formatUserMessage(
-                "Network Error",
-                "A network operation failed.",
-                suggestedAction: "Check your internet connection and try again"
-            )
-        case .filesystem:
-            return formatUserMessage(
-                "File System Error",
-                "A file operation failed.",
-                suggestedAction: "Check file permissions and available disk space"
-            )
-        }
+        return formatUserMessage(
+            category.userFacingTitle,
+            category.userFacingDescription,
+            suggestedAction: suggestedAction
+        )
     }
     
     private func formatUserMessage(_ title: String, _ description: String, suggestedAction: String) -> String {
