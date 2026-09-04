@@ -34,9 +34,9 @@ enum ScaffoldTemplates {
 
         blog:
           postsPerPage: 10
-          generateArchive: true
-          generateCategories: true
-          generateTags: true
+          generateArchive: \(includeBlog ? "true" : "false")
+          generateCategories: \(includeBlog ? "true" : "false")
+          generateTags: \(includeBlog ? "true" : "false")
 
         features:
           sitemap: true

@@ -66,10 +66,9 @@ public struct SiteScaffolder {
         try createDirectory(at: destination)
 
         var createdRelativePaths: [String] = []
-        try writeFile(
-            ScaffoldTemplates.gitignore,
-            relativePath: ".gitignore",
+        try writeGitignore(
             at: destination,
+            force: options.force,
             createdRelativePaths: &createdRelativePaths
         )
         try writeFile(
@@ -133,11 +132,17 @@ public struct SiteScaffolder {
 
     private func validateTitle(_ title: String) throws -> String {
         do {
-            return try ConfigValidation.validateNonEmptyAndLength(
+            let trimmed = try ConfigValidation.validateNonEmptyAndLength(
                 title,
                 maxLength: 200,
                 fieldName: "Site title"
             )
+            if trimmed.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) {
+                throw ScaffoldError.invalidTitle("Site title cannot contain control characters")
+            }
+            return trimmed
+        } catch let error as ScaffoldError {
+            throw error
         } catch let ConfigError.invalidValue(details) {
             throw ScaffoldError.invalidTitle(details)
         } catch let error as ConfigError {
@@ -178,6 +183,55 @@ public struct SiteScaffolder {
         relativePath.split(separator: "/").reduce(destination) { url, component in
             url.appendingPathComponent(String(component))
         }
+    }
+
+    private func writeGitignore(
+        at destination: URL,
+        force: Bool,
+        createdRelativePaths: inout [String]
+    ) throws {
+        let relativePath = ".gitignore"
+        let url = fileURL(at: destination, relativePath: relativePath)
+        if fileManager.fileExists(atPath: url.path), !force {
+            let existing: String
+            do {
+                existing = try String(contentsOf: url, encoding: .utf8)
+            } catch {
+                throw ScaffoldError.cannotWriteFile(url.path)
+            }
+            let merged = Self.mergingSiteIgnore(into: existing)
+            if merged != existing {
+                do {
+                    try Data(merged.utf8).write(to: url, options: .atomic)
+                } catch {
+                    throw ScaffoldError.cannotWriteFile(url.path)
+                }
+            }
+            return
+        }
+        try writeFile(
+            ScaffoldTemplates.gitignore,
+            relativePath: relativePath,
+            at: destination,
+            createdRelativePaths: &createdRelativePaths
+        )
+    }
+
+    private static func mergingSiteIgnore(into existing: String) -> String {
+        let lines = existing.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        let hasSiteIgnore = lines.contains { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            return trimmed == "_site/" || trimmed == "_site"
+        }
+        if hasSiteIgnore {
+            return existing
+        }
+        var merged = existing
+        if !merged.isEmpty && !merged.hasSuffix("\n") {
+            merged += "\n"
+        }
+        merged += "_site/\n"
+        return merged
     }
 
     private func writeFile(

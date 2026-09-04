@@ -42,7 +42,7 @@ struct InitCommand: ParsableCommand {
             print("✅ Site created. Next:")
             let isCurrent = (path == "." || destination.path == cwd.path)
             if !isCurrent {
-                print("   cd \(path)")
+                print("   cd \(path.posixShellQuoted)")
             }
             print("   hirundo serve")
         } catch {

@@ -48,6 +48,9 @@ final class SiteScaffolderTests: XCTestCase {
         XCTAssertTrue(config.features.sitemap)
         XCTAssertFalse(config.features.rss)
         XCTAssertFalse(config.features.minify)
+        XCTAssertFalse(config.blog.generateArchive)
+        XCTAssertFalse(config.blog.generateCategories)
+        XCTAssertFalse(config.blog.generateTags)
     }
 
     func testScaffold_whenBlogEnabled_createsPostTemplateAndSamplePost() throws {
@@ -62,6 +65,9 @@ final class SiteScaffolderTests: XCTestCase {
             atPath: dest.appendingPathComponent("content/posts/hello-world.md").path))
         let config = try HirundoConfig.load(from: dest.appendingPathComponent("config.yaml"))
         XCTAssertTrue(config.features.rss)
+        XCTAssertTrue(config.blog.generateArchive)
+        XCTAssertTrue(config.blog.generateCategories)
+        XCTAssertTrue(config.blog.generateTags)
         let base = try String(contentsOf: dest.appendingPathComponent("templates/base.html"), encoding: .utf8)
         XCTAssertTrue(base.contains("/archive/"))
     }
@@ -133,5 +139,54 @@ final class SiteScaffolderTests: XCTestCase {
             atPath: dest.appendingPathComponent("_site/about/index.html").path))
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: dest.appendingPathComponent("_site/posts/hello-world/index.html").path))
+    }
+
+    func testScaffold_whenExistingGitignoreWithoutForce_preservesContentAndAddsSiteIgnore() throws {
+        let dest = tempDir.appendingPathComponent("repo")
+        let fm = FileManager.default
+        try fm.createDirectory(at: dest.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        let gitignore = dest.appendingPathComponent(".gitignore")
+        try "*.log\n".write(to: gitignore, atomically: true, encoding: .utf8)
+
+        _ = try SiteScaffolder().scaffold(at: dest, options: SiteScaffoldOptions())
+
+        let contents = try String(contentsOf: gitignore, encoding: .utf8)
+        XCTAssertTrue(contents.contains("*.log"))
+        XCTAssertTrue(contents.contains("_site/"))
+    }
+
+    func testScaffold_whenTitleContainsNewline_throwsInvalidTitle() {
+        let dest = tempDir.appendingPathComponent("nl")
+        XCTAssertThrowsError(
+            try SiteScaffolder().scaffold(
+                at: dest,
+                options: SiteScaffoldOptions(title: "Foo\nBar")
+            )
+        ) { error in
+            guard case ScaffoldError.invalidTitle = error else {
+                return XCTFail("expected invalidTitle, got \(error)")
+            }
+        }
+    }
+
+    func testScaffold_whenBlogDisabled_buildDoesNotWriteArchive() async throws {
+        let dest = tempDir.appendingPathComponent("noblog")
+        _ = try SiteScaffolder().scaffold(at: dest, options: SiteScaffoldOptions())
+        let generator = try SiteGenerator(projectPath: dest.path)
+        try await generator.build(clean: true)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: dest.appendingPathComponent("_site/archive").path))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: dest.appendingPathComponent("_site/categories").path))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: dest.appendingPathComponent("_site/tags").path))
+    }
+}
+
+final class POSIXShellQuotingTests: XCTestCase {
+    func testPosixShellQuoted_whenPathContainsSpacesAndQuotes_escapesForSingleQuotes() {
+        XCTAssertEqual("my-site".posixShellQuoted, "'my-site'")
+        XCTAssertEqual("My Site".posixShellQuoted, "'My Site'")
+        XCTAssertEqual("it's".posixShellQuoted, "'it'\\''s'")
     }
 }

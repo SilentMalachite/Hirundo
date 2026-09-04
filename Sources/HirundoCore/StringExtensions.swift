@@ -1,6 +1,12 @@
 import Foundation
 
 extension String {
+    /// Quotes `self` for a POSIX shell using single quotes.
+    /// - Returns: A single-quoted string safe to paste after `cd`.
+    public var posixShellQuoted: String {
+        "'" + replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     func slugify(maxLength: Int = 100) -> String {
         // Use percent-encoding for URL-safe slugs, which is more robust for Unicode.
         let slug = self.lowercased()
