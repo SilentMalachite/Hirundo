@@ -162,11 +162,21 @@ public enum EditorLauncher {
 
         do {
             try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
         } catch {
             warn("Could not start '\(displayable(editor.rawValue))': \(error.localizedDescription)")
             return false
+        }
+
+        // Inherited streams alone leave the editor unable to drive the terminal: the child
+        // is in a process group of its own, which is not the terminal's *foreground* group,
+        // so the first `tcsetattr` it makes to enter raw mode stops it with SIGTTOU and the
+        // command appears to hang. Lend it the foreground for the duration; the terminal is
+        // handed back on every exit path, including a throw. When there is no controlling
+        // terminal — a pipe, a file, CI — this does nothing and the launch is as it was.
+        let plan = TerminalForeground.plan(forChild: process.processIdentifier)
+        return TerminalForeground.withForeground(givenTo: plan) {
+            process.waitUntilExit()
+            return process.terminationStatus == 0
         }
     }
 
