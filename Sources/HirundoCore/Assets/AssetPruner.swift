@@ -61,8 +61,11 @@ public enum AssetPruner {
                 let stem = URL(fileURLWithPath: entry).deletingPathExtension().lastPathComponent
                 let siblings = (try? fileManager.contentsOfDirectory(atPath: outputDirectory.path)) ?? []
                 for sibling in siblings where sibling.hasPrefix(stem + "-") {
+                    let siblingURL = outputDirectory.appendingPathComponent(sibling)
+                    guard (try? siblingURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+                    else { continue }
                     try pruneIfStale(
-                        outputDirectory.appendingPathComponent(sibling),
+                        siblingURL,
                         outputDirectory: outputDirectory,
                         keep: keep,
                         fileManager: fileManager

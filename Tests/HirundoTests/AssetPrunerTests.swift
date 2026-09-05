@@ -120,4 +120,32 @@ final class AssetPrunerTests: XCTestCase {
 
         XCTAssertFalse(exists("robots-0000000000000000.txt"))
     }
+
+    func testKeepsTheCurrentTopLevelFileOutput() throws {
+        try "User-agent: *".write(to: staticDir.appendingPathComponent("robots.txt"), atomically: true, encoding: .utf8)
+        try write("stale", to: "robots-0000000000000000.txt", under: outputDir)
+        try write("current", to: "robots-9f2a1c04b7e3d5a1.txt", under: outputDir)
+
+        try AssetPruner.prune(
+            outputDirectory: outputDir,
+            staticDirectory: staticDir,
+            keeping: AssetManifest(["robots.txt": "robots-9f2a1c04b7e3d5a1.txt"])
+        )
+
+        XCTAssertFalse(exists("robots-0000000000000000.txt"))
+        XCTAssertTrue(exists("robots-9f2a1c04b7e3d5a1.txt"))
+    }
+
+    func testKeepsANonFingerprintedNameThatMerelyStartsWithAStaticStem() throws {
+        try "User-agent: *".write(to: staticDir.appendingPathComponent("robots.txt"), atomically: true, encoding: .utf8)
+        try write("notes", to: "robots-notes.txt", under: outputDir)
+
+        try AssetPruner.prune(
+            outputDirectory: outputDir,
+            staticDirectory: staticDir,
+            keeping: AssetManifest()
+        )
+
+        XCTAssertTrue(exists("robots-notes.txt"))
+    }
 }
