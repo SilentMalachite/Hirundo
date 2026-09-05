@@ -90,6 +90,15 @@ final class AssetReferenceRewriterTests: XCTestCase {
         XCTAssertEqual(AssetReferenceRewriter.rewriteCSS(css, manifest: manifest, inDirectory: "css").content, css)
     }
 
+    func testPreservesWhitespaceInUnquotedURL() {
+        let result = AssetReferenceRewriter.rewriteCSS(
+            "body { background: url( /images/bg.png ); }",
+            manifest: manifest,
+            inDirectory: "css"
+        )
+        XCTAssertEqual(result.content, "body { background: url( /images/bg-5c3e9a21d0f4b678.png ); }")
+    }
+
     // MARK: - CSS から CSS への参照
 
     func testReportsStylesheetReferenceItCannotResolve() {

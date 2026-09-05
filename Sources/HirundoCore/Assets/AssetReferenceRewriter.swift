@@ -59,9 +59,10 @@ public enum AssetReferenceRewriter {
             }
 
             let rawValue = String(css[valueStart..<cursor])
-            let reference = rawValue.trimmingCharacters(in: .whitespaces)
+            let trailingWhitespace = String(rawValue.reversed().prefix { $0.isWhitespace }.reversed())
+            let reference = String(rawValue.dropLast(trailingWhitespace.count))
             if let rewritten = manifest.rewrite(reference: reference, inDirectory: directory) {
-                result += rewritten
+                result += rewritten + trailingWhitespace
             } else {
                 result += rawValue
                 if isUnresolvedStylesheet(reference, manifest: manifest, inDirectory: directory) {
