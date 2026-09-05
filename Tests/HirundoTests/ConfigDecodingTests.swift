@@ -123,4 +123,44 @@ final class ConfigDecodingTests: XCTestCase {
             }
         }
     }
+
+    func testFingerprintDefaultsToOff() throws {
+        let yaml = """
+        site:
+          title: "Test"
+          url: "https://example.com"
+        """
+        let config = try HirundoConfig.parse(from: yaml)
+        XCTAssertFalse(config.features.fingerprint)
+    }
+
+    func testFingerprintCanBeEnabledOnItsOwn() throws {
+        let yaml = """
+        site:
+          title: "Test"
+          url: "https://example.com"
+
+        features:
+          fingerprint: true
+        """
+        let config = try HirundoConfig.parse(from: yaml)
+        XCTAssertTrue(config.features.fingerprint)
+        XCTAssertFalse(config.features.sitemap, "他のフラグは既定の false のまま")
+    }
+
+    func testValidateDoesNotWarnAboutFingerprint() throws {
+        let yaml = """
+        site:
+          title: "Test"
+          url: "https://example.com"
+
+        features:
+          fingerprint: true
+        """
+        let report = try ConfigDiagnostics.inspect(yaml: yaml)
+        XCTAssertFalse(
+            report.warnings.contains { $0.contains("fingerprint") },
+            "既知のキーなので警告してはならない: \(report.warnings)"
+        )
+    }
 }
