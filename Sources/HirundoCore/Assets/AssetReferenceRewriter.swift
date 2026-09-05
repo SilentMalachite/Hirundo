@@ -16,6 +16,209 @@ public enum AssetReferenceRewriter {
         public let unresolvedStylesheetReferences: [String]
     }
 
+    /// アセット参照を持つ HTML 属性。`style` だけは URL ではなく CSS として扱う。
+    private static let urlAttributes: Set<String> = ["href", "src"]
+
+    /// HTML の `href` / `src` / `srcset` 属性と、`style` 属性・`<style>` 本文の `url(...)` を
+    /// 書き換える。
+    ///
+    /// `<script>` の本文と HTML コメントは走査しない。本文中の `a<b` をタグの開始と誤認する
+    /// 余地を減らすためで、同時に JS の文字列リテラルを書き換えないことも保証する。
+    public static func rewriteHTML(
+        _ html: String,
+        manifest: AssetManifest,
+        inDirectory directory: String
+    ) -> String {
+        var result = ""
+        var index = html.startIndex
+
+        while index < html.endIndex {
+            guard let open = html[index...].firstIndex(of: "<") else {
+                result += html[index...]
+                index = html.endIndex
+                break
+            }
+            result += html[index..<open]
+            index = open
+
+            if html[index...].hasPrefix("<!--") {
+                if let close = html.range(of: "-->", range: index..<html.endIndex) {
+                    result += html[index..<close.upperBound]
+                    index = close.upperBound
+                } else {
+                    result += html[index...]
+                    index = html.endIndex
+                }
+                continue
+            }
+
+            let afterOpen = html.index(after: index)
+            guard afterOpen < html.endIndex,
+                  html[afterOpen].isLetter || html[afterOpen] == "/" || html[afterOpen] == "!",
+                  let close = findTagEnd(in: html, from: index) else {
+                result.append("<")
+                index = afterOpen
+                continue
+            }
+
+            let tag = String(html[index...close])
+            result += rewriteTag(tag, manifest: manifest, inDirectory: directory)
+            index = html.index(after: close)
+
+            let name = tagName(of: tag)
+            guard name == "script" || name == "style" else { continue }
+
+            if let closing = html.range(of: "</\(name)", options: [.caseInsensitive], range: index..<html.endIndex) {
+                let body = String(html[index..<closing.lowerBound])
+                result += name == "style"
+                    ? rewriteCSS(body, manifest: manifest, inDirectory: directory).content
+                    : body
+                index = closing.lowerBound
+            } else {
+                result += html[index...]
+                index = html.endIndex
+            }
+        }
+
+        return result
+    }
+
+    // MARK: - HTML の走査
+
+    /// 引用符の中の `>` を無視してタグの終わりを探す。
+    private static func findTagEnd(in html: String, from start: String.Index) -> String.Index? {
+        var index = start
+        var quote: Character?
+        while index < html.endIndex {
+            let character = html[index]
+            if let open = quote {
+                if character == open { quote = nil }
+            } else if character == "\"" || character == "'" {
+                quote = character
+            } else if character == ">" {
+                return index
+            }
+            index = html.index(after: index)
+        }
+        return nil
+    }
+
+    /// 開始タグの名前（小文字）。終了タグや `<!DOCTYPE` では空文字列。
+    private static func tagName(of tag: String) -> String {
+        var index = tag.index(after: tag.startIndex)
+        let start = index
+        while index < tag.endIndex, tag[index].isLetter || tag[index].isNumber {
+            index = tag.index(after: index)
+        }
+        return tag[start..<index].lowercased()
+    }
+
+    /// `<` と `>` を含むタグ1つ分を受け取り、対象の属性値だけを差し替えて返す。
+    private static func rewriteTag(
+        _ tag: String,
+        manifest: AssetManifest,
+        inDirectory directory: String
+    ) -> String {
+        var result = ""
+        var index = tag.startIndex
+
+        // `<` とタグ名を写す。
+        while index < tag.endIndex, !tag[index].isWhitespace {
+            result.append(tag[index])
+            index = tag.index(after: index)
+        }
+
+        while index < tag.endIndex {
+            if tag[index].isWhitespace || tag[index] == ">" || tag[index] == "/" {
+                result.append(tag[index])
+                index = tag.index(after: index)
+                continue
+            }
+
+            let nameStart = index
+            while index < tag.endIndex, !tag[index].isWhitespace,
+                  tag[index] != "=", tag[index] != ">", tag[index] != "/" {
+                index = tag.index(after: index)
+            }
+            let name = tag[nameStart..<index].lowercased()
+            result += tag[nameStart..<index]
+
+            guard index < tag.endIndex, tag[index] == "=" else { continue }
+            result.append("=")
+            index = tag.index(after: index)
+
+            var quote: Character?
+            if index < tag.endIndex, tag[index] == "\"" || tag[index] == "'" {
+                quote = tag[index]
+                result.append(tag[index])
+                index = tag.index(after: index)
+            }
+
+            let valueStart = index
+            if let open = quote {
+                while index < tag.endIndex, tag[index] != open {
+                    index = tag.index(after: index)
+                }
+            } else {
+                while index < tag.endIndex, !tag[index].isWhitespace, tag[index] != ">" {
+                    index = tag.index(after: index)
+                }
+            }
+
+            let value = String(tag[valueStart..<index])
+            result += rewriteAttributeValue(value, named: name, manifest: manifest, inDirectory: directory)
+
+            if let open = quote, index < tag.endIndex, tag[index] == open {
+                result.append(open)
+                index = tag.index(after: index)
+            }
+        }
+
+        return result
+    }
+
+    private static func rewriteAttributeValue(
+        _ value: String,
+        named name: String,
+        manifest: AssetManifest,
+        inDirectory directory: String
+    ) -> String {
+        if urlAttributes.contains(name) {
+            return manifest.rewrite(reference: value, inDirectory: directory) ?? value
+        }
+        if name == "srcset" {
+            return rewriteSrcset(value, manifest: manifest, inDirectory: directory)
+        }
+        if name == "style" {
+            return rewriteCSS(value, manifest: manifest, inDirectory: directory).content
+        }
+        return value
+    }
+
+    /// `srcset` はカンマ区切りの候補列。各候補の先頭の URL だけを書き換え、`1.5x` や `800w`
+    /// といった記述子はそのまま残す。
+    private static func rewriteSrcset(
+        _ value: String,
+        manifest: AssetManifest,
+        inDirectory directory: String
+    ) -> String {
+        let candidates = value.split(separator: ",", omittingEmptySubsequences: false)
+        return candidates.map { candidate -> String in
+            let text = String(candidate)
+            let leading = String(text.prefix(while: { $0.isWhitespace }))
+            let trimmed = text.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { return text }
+
+            var parts = trimmed.split(maxSplits: 1, whereSeparator: { $0.isWhitespace }).map(String.init)
+            guard let url = parts.first,
+                  let rewritten = manifest.rewrite(reference: url, inDirectory: directory) else {
+                return text
+            }
+            parts[0] = rewritten
+            return leading + parts.joined(separator: " ")
+        }.joined(separator: ",")
+    }
+
     /// CSS の `url(...)` を書き換える。
     public static func rewriteCSS(
         _ css: String,
