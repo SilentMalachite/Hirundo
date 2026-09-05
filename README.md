@@ -16,7 +16,7 @@ A modern, fast, and secure static site generator built with Swift.
 - **📝 Markdown**: CommonMark support with YAML frontmatter using Apple's swift-markdown
 - **🎨 Templates**: Stencil-based templating engine with 20 custom filters
 - **🔄 Live Reload**: Development server that rebuilds on change and pushes reloads over WebSocket
-- **🧩 Built-in Features**: Sitemap, RSS, search index, and asset minification as simple on/off flags
+- **🧩 Built-in Features**: Sitemap, RSS, search index, asset minification, and asset fingerprinting as simple on/off flags
 - **📦 Type Safe**: Strongly typed, validated configuration and models
 - **⚡ Simple**: A small configuration surface — six top-level keys, no plugin runtime to manage
 

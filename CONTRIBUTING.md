@@ -223,6 +223,7 @@ public struct Features: Codable, Sendable, Equatable {
     public var rss: Bool
     public var searchIndex: Bool
     public var minify: Bool
+    public var fingerprint: Bool
 }
 ```
 
@@ -245,6 +246,7 @@ features:
   rss: true
   searchIndex: false
   minify: true
+  fingerprint: false
 ```
 
 Note that `minify` enables CSS and JS asset minification together; it does not

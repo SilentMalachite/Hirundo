@@ -148,11 +148,12 @@ Hirundo provides built-in features (no dynamic loading) that participate in the 
 - RSS feed creation
 - CSS/JS minification
 - Search index generation
+- Asset fingerprinting with HTML/CSS reference rewriting
 
 Configure these under `features:` in `config.yaml`. Each is a plain boolean
-(`sitemap`, `rss`, `searchIndex`, `minify`), all defaulting to `false`. Note
-that `minify` sets `minify` on the CSS and JS asset options together; there is
-no HTML minification and no separate per-language toggle.
+(`sitemap`, `rss`, `searchIndex`, `minify`, `fingerprint`), all defaulting to
+`false`. Note that `minify` sets `minify` on the CSS and JS asset options
+together; there is no HTML minification and no separate per-language toggle.
 
 ### 7. Site Scaffolder (`Scaffold/`)
 
