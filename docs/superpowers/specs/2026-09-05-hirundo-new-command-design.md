@@ -164,7 +164,8 @@ public struct ContentScaffolder {
 
     public func scaffold(
         in projectRoot: URL,
-        config: HirundoConfig,
+        build: Build,
+        limits: Limits,
         kind: ContentKind,
         options: ContentScaffoldOptions,
         date: Date = Date()
@@ -174,6 +175,12 @@ public struct ContentScaffolder {
 
 `date` を引数に出すのはテストのためである（`ScaffoldTemplates.helloWorldPost(date:)`
 と同じ手法）。
+
+`HirundoConfig` 全体ではなく `Build` と `Limits` を受け取る。この生成処理が使うのは
+`build.contentDirectory` と `limits.maxTitleLength` / `maxFilenameLength` だけであり、
+`HirundoConfig` を要求すると `config.yaml` が無い場合に呼び出し側が架空の `Site`
+（`title` と `url` が必須）をでっち上げる必要が生じる。フォールバックは
+`Build.defaultBuild()` と `Limits()` で足りる。
 
 ### 4.2 エラー型
 
@@ -268,9 +275,10 @@ template: "default.html"
 
 1. プロジェクトルートはカレントディレクトリ。
 2. `config.yaml` が存在すれば `HirundoConfig.load(from:)` で読む。
-3. 存在しない、または読み込みに失敗した場合は `HirundoConfig` の既定値を使い、
-   その旨を警告として印字する（終了はしない）。`CleanCommand.swift:29-38` と同じ方針。
-4. content ディレクトリ = `config.build.contentDirectory`（既定 `"content"`）。
+3. 存在しない、または読み込みに失敗した場合は `Build.defaultBuild()` と `Limits()`
+   を使い、その旨を警告として印字する（終了はしない）。`CleanCommand.swift:29-38`
+   と同じ方針。
+4. content ディレクトリ = `build.contentDirectory`（既定 `"content"`）。
 
 ### 6.2 slug の導出
 
