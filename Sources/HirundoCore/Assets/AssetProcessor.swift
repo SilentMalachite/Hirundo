@@ -3,8 +3,6 @@ import CryptoKit
 
 /// Handles individual asset processing operations
 public class AssetProcessor {
-    private let fileManager = FileManager.default
-    
     public init() {}
     
     /// Detects asset type from filename
@@ -54,39 +52,6 @@ public class AssetProcessor {
             .appendingPathComponent(newName)
             .appendingPathExtension(ext)
             .path
-    }
-    
-    /// Processes asset content based on type
-    public func processAssetContent(_ asset: AssetItem, cssOptions: CSSProcessingOptions, jsOptions: JSProcessingOptions) throws {
-        switch asset.type {
-        case .css:
-            try processCSSThroughPipeline(asset, options: cssOptions)
-        case .javascript:
-            try processJSThroughPipeline(asset, options: jsOptions)
-        default:
-            // For other assets, just copy
-            if asset.sourcePath != asset.outputPath {
-                // Remove existing file if it exists
-                if fileManager.fileExists(atPath: asset.outputPath) {
-                    try fileManager.removeItem(atPath: asset.outputPath)
-                }
-                try fileManager.copyItem(atPath: asset.sourcePath, toPath: asset.outputPath)
-            }
-        }
-    }
-    
-    /// Processes CSS file through pipeline
-    private func processCSSThroughPipeline(_ asset: AssetItem, options: CSSProcessingOptions) throws {
-        let content = try String(contentsOfFile: asset.sourcePath, encoding: .utf8)
-        let processed = processCSS(content, options: options)
-        try processed.write(toFile: asset.outputPath, atomically: true, encoding: .utf8)
-    }
-    
-    /// Processes JavaScript file through pipeline
-    private func processJSThroughPipeline(_ asset: AssetItem, options: JSProcessingOptions) throws {
-        let content = try String(contentsOfFile: asset.sourcePath, encoding: .utf8)
-        let processed = processJS(content, options: options)
-        try processed.write(toFile: asset.outputPath, atomically: true, encoding: .utf8)
     }
     
     /// Processes CSS content

@@ -7,17 +7,17 @@ public class AssetFileManager {
     public init() {}
     
     /// Saves manifest to file
-    public func saveManifest(_ manifest: [String: String], to path: String) throws {
+    public func saveManifest(_ manifest: AssetManifest, to path: String) throws {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = .prettyPrinted
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(manifest)
         try data.write(to: URL(fileURLWithPath: path))
     }
-    
+
     /// Loads manifest from file
-    public func loadManifest(from path: String) throws -> [String: String] {
+    public func loadManifest(from path: String) throws -> AssetManifest {
         let data = try Data(contentsOf: URL(fileURLWithPath: path))
-        return try JSONDecoder().decode([String: String].self, from: data)
+        return try JSONDecoder().decode(AssetManifest.self, from: data)
     }
     
     /// Processes a directory recursively
