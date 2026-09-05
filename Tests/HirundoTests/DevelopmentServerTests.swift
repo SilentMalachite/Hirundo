@@ -295,6 +295,31 @@ final class DevelopmentServerTests: XCTestCase {
         await server.stop()
     }
 
+    func testStaticFileRequest_whenLiveReloadEnabledAndHTMLIsNotValidUTF8_servesBytesUnchanged() async throws {
+        // Content-Type is text/html (from the .html extension) so the injection guard reaches
+        // its UTF-8 decode, but the bytes are not valid UTF-8 (0xFF 0xFE is not a valid UTF-8
+        // sequence). `String(data:encoding:.utf8)` returns nil, so injection must be skipped and
+        // the original bytes served unchanged rather than the request failing.
+        let bytes = Data([0x3C, 0x68, 0x31, 0x3E, 0xFF, 0xFE, 0x3C, 0x2F, 0x68, 0x31, 0x3E])
+        try bytes.write(to: tempDir.appendingPathComponent("_site/invalid.html"))
+
+        let port = Int.random(in: 20000...30000)
+        let server = DevelopmentServer(
+            projectPath: tempDir.path,
+            port: port,
+            host: "localhost",
+            liveReload: true
+        )
+        try await server.start()
+
+        let url = URL(string: "http://127.0.0.1:\(port)/invalid.html")!
+        let (data, response) = try await URLSession.shared.data(from: url)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(data, bytes)
+
+        await server.stop()
+    }
+
     // MARK: - Bind Address Tests
 
     func testStart_whenHostIsIPv4Literal_servesOverThatAddress() async throws {
