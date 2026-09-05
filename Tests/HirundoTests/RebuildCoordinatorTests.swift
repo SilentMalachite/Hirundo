@@ -59,10 +59,18 @@ final class RebuildCoordinatorTests: XCTestCase {
         XCTAssertEqual(failureCount.get(), 0)
     }
 
-    func testRequestRebuild_whenCalledTenTimesInBurst_convergesToTwoBuilds() async {
+    func testRequestRebuild_whenCalledTenTimesInBurst_convergesToAtMostTwoBuilds() async {
         // A 0.3s build is slow enough that all ten requests land while the first build is
         // still running, so they must all fold into a single pending flag rather than each
         // starting their own build.
+        //
+        // The contract is "at most two": the build already running, plus one follow-up covering
+        // everything that arrived while it ran. Whether the burst costs one build or two depends
+        // on when the run loop's task is first scheduled relative to the remaining nine calls —
+        // one build is the better outcome, not a regression, so asserting an exact 2 would pin
+        // down a scheduling artifact rather than the guarantee. Ten uncoalesced builds still
+        // fail this: every request would start its own build, each `FakeBuilder.build()` bumps
+        // the counter before it sleeps, and 0.3s is far longer than ten task spawns take.
         let builder = FakeBuilder(delay: 0.3)
         let coordinator = RebuildCoordinator(
             build: { try await builder.build() },
@@ -75,7 +83,8 @@ final class RebuildCoordinatorTests: XCTestCase {
         }
         await coordinator.waitForQuiescence()
 
-        XCTAssertEqual(builder.callCount, 2)
+        XCTAssertGreaterThanOrEqual(builder.callCount, 1)
+        XCTAssertLessThanOrEqual(builder.callCount, 2)
     }
 
     func testRequestRebuild_whenBuildResultReportsFailure_signalsFailureWithRebuildIncomplete() async {

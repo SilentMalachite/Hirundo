@@ -1,9 +1,11 @@
 import Foundation
 import HirundoCore
 
-/// Write to standard error with newline
+/// Write to standard error with newline.
+///
+/// Shared by every command in this target, not just `handleError` below.
 @inline(__always)
-private func eprint(_ message: String) {
+func eprint(_ message: String) {
     if let data = (message + "\n").data(using: .utf8) {
         try? FileHandle.standardError.write(contentsOf: data)
     }

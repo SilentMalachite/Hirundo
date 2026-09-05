@@ -5,13 +5,6 @@ import Foundation
 import AppKit
 #endif
 
-/// Writes a line to standard error with a newline.
-private func eprint(_ message: String) {
-    if let data = (message + "\n").data(using: .utf8) {
-        try? FileHandle.standardError.write(contentsOf: data)
-    }
-}
-
 /// Resumes a `CheckedContinuation` at most once.
 ///
 /// Two signal sources are armed (SIGINT and SIGTERM) and both can fire — a terminal sending
@@ -179,9 +172,13 @@ struct ServeCommand: AsyncParsableCommand {
             )
             server = developmentServer
 
-            // Step 3: serialize rebuilds. `SiteGenerator` is a non-`Sendable` class, so it is
-            // constructed inside the `@Sendable` build closure from the project path and the
-            // (`Sendable`) configuration rather than captured from out here.
+            // Step 3: serialize rebuilds. A fresh `SiteGenerator` per rebuild is required, not a
+            // concession: a generator owns a `TemplateCache` that only expires entries on a
+            // one-hour timer and has no file-change invalidation, so reusing one across rebuilds
+            // would keep serving the template the user just edited for up to an hour — precisely
+            // the staleness live reload exists to eliminate. Constructing it inside the closure
+            // also happens to satisfy `@Sendable`, since `SiteGenerator` is a non-`Sendable`
+            // class and only the project path and the (`Sendable`) configuration are captured.
             let coordinator = RebuildCoordinator(
                 build: {
                     let generator = try SiteGenerator(projectPath: currentDirectory, config: config)
