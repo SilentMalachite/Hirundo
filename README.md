@@ -141,8 +141,14 @@ output; it is reserved for future conditional behaviour.
 The content directory is walked through symlinks. If `content/posts` is a link to a
 directory elsewhere, the Markdown behind it is built, and each page keeps the URL its path
 under `content/` implies — `content/posts/hello.md` publishes at `/posts/hello/` wherever
-the file actually lives. A directory is entered once per build, so a link pointing back at
-somewhere already walked (`content/loop -> ..`) is skipped instead of followed forever.
+the file actually lives. A link is followed only while it stays inside the project
+directory (the one holding `config.yaml`), so the build reads Markdown from inside the
+project only: a link to anywhere else on the machine, or to the project directory itself
+(`content/up -> ..`), is skipped, as is one pointing into the output, `static` or
+`templates` directory. A directory is entered once per build, so links pointing at each
+other, or back at somewhere already walked, terminate instead of being followed forever.
+Every decision is printed as the build makes it — `Following content symlink:
+content/posts -> ../shared-posts`.
 
 ### `hirundo serve`
 Start the development server with live reload.

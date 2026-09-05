@@ -9,6 +9,8 @@ import XCTest
 final class ContentProcessorSymlinkTests: XCTestCase {
 
     private var tempDir: URL!
+    /// A directory outside the project, for the links the walk has to refuse.
+    private var outsideDir: URL!
 
     private var contentDirectory: URL {
         return tempDir.appendingPathComponent("content")
@@ -16,14 +18,19 @@ final class ContentProcessorSymlinkTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
+        let id = UUID().uuidString
         tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("hirundo-symlink-test-\(UUID().uuidString)")
+            .appendingPathComponent("hirundo-symlink-test-\(id)")
+        outsideDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hirundo-symlink-outside-\(id)")
         try? FileManager.default.createDirectory(at: contentDirectory, withIntermediateDirectories: true)
     }
 
     override func tearDown() {
         try? FileManager.default.removeItem(at: tempDir)
+        try? FileManager.default.removeItem(at: outsideDir)
         tempDir = nil
+        outsideDir = nil
         super.tearDown()
     }
 
@@ -131,16 +138,76 @@ final class ContentProcessorSymlinkTests: XCTestCase {
         XCTAssertEqual(collectRelativePaths(), ["index.md"])
     }
 
-    /// `content/up -> ..` reaches the project root, and the project root contains the content
-    /// directory again.
-    func testSymlinkToAnAncestorTerminates() throws {
+    /// `content/sub/up -> ..` reaches the content directory, which the walk entered before it
+    /// ever saw the link.
+    func testSymlinkToAnAlreadyWalkedAncestorTerminates() throws {
+        try write(markdown(title: "Home"), to: contentDirectory.appendingPathComponent("index.md"))
+        try write(markdown(title: "Note"), to: contentDirectory.appendingPathComponent("sub/note.md"))
+        try makeSymbolicLink(at: contentDirectory.appendingPathComponent("sub/up"), to: "..")
+
+        XCTAssertEqual(Set(collectRelativePaths()), ["index.md", "sub/note.md"])
+    }
+
+    // MARK: - Containment
+
+    /// `content/up -> ..` is the project root. Following it publishes the repository — the
+    /// project's own `README.md`, `docs/`, `vendor/`, `node_modules/` — as pages.
+    func testSymlinkToTheProjectRootIsSkipped() throws {
         try write(markdown(title: "Home"), to: contentDirectory.appendingPathComponent("index.md"))
         try write(markdown(title: "Outside"), to: tempDir.appendingPathComponent("notes.md"))
         try makeSymbolicLink(at: contentDirectory.appendingPathComponent("up"), to: "..")
 
-        // `up/notes.md` is what the link literally points at; `up/content/index.md` is not
-        // reported again, because the content directory has already been walked.
-        XCTAssertEqual(Set(collectRelativePaths()), ["index.md", "up/notes.md"])
+        XCTAssertEqual(collectRelativePaths(), ["index.md"])
+    }
+
+    /// Reading through a symlink needs no privilege, and what it exposes is every Markdown file
+    /// under the target rather than one named file. A content directory arriving from a starter
+    /// kit, a theme repository or a contributor branch can carry `content/leak -> /Users/someone`
+    /// verbatim, so the walk stays inside the project.
+    func testSymlinkOutsideTheProjectIsSkipped() throws {
+        try FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+        try write(markdown(title: "Private"), to: outsideDir.appendingPathComponent("secret.md"))
+        try write(markdown(title: "Home"), to: contentDirectory.appendingPathComponent("index.md"))
+        try makeSymbolicLink(at: contentDirectory.appendingPathComponent("leak"), to: outsideDir.path)
+
+        XCTAssertEqual(collectRelativePaths(), ["index.md"])
+    }
+
+    /// The output, static and templates directories are not content however a link reaches
+    /// them: re-publishing the previous build, or publishing a template as a page, is never
+    /// what the link meant.
+    func testSymlinksIntoBuildDirectoriesAreSkipped() throws {
+        try write(markdown(title: "Home"), to: contentDirectory.appendingPathComponent("index.md"))
+        try write(markdown(title: "Stale"), to: tempDir.appendingPathComponent("_site/old.md"))
+        try write(markdown(title: "Asset"), to: tempDir.appendingPathComponent("static/notes.md"))
+        try write(markdown(title: "Partial"), to: tempDir.appendingPathComponent("templates/partial.md"))
+        try makeSymbolicLink(at: contentDirectory.appendingPathComponent("built"), to: "../_site")
+        try makeSymbolicLink(at: contentDirectory.appendingPathComponent("assets"), to: "../static")
+        try makeSymbolicLink(at: contentDirectory.appendingPathComponent("layouts"), to: "../templates")
+
+        XCTAssertEqual(collectRelativePaths(), ["index.md"])
+    }
+
+    /// The containment rules exist for what a build would otherwise publish, so they are also
+    /// checked where a site owner would notice: in the output.
+    func testBuildDoesNotPublishTheProjectReadmeThroughAnAncestorSymlink() async throws {
+        try makeSite()
+        try write("# Hirundo\n\nProject readme.", to: tempDir.appendingPathComponent("README.md"))
+        try makeSymbolicLink(at: contentDirectory.appendingPathComponent("up"), to: "..")
+
+        let generator = try SiteGenerator(projectPath: tempDir.path)
+        try await generator.build()
+
+        let output = tempDir.appendingPathComponent("_site")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: output.appendingPathComponent("up").path),
+            "nothing above the content directory belongs in the output: \(outputTree(output))"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: output.appendingPathComponent("up/README/index.html").path),
+            "the project's own README must not become a page: \(outputTree(output))"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("index.html").path))
     }
 
     /// Two links pointing back at each other's directories: neither is a self-link, and the
@@ -282,6 +349,68 @@ final class ContentProcessorSymlinkTests: XCTestCase {
         )
     }
 
+    /// `content-extra` is an ordinary sibling name that happens to start with `content`, as do
+    /// `content-posts`, `contents` and `content2`. Testing containment with a bare string prefix
+    /// matches all of them, and the page then publishes at a URL made of the leftover
+    /// characters — `/-extra/guide/` instead of `/shared/guide/`.
+    func testSymlinkToASiblingSharingAPrefixWithTheContentDirectoryKeepsItsLogicalURL() async throws {
+        try makeSite()
+        try makeDirectory("content-extra", under: tempDir)
+        try write(markdown(title: "Guide"), to: tempDir.appendingPathComponent("content-extra/guide.md"))
+        try makeSymbolicLink(at: contentDirectory.appendingPathComponent("shared"), to: "../content-extra")
+
+        let generator = try SiteGenerator(projectPath: tempDir.path)
+        try await generator.build()
+
+        let output = tempDir.appendingPathComponent("_site")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: output.appendingPathComponent("shared/guide/index.html").path),
+            "the page belongs at the logical path, /shared/guide/: \(outputTree(output))"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: output.appendingPathComponent("-extra").path),
+            "a sibling sharing a prefix with the content directory must not be treated as being inside it: \(outputTree(output))"
+        )
+    }
+
+    /// `content/blog -> ./posts` resolves back inside the content directory. Deriving the output
+    /// path from the resolved location gives both entries the same URL, so one page overwrites
+    /// the other and the archive lists the same link twice.
+    func testAliasToADirectoryInsideTheContentDirectoryPublishesAtItsOwnURL() async throws {
+        try makeSite()
+        try write(
+            markdown(title: "Hello", extraFrontMatter: "date: 2024-01-01T00:00:00Z"),
+            to: contentDirectory.appendingPathComponent("posts/hello.md")
+        )
+        try makeSymbolicLink(at: contentDirectory.appendingPathComponent("blog"), to: "./posts")
+
+        let generator = try SiteGenerator(projectPath: tempDir.path)
+        try await generator.build()
+
+        let output = tempDir.appendingPathComponent("_site")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: output.appendingPathComponent("blog/hello/index.html").path),
+            "the alias publishes at its own URL, /blog/hello/: \(outputTree(output))"
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: output.appendingPathComponent("posts/hello/index.html").path),
+            "the real directory still publishes at /posts/hello/: \(outputTree(output))"
+        )
+
+        let archive = try String(
+            contentsOf: output.appendingPathComponent("archive/index.html"),
+            encoding: .utf8
+        )
+        XCTAssertEqual(
+            occurrences(of: "/blog/hello/index.html", in: archive), 1,
+            "the aliased post is listed once, at the alias's URL: \(archive)"
+        )
+        XCTAssertEqual(
+            occurrences(of: "/posts/hello/index.html", in: archive), 1,
+            "the post must not be listed twice under one URL: \(archive)"
+        )
+    }
+
     // MARK: - Helpers
 
     /// Runs the walk on a background thread with a deadline, so a traversal that fails to
@@ -335,6 +464,16 @@ final class ContentProcessorSymlinkTests: XCTestCase {
         let base = contentDirectory.path
         guard normalized.hasPrefix(base + "/") else { return normalized }
         return String(normalized.dropFirst(base.count + 1))
+    }
+
+    private func occurrences(of needle: String, in haystack: String) -> Int {
+        var count = 0
+        var searchRange = haystack.startIndex..<haystack.endIndex
+        while let found = haystack.range(of: needle, range: searchRange) {
+            count += 1
+            searchRange = found.upperBound..<haystack.endIndex
+        }
+        return count
     }
 
     private func markdown(title: String, extraFrontMatter: String? = nil, body: String = "Body.") -> String {

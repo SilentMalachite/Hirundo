@@ -244,29 +244,37 @@ public class SiteGenerator {
         )
         // (debug removed)
         
-        // Determine output path
-        // Resolve both paths to handle system symlinks consistently
-        let contentBasePath = URL(fileURLWithPath: projectPath)
+        // Determine output path from the *logical* path the content walk reported.
+        //
+        // Resolving symlinks here would throw that path away: a file found through
+        // `content/shared -> ../elsewhere` would publish under `elsewhere`, and an alias to a
+        // directory already inside `content/` would derive the very same output path as the
+        // file it aliases, so one page would overwrite the other and both would carry the same
+        // URL into the archive, the feed and the sitemap.
+        let contentBase = URL(fileURLWithPath: projectPath)
             .appendingPathComponent(config.build.contentDirectory)
-            .resolvingSymlinksInPath()
-            .path
-        let resolvedContentPath = content.url.resolvingSymlinksInPath().path
-        
-        // Get the relative path from the content directory
-        let relativePath: String
-        if resolvedContentPath.hasPrefix(contentBasePath) {
-            relativePath = String(resolvedContentPath.dropFirst(contentBasePath.count))
+
+        let cleanRelativePath: String
+        if let relativePath = Self.pathRelative(content.url.path, to: contentBase.path) {
+            // The walk reports every file it followed a symlink to at its logical path under
+            // the content directory as configured, so this is the spelling that keeps a page
+            // at the URL its path under `content/` implies.
+            cleanRelativePath = relativePath
+        } else if let relativePath = Self.pathRelative(
+            content.url.resolvingSymlinksInPath().path,
+            to: contentBase.resolvingSymlinksInPath().path
+        ) {
+            // Not a logical path, so it came straight from `FileManager`'s enumerator, which
+            // hands out its own spelling of the directory it walked (`/private/var` where the
+            // configured path says `/var`). Resolving both sides folds those together, and it
+            // cannot move a page: a file found behind a symlink never reaches this branch.
+            cleanRelativePath = relativePath
         } else {
-            // Fallback to original calculation
-            relativePath = content.url.path.replacingOccurrences(
-                of: URL(fileURLWithPath: projectPath).appendingPathComponent(config.build.contentDirectory).path,
-                with: ""
-            )
+            // Fallback for a file that is not under the content directory at all.
+            let relativePath = content.url.path.replacingOccurrences(of: contentBase.path, with: "")
+            cleanRelativePath = relativePath.hasPrefix("/") ? String(relativePath.dropFirst()) : relativePath
         }
-        
-        // Remove leading slash if present
-        let cleanRelativePath = relativePath.hasPrefix("/") ? String(relativePath.dropFirst()) : relativePath
-        
+
         // Special handling for index.md files - they should become index.html in their directory
         let outputPath: URL
         if cleanRelativePath == "index.md" || cleanRelativePath.hasSuffix("/index.md") {
@@ -447,6 +455,19 @@ public class SiteGenerator {
         let index = Index(version: "1.0", generated: Date(), entries: entries)
         let data = try JSONEncoder().encode(index)
         try data.write(to: outputURL.appendingPathComponent("search-index.json"))
+    }
+
+    /// Relative path of `path` under `base`, or `nil` when it is not under it.
+    ///
+    /// The boundary is a whole path component, never a bare string prefix: `content-extra`,
+    /// `content-posts`, `contents` and `content2` are ordinary sibling names that all start with
+    /// `content` without being anywhere inside it, and a prefix match would publish their pages
+    /// at a URL made of whatever characters were left over.
+    private static func pathRelative(_ path: String, to base: String) -> String? {
+        let base = base.hasSuffix("/") ? String(base.dropLast()) : base
+        guard path != base else { return "" }
+        guard path.hasPrefix(base + "/") else { return nil }
+        return String(path.dropFirst(base.count + 1))
     }
 
     private func siteRelativePath(forOutput outputPath: String) -> String {

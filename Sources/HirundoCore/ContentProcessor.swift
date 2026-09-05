@@ -220,18 +220,29 @@ public final class ContentProcessor: Sendable {
     /// content directory, so a file found through `content/shared` has to come back as
     /// `content/shared/page.md` or its page moves.
     ///
+    /// Only links that stay inside the project are followed, and never into the directories the
+    /// project builds from or into; see `shouldFollowSymlink(at:reportedAs:to:visitedDirectories:)`.
+    /// Every decision is printed, because a walk that silently changes what it includes is the
+    /// failure this whole traversal exists to fix.
+    ///
     /// - Parameter directoryURL: Content directory to walk. May itself be a symlink.
     /// - Returns: Logical URLs of the `.md` and `.markdown` files found, in enumeration order.
     /// - Throws: `ContentProcessorError.cannotEnumerateDirectory` when `directoryURL` cannot
     ///   be enumerated.
     func collectMarkdownFiles(in directoryURL: URL) throws -> [URL] {
         var collected: [URL] = []
-        // Seeded with the content directory itself, so `content/here -> .` is recognised as a
-        // loop rather than walked a second time.
-        var visitedDirectories: Set<String> = [Self.canonicalPath(of: directoryURL)]
+        var visitedDirectories: Set<String> = []
 
         // A content directory that is itself a symlink enumerates as empty, so walk its target.
         if let target = Self.directorySymlinkTarget(of: directoryURL) {
+            guard shouldFollowSymlink(
+                at: directoryURL,
+                reportedAs: directoryURL,
+                to: target,
+                visitedDirectories: &visitedDirectories
+            ) else {
+                return collected
+            }
             collectMarkdownFiles(
                 inResolved: target,
                 reportedAs: directoryURL,
@@ -240,6 +251,9 @@ public final class ContentProcessor: Sendable {
             )
             return collected
         }
+        // Recorded before the walk starts, so `content/here -> .` is recognised as a loop
+        // rather than walked a second time.
+        visitedDirectories.insert(Self.canonicalPath(of: directoryURL))
 
         // Unchanged from before directory symlinks were followed: same call, same options, so
         // a site with no symlinked content walks exactly as it always did.
@@ -256,7 +270,12 @@ public final class ContentProcessor: Sendable {
             // and the filter would drop it before it could be followed.
             if let target = Self.directorySymlinkTarget(of: fileURL),
                let logicalURL = Self.logicalURL(for: fileURL, enumeratedFrom: directoryURL) {
-                guard visitedDirectories.insert(Self.canonicalPath(of: target)).inserted else {
+                guard shouldFollowSymlink(
+                    at: fileURL,
+                    reportedAs: logicalURL,
+                    to: target,
+                    visitedDirectories: &visitedDirectories
+                ) else {
                     continue
                 }
                 collectMarkdownFiles(
@@ -314,7 +333,12 @@ public final class ContentProcessor: Sendable {
             let logicalURL = logicalDirectory.appendingPathComponent(entry.lastPathComponent)
 
             if let target = Self.directorySymlinkTarget(of: entry) {
-                guard visitedDirectories.insert(Self.canonicalPath(of: target)).inserted else {
+                guard shouldFollowSymlink(
+                    at: entry,
+                    reportedAs: logicalURL,
+                    to: target,
+                    visitedDirectories: &visitedDirectories
+                ) else {
                     continue
                 }
                 collectMarkdownFiles(
@@ -344,6 +368,100 @@ public final class ContentProcessor: Sendable {
             }
             collected.append(logicalURL)
         }
+    }
+
+    /// Decides whether the walk descends into `target`, the directory `linkURL` resolves to,
+    /// and says out loud what it decided.
+    ///
+    /// Writing *through* a symlink is the scaffolder's business and needs write access to the
+    /// content directory first. Reading through one needs no privilege at all, and what it
+    /// exposes is not the single file somebody named but every Markdown file under the target,
+    /// transitively. Content directories are routinely populated from starter kits, theme
+    /// repositories, submodules and contributor branches, and git records a symlink verbatim,
+    /// so `content/leak -> /Users/someone` can arrive in a branch a maintainer builds. Two
+    /// boundaries keep that from turning into published pages:
+    ///
+    /// - The target has to sit *inside* the project. The project root itself does not count:
+    ///   `content/up -> ..` would otherwise publish the repository — its `README.md`, `docs/`,
+    ///   `vendor/`, `node_modules/` — as pages.
+    /// - The target may not be the output, static or templates directory, or anything under
+    ///   one, however it was reached. Re-publishing the previous build, or publishing a
+    ///   template as a page, is never what a link meant.
+    ///
+    /// The case the feature exists for — `content/posts -> ../shared-posts`, a sibling inside
+    /// the project — passes both and needs no configuration to work.
+    ///
+    /// - Parameters:
+    ///   - linkURL: The symlink itself, where it really sits on disk.
+    ///   - logicalURL: Path the link is reported at, used for the printed line.
+    ///   - target: `linkURL` with its symlinks resolved.
+    ///   - visitedDirectories: Canonical paths already walked. The target is recorded here only
+    ///     when it is about to be walked, so a refused link never shadows a later legitimate one.
+    private func shouldFollowSymlink(
+        at linkURL: URL,
+        reportedAs logicalURL: URL,
+        to target: URL,
+        visitedDirectories: inout Set<String>
+    ) -> Bool {
+        let description = describeSymlink(at: linkURL, reportedAs: logicalURL, to: target)
+        let targetPath = Self.canonicalPath(of: target)
+        let projectRoot = Self.canonicalPath(of: URL(fileURLWithPath: projectPath))
+
+        if targetPath == projectRoot {
+            print("Skipping content symlink to the project root: \(description)")
+            return false
+        }
+        guard targetPath.hasPrefix(projectRoot + "/") else {
+            print("Skipping content symlink outside the project: \(description)")
+            return false
+        }
+        if excludedDirectories.contains(where: { targetPath == $0 || targetPath.hasPrefix($0 + "/") }) {
+            print("Skipping content symlink into a build directory: \(description)")
+            return false
+        }
+        guard visitedDirectories.insert(targetPath).inserted else {
+            print("Skipping content symlink already walked: \(description)")
+            return false
+        }
+        print("Following content symlink: \(description)")
+        return true
+    }
+
+    /// Directories the walk refuses to enter whichever link leads there.
+    ///
+    /// All three sit next to the content directory, so any link reaching the project root
+    /// reaches them too. Both spellings of each are collected — as configured and with symlinks
+    /// resolved — because the target is compared canonically and the project root itself may be
+    /// reached through a link (`/var` is `/private/var` on macOS).
+    private var excludedDirectories: Set<String> {
+        let root = URL(fileURLWithPath: projectPath)
+        let canonicalRoot = URL(fileURLWithPath: Self.canonicalPath(of: root))
+        var excluded: Set<String> = []
+        for name in [
+            config.build.outputDirectory,
+            config.build.staticDirectory,
+            config.build.templatesDirectory
+        ] {
+            excluded.insert(root.appendingPathComponent(name).path)
+            excluded.insert(canonicalRoot.appendingPathComponent(name).path)
+            excluded.insert(Self.canonicalPath(of: root.appendingPathComponent(name)))
+        }
+        return excluded
+    }
+
+    /// Renders a link the way the site owner wrote it: `content/posts -> ../shared-posts`.
+    ///
+    /// The left side is the logical path relative to the project, so a link found behind
+    /// another link still reads as a path under `content/`. The right side is the link's own
+    /// destination text rather than the resolved path, because that is what is on disk to fix.
+    private func describeSymlink(at linkURL: URL, reportedAs logicalURL: URL, to target: URL) -> String {
+        let prefix = projectPath.hasSuffix("/") ? projectPath : projectPath + "/"
+        var displayed = logicalURL.path
+        if displayed.hasPrefix(prefix) {
+            displayed = String(displayed.dropFirst(prefix.count))
+        }
+        let destination = (try? FileManager.default.destinationOfSymbolicLink(atPath: linkURL.path)) ?? target.path
+        return "\(displayed) -> \(destination)"
     }
 
     /// Rewrites an enumerated URL so it is rooted at `root` exactly as the caller wrote it.
