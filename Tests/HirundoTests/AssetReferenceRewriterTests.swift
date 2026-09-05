@@ -185,6 +185,17 @@ final class AssetReferenceRewriterTests: XCTestCase {
         )
     }
 
+    func testPreservesSrcsetSpacingAroundDescriptorsAndCommas() {
+        XCTAssertEqual(
+            AssetReferenceRewriter.rewriteHTML(
+                "<img srcset=\"/images/logo.png 1x , /images/bg.png   2x\">",
+                manifest: manifest,
+                inDirectory: ""
+            ),
+            "<img srcset=\"/images/logo-1b4d0f77c2ae8e93.png 1x , /images/bg-5c3e9a21d0f4b678.png   2x\">"
+        )
+    }
+
     func testRewritesURLInStyleAttribute() {
         XCTAssertEqual(
             AssetReferenceRewriter.rewriteHTML(

@@ -206,16 +206,13 @@ public enum AssetReferenceRewriter {
         return candidates.map { candidate -> String in
             let text = String(candidate)
             let leading = String(text.prefix(while: { $0.isWhitespace }))
-            let trimmed = text.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty else { return text }
-
-            var parts = trimmed.split(maxSplits: 1, whereSeparator: { $0.isWhitespace }).map(String.init)
-            guard let url = parts.first,
+            let rest = text.dropFirst(leading.count)
+            let url = String(rest.prefix(while: { !$0.isWhitespace }))
+            guard !url.isEmpty,
                   let rewritten = manifest.rewrite(reference: url, inDirectory: directory) else {
                 return text
             }
-            parts[0] = rewritten
-            return leading + parts.joined(separator: " ")
+            return leading + rewritten + rest.dropFirst(url.count)
         }.joined(separator: ",")
     }
 
