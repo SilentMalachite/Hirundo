@@ -204,7 +204,7 @@ template: "post.html"
 
 | Option | Meaning |
 |---|---|
-| `--path` | Path relative to the content directory. `--path about/team` creates `content/about/team.md`, intermediate directories included. Defaults to a slug derived from the title. |
+| `--path` | Path relative to the content directory. `--path about/team` creates `content/about/team.md`, intermediate directories included. Defaults to a slug derived from the title. Each component is limited to `limits.maxFilenameLength` characters (255 by default); an over-long one is rejected. A deep chain of short names is fine. |
 | `--template` | Value for the `template:` key. Defaults to `default.html`. |
 | `--open` | Opens the new file in `$VISUAL`, else `$EDITOR`. |
 
@@ -225,7 +225,8 @@ starter pages `hirundo init` writes.
   `slug:` that disagreed with the file name would make the two point at different URLs.
   A `--slug` you pass is used **verbatim** — it is not slugified — so it becomes the file
   name and therefore the URL segment exactly as typed, spaces and non-ASCII included.
-  Only `/`, `\`, `.`, `..`, control characters and over-long values are rejected.
+  What is rejected: `/`, `\`, `.`, `..`, control characters, a blank value, and anything
+  over the file name limit.
 - `--open` only runs editors on an allow-list (`vim`, `nvim`, `nano`, `emacs`, `code`,
   `subl`, `vi`, `open`, and similar) and never goes through a shell. The name is run on
   its own, so a value carrying arguments (`code --wait`, `vim +startinsert`) is refused,
