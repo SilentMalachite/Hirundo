@@ -470,6 +470,54 @@ final class ContentScaffolderTests: XCTestCase {
         )
     }
 
+    /// A rollback must not take a file another writer has finished in a directory this call
+    /// created — the interleaving that made a recursive `removeItem` destructive: process A
+    /// creates `content/notes/` on its way to `a.md`, process B writes `content/notes/b.md`,
+    /// A's write fails, and A's rollback deletes the directory with B's post inside it.
+    ///
+    /// The injected `FileManager` plays process B at exactly the moment that matters — after
+    /// the directory exists, before the write fails — so the interleaving is reproduced
+    /// deterministically instead of being waited for.
+    func testRollbackKeepsAFileAnotherWriterPutInADirectoryThisCallCreated() throws {
+        let contentDirectory = projectRoot.appendingPathComponent("content")
+        try FileManager.default.createDirectory(at: contentDirectory, withIntermediateDirectories: true)
+        let fileManager = SiblingWritingFileManager()
+
+        do {
+            _ = try ContentScaffolder(fileManager: fileManager).scaffold(
+                in: projectRoot,
+                build: Build.defaultBuild(),
+                limits: Limits(maxFilenameLength: 1000),
+                kind: .page,
+                options: ContentScaffoldOptions(
+                    title: "T",
+                    path: "a/b/" + String(repeating: "c", count: 300)
+                ),
+                date: Date(timeIntervalSince1970: 1_772_000_000)
+            )
+            XCTFail("Expected the over-long file name to fail the write")
+        } catch ContentScaffoldError.cannotWriteFile {
+            // The failure this test needs: reached after the directories were created.
+        }
+
+        XCTAssertEqual(fileManager.siblings.count, 1, "Precondition: one directory was created")
+        let sibling = try XCTUnwrap(fileManager.siblings.first)
+        XCTAssertEqual(
+            try? String(contentsOf: sibling, encoding: .utf8),
+            SiblingWritingFileManager.siblingContents,
+            "A rollback must not delete a file it did not create"
+        )
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: sibling.deletingLastPathComponent().path),
+            [sibling.lastPathComponent],
+            "The failed write must still have taken its own temporary file with it"
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: contentDirectory.appendingPathComponent("a").path),
+            "The unwind must stop at the directory it cannot remove, not skip past it"
+        )
+    }
+
     // MARK: - Comma-separated option parsing
 
     func testParseList_returnsEmptyForNil() {
@@ -508,6 +556,107 @@ final class ContentScaffolderTests: XCTestCase {
             try String(contentsOf: first.url, encoding: .utf8),
             original,
             "A collision must not touch the file that is already there"
+        )
+    }
+
+    /// The no-overwrite guarantee has to hold on the filesystem, not merely on the early
+    /// existence check: that check is a fast path for the friendly error, and between it and
+    /// the write anything can happen.
+    ///
+    /// A dangling symbolic link is the one destination that reaches the write with the check
+    /// satisfied, and so tests the guarantee without a race: `fileExists(atPath:)` follows
+    /// the link to a target that is not there and reports the name free, while the name
+    /// itself is very much taken. The exclusive create must refuse it, report the very same
+    /// error the check would have, and leave the link exactly as it found it.
+    func testRefusesADestinationTheExistenceCheckCannotSee() throws {
+        let posts = projectRoot.appendingPathComponent("content/posts")
+        try FileManager.default.createDirectory(at: posts, withIntermediateDirectories: true)
+        let destination = posts.appendingPathComponent("hello-world.md")
+        let danglingTarget = posts.appendingPathComponent("not-there.md")
+        try FileManager.default.createSymbolicLink(at: destination, withDestinationURL: danglingTarget)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: destination.path),
+            "Precondition: the early existence check has to consider this destination free"
+        )
+
+        assertThrows(.fileExists("")) {
+            try scaffold(kind: .post, ContentScaffoldOptions(title: "Hello World"))
+        }
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
+        XCTAssertEqual(
+            attributes[.type] as? FileAttributeType,
+            FileAttributeType.typeSymbolicLink,
+            "The destination must be left as it was found"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: danglingTarget.path),
+            "Nothing may have been written through the link"
+        )
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: posts.path).sorted(),
+            ["hello-world.md"],
+            "A refused write must take its temporary file with it"
+        )
+    }
+
+    /// The race itself: many writers aiming at one destination at once.
+    ///
+    /// Exactly one may create the file, and what is on disk afterwards must be that writer's
+    /// complete output — not a blend of two, not a truncation. Whether a given run really
+    /// interleaves inside the window between the existence check and the write is the
+    /// scheduler's business, but the assertions do not depend on it: every interleaving an
+    /// exclusive create allows satisfies them, and a replacing rename satisfies them only by
+    /// luck.
+    func testConcurrentScaffoldsAtOneDestinationLeaveExactlyOneCompleteFile() throws {
+        // Pre-created so the writers race on the file alone; a directory race is the
+        // rollback tests' subject, not this one's.
+        let posts = projectRoot.appendingPathComponent("content/posts")
+        try FileManager.default.createDirectory(at: posts, withIntermediateDirectories: true)
+        // Every writer passes identical options, so the expected bytes are known exactly
+        // without knowing who won: the content depends on the title, date, and front matter,
+        // and never on the slug, which names only the file.
+        let reference = try scaffold(kind: .post, ContentScaffoldOptions(title: "Race", slug: "reference"))
+        let expected = try String(contentsOf: reference.url, encoding: .utf8)
+
+        let outcomes = ScaffoldOutcomes()
+        let root = projectRoot!
+        DispatchQueue.concurrentPerform(iterations: 16) { _ in
+            do {
+                let result = try ContentScaffolder().scaffold(
+                    in: root,
+                    build: Build.defaultBuild(),
+                    limits: Limits(),
+                    kind: .post,
+                    options: ContentScaffoldOptions(title: "Race", slug: "raced"),
+                    date: Date(timeIntervalSince1970: 1_772_000_000)
+                )
+                outcomes.recordSuccess(result.url)
+            } catch {
+                outcomes.recordFailure(error)
+            }
+        }
+
+        XCTAssertEqual(
+            outcomes.unexpectedFailures,
+            [],
+            "A writer that loses the race may fail only with fileExists"
+        )
+        XCTAssertEqual(
+            outcomes.successes.count,
+            1,
+            "Exactly one concurrent writer may create the destination"
+        )
+        let winner = try XCTUnwrap(outcomes.successes.first)
+        XCTAssertEqual(
+            try String(contentsOf: winner, encoding: .utf8),
+            expected,
+            "The surviving file must be one writer's complete output"
+        )
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: posts.path).sorted(),
+            ["raced.md", "reference.md"],
+            "No writer may leave a temporary file behind"
         )
     }
 
@@ -558,5 +707,62 @@ final class ContentScaffolderTests: XCTestCase {
             FileManager.default.fileExists(atPath: output.path),
             "Expected /posts/second-post/ from content/posts/second-post.md"
         )
+    }
+}
+
+/// Stands in for a second `hirundo new` process: drops a finished file into every directory
+/// the scaffolder creates, so a rollback runs against a directory somebody else is already
+/// using. `FileManager` is the scaffolder's own injection point, so this needs no seam.
+private final class SiblingWritingFileManager: FileManager {
+    static let siblingContents = "written by another writer"
+
+    /// The files planted, in creation order.
+    private(set) var siblings: [URL] = []
+
+    override func createDirectory(
+        at url: URL,
+        withIntermediateDirectories createIntermediates: Bool,
+        attributes: [FileAttributeKey: Any]? = nil
+    ) throws {
+        try super.createDirectory(
+            at: url,
+            withIntermediateDirectories: createIntermediates,
+            attributes: attributes
+        )
+        let sibling = url.appendingPathComponent("sibling.md")
+        FileManager.default.createFile(
+            atPath: sibling.path,
+            contents: Data(Self.siblingContents.utf8)
+        )
+        siblings.append(sibling)
+    }
+}
+
+/// Thread-safe tally for the concurrent collision test.
+private final class ScaffoldOutcomes: @unchecked Sendable {
+    private let lock = NSLock()
+    private var created: [URL] = []
+    private var unexpected: [String] = []
+
+    /// URLs of the calls that reported creating the file.
+    var successes: [URL] {
+        lock.withLock { created }
+    }
+
+    /// Descriptions of the failures that were not a collision — losing the race is the only
+    /// acceptable way for a concurrent writer to fail.
+    var unexpectedFailures: [String] {
+        lock.withLock { unexpected }
+    }
+
+    func recordSuccess(_ url: URL) {
+        lock.withLock { created.append(url) }
+    }
+
+    func recordFailure(_ error: Error) {
+        lock.withLock {
+            if let error = error as? ContentScaffoldError, case .fileExists = error { return }
+            unexpected.append("\(error)")
+        }
     }
 }

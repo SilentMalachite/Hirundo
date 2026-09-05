@@ -375,10 +375,10 @@ public struct ContentScaffolder {
     /// Writes the file, creating missing parent directories and rolling those back if the
     /// write itself fails.
     ///
-    /// Deliberately not `SiteFileManager.writeFile(content:to:)`: this write is atomic (a
-    /// failure must not leave a truncated file behind) and must land on the literal path
-    /// the user named, whereas `SiteFileManager` resolves symlinks — right for generated
-    /// output under `_site`, wrong for content the user asked to create here.
+    /// Deliberately not `SiteFileManager.writeFile(content:to:)`: this write is atomic and
+    /// exclusive (see ``createExclusively(_:at:in:)``) and must land on the literal path the
+    /// user named, whereas `SiteFileManager` resolves symlinks — right for generated output
+    /// under `_site`, wrong for content the user asked to create here.
     ///
     /// A consequence, and a deliberate one: `standardizedFileURL` does not resolve
     /// symlinks, so a symlinked directory the user has already placed under `content/` will
@@ -388,8 +388,8 @@ public struct ContentScaffolder {
     /// `SiteFileManager`.
     private func write(_ contents: String, to destination: URL) throws {
         let parent = destination.deletingLastPathComponent()
-        let createdRoot = topmostMissingAncestor(of: parent)
-        if createdRoot != nil {
+        let createdDirectories = missingDirectories(leadingTo: parent)
+        if !createdDirectories.isEmpty {
             do {
                 try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
             } catch {
@@ -398,29 +398,131 @@ public struct ContentScaffolder {
         }
 
         do {
-            try Data(contents.utf8).write(to: destination, options: .atomic)
+            try createExclusively(Data(contents.utf8), at: destination, in: parent)
         } catch {
-            // Only remove directories this call created; never touch pre-existing ones.
-            if let createdRoot {
-                try? fileManager.removeItem(at: createdRoot)
-            }
-            throw ContentScaffoldError.cannotWriteFile(destination.path)
+            // Give back only the directories this call created, and only while they are
+            // still empty. See `removeCreatedDirectories(_:)`.
+            removeCreatedDirectories(createdDirectories)
+            throw error
         }
     }
 
-    /// Returns the highest ancestor of `url` (possibly `url` itself) that does not exist —
-    /// the topmost directory `createDirectory(withIntermediateDirectories:)` would create,
-    /// and therefore the only one safe to remove when rolling back.
-    /// - Returns: `nil` when `url` already exists, so rollback leaves it alone.
-    private func topmostMissingAncestor(of url: URL) -> URL? {
+    /// Creates `destination` atomically **and** exclusively, with the content in `data`.
+    ///
+    /// The bytes go to a uniquely named temporary file in `parent` — the same directory,
+    /// hence the same filesystem — which is then given its final name with `link`. Splitting
+    /// it that way is what buys both properties at once:
+    ///
+    /// - **Atomic**: the destination name appears only once every byte is written, so a
+    ///   failure can never leave a half-written file behind.
+    /// - **Exclusive**: `link` fails with `EEXIST` instead of replacing an existing name, so
+    ///   the filesystem itself — not the caller's earlier `fileExists` check — is what
+    ///   guarantees no overwrite.
+    ///
+    /// `Data.write(options: .atomic)` gives only the first: it finishes with `rename`, which
+    /// silently replaces the destination. Two `hirundo new` processes racing on one path
+    /// would both pass the existence check and the second one's rename would destroy the
+    /// first one's finished file. `EEXIST` is reported as ``ContentScaffoldError/fileExists``
+    /// so the losing process is indistinguishable from one that lost the check itself.
+    ///
+    /// The temporary file is unlinked on every path out of this method, taken or not, so a
+    /// failure never leaves one behind in the user's content directory.
+    private func createExclusively(_ data: Data, at destination: URL, in parent: URL) throws {
+        let temporary = parent.appendingPathComponent(".hirundo-new-\(UUID().uuidString).tmp")
+        guard
+            let temporaryPath = Self.fileSystemPath(of: temporary),
+            let destinationPath = Self.fileSystemPath(of: destination)
+        else {
+            throw ContentScaffoldError.cannotWriteFile(destination.path)
+        }
+
+        // `O_EXCL` here too: the name carries a UUID, but it is a name in a directory the
+        // user can write to, so it is never assumed to be free.
+        let descriptor = open(temporaryPath, O_WRONLY | O_CREAT | O_EXCL, 0o644)
+        guard descriptor >= 0 else {
+            throw ContentScaffoldError.cannotWriteFile(destination.path)
+        }
+        defer { unlink(temporaryPath) }
+
+        let wrote = Self.writeAll(data, to: descriptor)
+        // Closed before the result is judged, so the descriptor leaks on no path; a failure
+        // reported only at close (a full disk, say) has to count as a failed write.
+        let closed = close(descriptor) == 0
+        guard wrote, closed else {
+            throw ContentScaffoldError.cannotWriteFile(destination.path)
+        }
+
+        guard link(temporaryPath, destinationPath) == 0 else {
+            let failure = errno
+            throw failure == EEXIST
+                ? ContentScaffoldError.fileExists(destination.path)
+                : ContentScaffoldError.cannotWriteFile(destination.path)
+        }
+    }
+
+    /// Writes every byte of `data` to `descriptor`, resuming a short write and retrying an
+    /// interrupted one.
+    /// - Returns: `false` as soon as a write fails for any other reason.
+    private static func writeAll(_ data: Data, to descriptor: Int32) -> Bool {
+        data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) -> Bool in
+            guard let base = buffer.baseAddress else { return true }
+            var offset = 0
+            while offset < buffer.count {
+                let written = Darwin.write(descriptor, base + offset, buffer.count - offset)
+                if written < 0 {
+                    if errno == EINTR { continue }
+                    return false
+                }
+                offset += written
+            }
+            return true
+        }
+    }
+
+    /// The null-terminated path bytes the kernel expects, taken from Foundation's own file
+    /// system representation so a non-ASCII name is spelled here exactly the way the
+    /// `FileManager` calls around this one spell it.
+    /// - Returns: `nil` only when the URL has no file system representation at all.
+    private static func fileSystemPath(of url: URL) -> [CChar]? {
+        url.withUnsafeFileSystemRepresentation { pointer -> [CChar]? in
+            guard let pointer else { return nil }
+            return Array(UnsafeBufferPointer(start: pointer, count: strlen(pointer) + 1))
+        }
+    }
+
+    /// The directories `createDirectory(at:withIntermediateDirectories:)` would have to
+    /// create for `url` to exist: `url` itself first, then each missing ancestor above it,
+    /// so the list reads deepest first.
+    ///
+    /// The whole chain is recorded rather than just its topmost entry, because a rollback
+    /// has to unwind it one directory at a time — see ``removeCreatedDirectories(_:)``.
+    /// - Returns: An empty list when `url` already exists, so a rollback leaves it alone.
+    private func missingDirectories(leadingTo url: URL) -> [URL] {
         var current = url.standardizedFileURL
-        var missing: URL?
+        var missing: [URL] = []
         while !fileManager.fileExists(atPath: current.path) {
-            missing = current
+            missing.append(current)
             let parent = current.deletingLastPathComponent().standardizedFileURL
             if parent.path == current.path { break }
             current = parent
         }
         return missing
+    }
+
+    /// Undoes a failed write's directory creation, deepest first.
+    ///
+    /// `rmdir` rather than `FileManager.removeItem`, which is recursive: between this call
+    /// creating `content/notes/` and its write failing, another `hirundo new` may have
+    /// finished a file in there, and a recursive delete would take that file with it.
+    /// `rmdir` refuses a non-empty directory with `ENOTEMPTY`, which is exactly the test for
+    /// "somebody else is using this now". The unwind stops at the first directory that will
+    /// not go, since every directory above it still holds that one.
+    ///
+    /// Failures are deliberately silent: the caller is about to throw the write error, and
+    /// that is the one the user needs to hear.
+    private func removeCreatedDirectories(_ directories: [URL]) {
+        for directory in directories {
+            guard let path = Self.fileSystemPath(of: directory), rmdir(path) == 0 else { return }
+        }
     }
 }
