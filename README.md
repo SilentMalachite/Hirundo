@@ -170,11 +170,11 @@ CLI flag > `server` block in `config.yaml` > built-in default (port 8080, live r
 an explicit `--port` overrides `server.port`, and `--no-reload` always disables live reload
 no matter what `server.liveReload` says; omit both and `config.yaml` decides.
 
-`--host` is the address the server actually binds to, and only a numeric address is
-accepted — a host name is rejected. The default, `localhost`, resolves to the IPv4 loopback
-address, so only this machine can connect. Pass `--host 0.0.0.0` to accept connections from
-other machines; doing so exposes the live reload WebSocket with no authentication, so only
-do this on a trusted network.
+`--host` is the address the server actually binds to, and accepts only a numeric address or
+the literal `localhost` — any other host name is rejected. The default, `localhost`,
+resolves to the IPv4 loopback address, so only this machine can connect. Pass
+`--host 0.0.0.0` to accept connections from other machines; doing so exposes the live
+reload WebSocket with no authentication, so only do this on a trusted network.
 
 - Directory requests resolve to that directory's `index.html`, so `/`, `/about`, and
   `/about/` all work.
