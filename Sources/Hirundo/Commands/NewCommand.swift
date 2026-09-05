@@ -27,9 +27,7 @@ func warnIfConfigUnreadable(_ context: NewContentContext) {
 func reportCreatedContent(_ result: ContentScaffoldResult, openInEditor: Bool) {
     print("✅ Created \(result.relativePath)")
     if openInEditor {
-        FileHandle.standardError.write(Data(
-            "⚠️  --open is not wired up yet.\n".utf8
-        ))
+        EditorLauncher.open(result.url)
     }
 }
 
