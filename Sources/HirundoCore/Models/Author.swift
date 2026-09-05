@@ -28,11 +28,16 @@ public struct Author: Codable, Sendable {
     /// Routes decoding through the throwing initializer above, which the synthesized decoder
     /// would otherwise bypass — leaving the e-mail format and length rules unenforced.
     public init(from decoder: Decoder) throws {
+        try self.init(from: decoder, limits: decoder.hirundoLimits)
+    }
+
+    /// Decodes with the parent configuration's limits.
+    init(from decoder: Decoder, limits: Limits) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         try self.init(
             name: container.decode(String.self, forKey: .name),
             email: container.decodeIfPresent(String.self, forKey: .email),
-            limits: decoder.hirundoLimits
+            limits: limits
         )
     }
 }

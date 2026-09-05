@@ -67,34 +67,26 @@ public struct HirundoConfig: Codable, Sendable {
     
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        
-        self.site = try container.decode(Site.self, forKey: .site)
+
+        // Resolve limits here so every Codable entry point validates the same way.
+        self.limits = try container.decodeIfPresent(Limits.self, forKey: .limits) ?? Limits()
+        guard container.contains(.site) else {
+            throw DecodingError.keyNotFound(CodingKeys.site, .init(
+                codingPath: container.codingPath,
+                debugDescription: "No value associated with key site."
+            ))
+        }
+        self.site = try Site(from: container.superDecoder(forKey: .site), limits: limits)
         self.build = try container.decodeIfPresent(Build.self, forKey: .build) ?? Build.defaultBuild()
         self.server = try container.decodeIfPresent(Server.self, forKey: .server) ?? Server.defaultServer()
         self.blog = try container.decodeIfPresent(Blog.self, forKey: .blog) ?? Blog.defaultBlog()
         // Features only (Stage 2)
         self.features = try container.decodeIfPresent(Features.self, forKey: .features) ?? Features()
-        self.limits = try container.decodeIfPresent(Limits.self, forKey: .limits) ?? Limits()
-    }
-    
-    /// Only `limits`, so that it can be read before the blocks whose validation depends on it.
-    private struct LimitsOnly: Decodable {
-        let limits: Limits?
     }
     
     public static func parse(from yaml: String) throws -> HirundoConfig {
         do {
-            let decoder = YAMLDecoder()
-            // Two passes: `site` and `author` are validated against the configured lengths, and
-            // a decoder cannot look sideways at another key of the document it is decoding.
-            let limits = try decoder.decode(LimitsOnly.self, from: yaml).limits ?? Limits()
-            // `Site.init(from:)` routes through the validating initializer, so an empty or
-            // malformed URL has already been rejected by the time this returns.
-            return try decoder.decode(
-                HirundoConfig.self,
-                from: yaml,
-                userInfo: [.hirundoLimits: limits]
-            )
+            return try YAMLDecoder().decode(HirundoConfig.self, from: yaml)
         } catch let error as ConfigError {
             throw error
         } catch let error as DecodingError {

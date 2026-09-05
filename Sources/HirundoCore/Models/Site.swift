@@ -56,14 +56,25 @@ public struct Site: Codable, Sendable {
     /// initializer — URL shape, title and description length, language code format — was dead
     /// for anything read from `config.yaml`. An absent `language` stays absent, as before.
     public init(from decoder: Decoder) throws {
+        try self.init(from: decoder, limits: decoder.hirundoLimits)
+    }
+
+    /// Decodes with the parent configuration's limits, including the nested author.
+    init(from decoder: Decoder, limits: Limits) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        func decodeAuthor() throws -> Author? {
+            guard container.contains(.author), try !container.decodeNil(forKey: .author) else {
+                return nil
+            }
+            return try Author(from: container.superDecoder(forKey: .author), limits: limits)
+        }
         try self.init(
             title: container.decode(String.self, forKey: .title),
             description: container.decodeIfPresent(String.self, forKey: .description),
             url: container.decode(String.self, forKey: .url),
             language: container.decodeIfPresent(String.self, forKey: .language),
-            author: container.decodeIfPresent(Author.self, forKey: .author),
-            limits: decoder.hirundoLimits
+            author: decodeAuthor(),
+            limits: limits
         )
     }
 }

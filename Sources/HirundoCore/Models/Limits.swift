@@ -79,11 +79,9 @@ public struct Limits: Codable, Sendable {
 }
 
 extension CodingUserInfoKey {
-    /// Carries the already-decoded `limits` block down to the models that enforce it.
+    /// Supplies limits when decoding a standalone `Site` or `Author`.
     ///
-    /// `site` and `author` are validated against the configured lengths, but a decoder has no
-    /// way to look sideways at another key of the document it is decoding. `HirundoConfig.parse`
-    /// therefore decodes `limits` first and passes the result in through `userInfo`.
+    /// A whole `HirundoConfig` decodes its own `limits` first and passes them explicitly.
     static let hirundoLimits = CodingUserInfoKey(rawValue: "com.hirundo.limits")!
 }
 
