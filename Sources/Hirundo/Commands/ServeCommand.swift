@@ -124,6 +124,22 @@ struct ServeCommand: AsyncParsableCommand {
                 print("⚠️  Listening on all interfaces. The live reload WebSocket has no authentication — do not use this on an untrusted network.")
             }
 
+            let projectRoot = URL(fileURLWithPath: currentDirectory)
+            let outputPath = projectRoot.appendingPathComponent(config.build.outputDirectory).path
+            let watchCandidates = [
+                config.build.contentDirectory,
+                config.build.templatesDirectory,
+                config.build.staticDirectory
+            ].map { projectRoot.appendingPathComponent($0).path }
+
+            // A configuration that puts the output inside a watched directory makes every
+            // rebuild trigger the next one, forever. Refuse before doing any work rather than
+            // letting the user discover it as a pegged core. Only live reload watches anything,
+            // so a layout like this is still usable with `--no-reload`.
+            if options.liveReload {
+                try validateWatchPaths(watchCandidates, outputPath: outputPath)
+            }
+
             // Step 1: build once so that the very first request has something to serve. A
             // failure here is reported but not fatal — a running server showing a stale or
             // partial site is far easier to debug than a command that refused to start.
@@ -189,13 +205,7 @@ struct ServeCommand: AsyncParsableCommand {
             // and is named in `ignorePatterns` as well, because the built-in defaults only know
             // the literal name `_site` and this project may have configured another one.
             if options.liveReload {
-                let watchPaths = [
-                    config.build.contentDirectory,
-                    config.build.templatesDirectory,
-                    config.build.staticDirectory
-                ]
-                .map { URL(fileURLWithPath: currentDirectory).appendingPathComponent($0).path }
-                .filter { path in
+                let watchPaths = watchCandidates.filter { path in
                     var isDirectory: ObjCBool = false
                     let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
                     return exists && isDirectory.boolValue
