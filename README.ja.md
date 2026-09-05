@@ -168,14 +168,64 @@ hirundo serve [オプション]
 新しいコンテンツを作成します。
 
 ```bash
-hirundo new post <タイトル> [--slug <スラグ>] [--categories <一覧>] [--tags <一覧>] [--draft] [--open] [--verbose]
-hirundo new page <タイトル> [--path <パス>] [--layout <レイアウト>] [--open] [--verbose]
+hirundo new post <タイトル> [--slug <スラグ>] [--categories <一覧>] [--tags <一覧>]
+                            [--template <テンプレート>] [--draft] [--open] [--verbose]
+hirundo new page <タイトル> [--path <パス>] [--template <テンプレート>] [--open] [--verbose]
 ```
 
-> ⚠️ **未完成です。** 現状どちらのサブコマンドも、引数を検証し、`content/posts`（または
-> `content/`）が存在することを確認して、実行内容を表示するだけです。Markdownファイルは
-> **作成されません**。当面は手作業でコンテンツファイルを作成してください。書式は
-> [フロントマター](#フロントマター)を参照してください。
+**`hirundo new post`**
+
+| オプション | 意味 |
+|---|---|
+| `--slug` | `.md` を除いたファイル名。省略時はタイトルから生成します。 |
+| `--categories` | カンマ区切り。空要素と重複は除去されます。 |
+| `--tags` | カンマ区切り。空要素と重複は除去されます。 |
+| `--template` | `template:` キーの値。既定は `post.html`。 |
+| `--draft` | `draft: true` を書き出します。`--drafts` 付きでビルドしない限り除外されます。 |
+| `--open` | 作成したファイルを `$VISUAL`、無ければ `$EDITOR` で開きます。 |
+
+`<contentDirectory>/posts/<スラグ>.md` を作成します:
+
+```markdown
+---
+title: "My First Post"
+date: 2026-09-05T12:00:00Z
+categories: ["swift"]
+tags: ["static-site"]
+template: "post.html"
+---
+
+# My First Post
+
+```
+
+`categories` / `tags` / `draft` は指定したときだけ出力されます。
+
+**`hirundo new page`**
+
+| オプション | 意味 |
+|---|---|
+| `--path` | content ディレクトリからの相対パス。`--path about/team` は `content/about/team.md` を作成し、中間ディレクトリも作ります。省略時はタイトルから生成します。 |
+| `--template` | `template:` キーの値。既定は `default.html`。 |
+| `--open` | 作成したファイルを `$VISUAL`、無ければ `$EDITOR` で開きます。 |
+
+`<contentDirectory>/<パス>.md` を作成します。`date:` キーは出力しません
+（`hirundo init` が生成する初期ページと同じ形です）。
+
+**補足**
+
+- content ディレクトリは `config.yaml` の `build.contentDirectory` から決まります。
+  設定ファイルが無い場合は、警告なしで `content` を使います。`config.yaml` があるのに
+  読み込めない場合は `content` を使い、警告を表示します。
+- **どちらのコマンドも既存ファイルを上書きしません。** 衝突した場合はエラーになります。
+  別の `--slug` / `--path` を指定するか、既にあるファイルを編集してください。
+- `--slug` が決めるのは**ファイル名だけ**です。フロントマターに `slug:` キーは
+  書き出しません。出力 URL はファイル名由来、RSS のリンクは記事のスラグ由来なので、
+  ファイル名と異なる `slug:` を書くと両者が別の URL を指してしまいます。
+- `--open` は許可リスト（`vim`、`nvim`、`nano`、`emacs`、`code`、`subl`、`vi`、`open` など）
+  にあるエディタのみを、シェルを経由せずに起動します。`$EDITOR` が未設定・不許可・
+  起動失敗のいずれでも、警告を表示するだけで終了コードは 0 のままです
+  （ファイルは既に作成済みのため）。
 
 ### `hirundo clean`
 出力ディレクトリとキャッシュをクリーンします。
@@ -429,7 +479,6 @@ Hirundoには4つの組み込み機能があり、`features` ブロックで切�
 - **ライブリロードのWebSocket認証**。`/auth-token` エンドポイントもトークンによるハンド
   シェイクも存在せず、`/livereload` は接続をそのまま受け付けます。開発サーバーを信頼できない
   ネットワークに公開しないでください。
-- **`hirundo new post` / `hirundo new page` によるファイル生成**。[`hirundo new`](#hirundo-new)を参照してください。
 - **アセットのフィンガープリント、ソースマップ、JS/CSSの結合**。
   `build.enableAssetFingerprinting`、`enableSourceMaps`、`concatenateJS`、`concatenateCSS` は
   設定パーサーに受け付けられますが、どこでも使用されていません。

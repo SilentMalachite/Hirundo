@@ -167,14 +167,64 @@ consulted by `serve`.
 Create new content.
 
 ```bash
-hirundo new post <title> [--slug <slug>] [--categories <list>] [--tags <list>] [--draft] [--open] [--verbose]
-hirundo new page <title> [--path <path>] [--layout <layout>] [--open] [--verbose]
+hirundo new post <title> [--slug <slug>] [--categories <list>] [--tags <list>]
+                         [--template <template>] [--draft] [--open] [--verbose]
+hirundo new page <title> [--path <path>] [--template <template>] [--open] [--verbose]
 ```
 
-> ⚠️ **Not fully implemented.** Both subcommands currently only validate their arguments,
-> ensure `content/posts` (or `content/`) exists, and print what they would do — they do
-> **not** write a Markdown file yet. Create content files by hand for now; see
-> [Frontmatter](#frontmatter) for the shape.
+**`hirundo new post`**
+
+| Option | Meaning |
+|---|---|
+| `--slug` | File name without the `.md` extension. Defaults to a slug derived from the title. |
+| `--categories` | Comma-separated. Blank entries and duplicates are dropped. |
+| `--tags` | Comma-separated. Blank entries and duplicates are dropped. |
+| `--template` | Value for the `template:` key. Defaults to `post.html`. |
+| `--draft` | Writes `draft: true`, so the file is skipped unless you build with `--drafts`. |
+| `--open` | Opens the new file in `$VISUAL`, else `$EDITOR`. |
+
+Creates `<contentDirectory>/posts/<slug>.md`:
+
+```markdown
+---
+title: "My First Post"
+date: 2026-09-05T12:00:00Z
+categories: ["swift"]
+tags: ["static-site"]
+template: "post.html"
+---
+
+# My First Post
+
+```
+
+`categories`, `tags`, and `draft` appear only when you ask for them.
+
+**`hirundo new page`**
+
+| Option | Meaning |
+|---|---|
+| `--path` | Path relative to the content directory. `--path about/team` creates `content/about/team.md`, intermediate directories included. Defaults to a slug derived from the title. |
+| `--template` | Value for the `template:` key. Defaults to `default.html`. |
+| `--open` | Opens the new file in `$VISUAL`, else `$EDITOR`. |
+
+Creates `<contentDirectory>/<path>.md`, with no `date:` key — the same shape as the
+starter pages `hirundo init` writes.
+
+**Notes**
+
+- The content directory comes from `build.contentDirectory` in `config.yaml`. With no
+  config file, `content` is used silently. If `config.yaml` exists but cannot be read,
+  `content` is used and a warning is printed.
+- **Neither command overwrites an existing file.** A collision is an error; pass a
+  different `--slug` or `--path`, or edit the file that is already there.
+- `--slug` decides the **file name only**. No `slug:` key is written into the frontmatter:
+  the output URL comes from the file name while RSS links come from the post's slug, so a
+  `slug:` that disagreed with the file name would make the two point at different URLs.
+- `--open` only runs editors on an allow-list (`vim`, `nvim`, `nano`, `emacs`, `code`,
+  `subl`, `vi`, `open`, and similar) and never goes through a shell. If `$EDITOR` is
+  unset, rejected, or fails to start, the command prints a warning and still exits 0 —
+  the file has already been written.
 
 ### `hirundo clean`
 Clean output directory and caches.
@@ -425,7 +475,6 @@ They are not:
 - **WebSocket authentication for live reload.** There is no `/auth-token` endpoint and no
   token handshake; `/livereload` accepts connections directly. Do not expose the development
   server to an untrusted network.
-- **`hirundo new post` / `hirundo new page` file creation.** See [`hirundo new`](#hirundo-new).
 - **Asset fingerprinting, source maps, and JS/CSS concatenation.** `build.enableAssetFingerprinting`,
   `enableSourceMaps`, `concatenateJS`, and `concatenateCSS` are accepted by the config parser
   but are not acted on anywhere.

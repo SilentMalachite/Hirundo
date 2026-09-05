@@ -64,12 +64,20 @@ hirundo build
 
 ### 新規コンテンツの作成
 ```bash
-# ブログ記事の作成
+# ブログ記事の作成 → content/posts/<スラグ>.md
 hirundo new post "記事タイトル"
+hirundo new post "記事タイトル" --slug custom-name --categories "swift,web" --tags "ssg" --draft
 
-# ページの作成
+# ページの作成 → content/<スラグ>.md
 hirundo new page "ページタイトル"
+hirundo new page "チーム紹介" --path about/team
 ```
+
+- 生成先は `config.yaml` の `build.contentDirectory` に従います。
+- 既存ファイルは上書きしません（エラーになります）。
+- `--slug` はファイル名だけを決めます。フロントマターに `slug:` は書き出しません。
+- `--open` は `$VISUAL` / `$EDITOR` を許可リストで検証してから起動します。
+  失敗しても終了コードは 0 のままです。
 
 ### テストの実行
 ```bash
