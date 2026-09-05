@@ -103,4 +103,149 @@ final class TerminalForegroundTests: XCTestCase {
         // process is always already in its own process group.
         XCTAssertEqual(TerminalForeground.plan(forChild: getpid()), .leaveAlone)
     }
+
+    // MARK: - The hand-over branch, without a terminal
+
+    /// A `.handOver` on a descriptor that is not a terminal takes the fallback path: the
+    /// `tcsetpgrp` fails, nothing was changed, and `body` still runs. That is the shape of
+    /// every case where the child has already gone or the terminal has — and it must never
+    /// turn into "the work silently did not happen".
+    ///
+    /// A descriptor of our own opening, never the runner's stdin, so this cannot touch a real
+    /// terminal whatever the runner was started from.
+    func testHandOverStillRunsTheBodyWhenTheDescriptorIsNotATerminal() throws {
+        let descriptor = try nonTerminalDescriptor()
+        defer { close(descriptor) }
+        var ran = false
+
+        TerminalForeground.withForeground(
+            givenTo: .handOver(childGroup: 700, restoringTo: 500),
+            on: descriptor
+        ) { ran = true }
+
+        XCTAssertTrue(ran, "the hand-over must not swallow the work it wraps")
+    }
+
+    func testHandOverReturnsTheBodysValueWhenTheDescriptorIsNotATerminal() throws {
+        let descriptor = try nonTerminalDescriptor()
+        defer { close(descriptor) }
+
+        XCTAssertEqual(
+            TerminalForeground.withForeground(
+                givenTo: .handOver(childGroup: 700, restoringTo: 500),
+                on: descriptor
+            ) { 42 },
+            42
+        )
+    }
+
+    func testHandOverPropagatesAThrownError() throws {
+        struct Boom: Error {}
+        let descriptor = try nonTerminalDescriptor()
+        defer { close(descriptor) }
+
+        XCTAssertThrowsError(
+            try TerminalForeground.withForeground(
+                givenTo: .handOver(childGroup: 700, restoringTo: 500),
+                on: descriptor
+            ) { throw Boom() }
+        )
+    }
+
+    // MARK: - Mask bookkeeping
+
+    /// The job-control signals have to be blocked *around* `body`, not just around the two
+    /// `tcsetpgrp` calls: the wait inside reclaims and re-lends the terminal itself when the
+    /// editor is stopped, and an unblocked SIGTTOU there would stop us instead.
+    func testHandOverBlocksTheJobControlSignalsForTheDurationOfTheBody() throws {
+        let descriptor = try nonTerminalDescriptor()
+        defer { close(descriptor) }
+
+        var blockedInside = (ttou: false, ttin: false)
+        TerminalForeground.withForeground(
+            givenTo: .handOver(childGroup: 700, restoringTo: 500),
+            on: descriptor
+        ) {
+            blockedInside = (Self.isBlocked(SIGTTOU), Self.isBlocked(SIGTTIN))
+        }
+
+        XCTAssertTrue(blockedInside.ttou, "SIGTTOU must be blocked while the child holds the terminal")
+        XCTAssertTrue(blockedInside.ttin, "SIGTTIN must be blocked while the child holds the terminal")
+    }
+
+    /// `.leaveAlone` is the case where nothing at all should be touched — including the mask.
+    func testLeaveAloneDoesNotBlockAnything() {
+        var blockedInside = true
+        TerminalForeground.withForeground(givenTo: .leaveAlone) {
+            blockedInside = Self.isBlocked(SIGTTOU)
+        }
+
+        XCTAssertFalse(blockedInside, "a no-op plan must not touch the signal mask")
+    }
+
+    func testHandOverRestoresTheSignalMaskAfterwards() throws {
+        let descriptor = try nonTerminalDescriptor()
+        defer { close(descriptor) }
+        let before = Self.isBlocked(SIGTTOU)
+
+        TerminalForeground.withForeground(
+            givenTo: .handOver(childGroup: 700, restoringTo: 500),
+            on: descriptor
+        ) {}
+
+        XCTAssertEqual(Self.isBlocked(SIGTTOU), before, "the mask must be put back")
+    }
+
+    /// The restore is a `defer`, so a throw out of `body` must not leave the process with the
+    /// job-control signals blocked for the rest of its life.
+    func testHandOverRestoresTheSignalMaskWhenTheBodyThrows() throws {
+        struct Boom: Error {}
+        let descriptor = try nonTerminalDescriptor()
+        defer { close(descriptor) }
+        let before = Self.isBlocked(SIGTTOU)
+
+        XCTAssertThrowsError(
+            try TerminalForeground.withForeground(
+                givenTo: .handOver(childGroup: 700, restoringTo: 500),
+                on: descriptor
+            ) { throw Boom() }
+        )
+
+        XCTAssertEqual(Self.isBlocked(SIGTTOU), before, "a throw must still put the mask back")
+    }
+
+    // MARK: - Reclaiming the terminal mid-wait
+
+    /// What the wait calls when the editor is stopped by a Ctrl-Z. On a descriptor that is not
+    /// a terminal it can only fail, and it has to say so rather than stop the caller: with
+    /// SIGTTOU unblocked, this call from a process that is not the foreground group is exactly
+    /// what would stop us.
+    func testSettingTheForegroundGroupReportsFailureOnANonTerminal() throws {
+        let descriptor = try nonTerminalDescriptor()
+        defer { close(descriptor) }
+        let before = Self.isBlocked(SIGTTOU)
+
+        XCTAssertFalse(TerminalForeground.setForegroundGroup(500, on: descriptor))
+        XCTAssertEqual(Self.isBlocked(SIGTTOU), before, "the mask must be put back")
+    }
+
+    // MARK: - Helpers
+
+    /// A descriptor that is definitely not a terminal, so a hand-over takes its fallback path
+    /// without the suite ever touching the runner's own terminal.
+    private func nonTerminalDescriptor(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> Int32 {
+        let descriptor = open("/dev/null", O_RDONLY)
+        try XCTSkipIf(descriptor < 0, "cannot open /dev/null", file: file, line: line)
+        XCTAssertEqual(isatty(descriptor), 0, "the fixture must not be a terminal", file: file, line: line)
+        return descriptor
+    }
+
+    private static func isBlocked(_ signal: Int32) -> Bool {
+        var mask = sigset_t()
+        guard pthread_sigmask(SIG_BLOCK, nil, &mask) == 0 else { return false }
+        return sigismember(&mask, signal) == 1
+    }
 }
