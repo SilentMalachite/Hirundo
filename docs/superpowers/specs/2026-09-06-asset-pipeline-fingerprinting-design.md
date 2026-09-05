@@ -146,6 +146,12 @@ finalizationSteps:
 完成したマニフェストで出力ツリーの HTML を書き換える。これが `asset references` ステップに当たる。
 HTML は自身がフィンガープリントの対象ではないので、書き換え後に再ハッシュする必要はない。
 
+パス3は**アセットパイプライン自身が生成したファイル（マニフェストの値集合に含まれるパス）を
+書き換えない**。書き換えてしまうと、パス2で確定したハッシュがその中身を指さなくなり、欠陥2が
+別の形で再発する。具体的には、パス3ではマニフェストに全 CSS が載っているため、パス2で解決を
+見送った `@import url("other.css")` がここで解決してしまい、ハッシュ済みの CSS の中身が変わる。
+この一行のガードがそれを防ぐ。
+
 ハッシュ形式は現行のまま（SHA-256 の先頭 16 桁 hex）。出力名は `<name>-<hash>.<ext>`。
 `AssetProcessor.processAssetContent` は「処理して書き込む」API なので削除し、
 「処理結果を返すが書き込まない」API に置き換える。書き込みは `AssetPipeline` 側が行う。
@@ -244,7 +250,9 @@ HTML はフィンガープリントの対象ではないので、ここでの書
 - `AssetPipeline.concatenationRules` / `enableSourceMaps` の削除
 - `CSSProcessingOptions.sourceMap`、`JSProcessingOptions.sourceMap` / `transpile` / `target` の削除
 - `AssetFileManager.findFiles` の削除、`processDirectory` のシグネチャ変更
-- `AssetPipeline.processAssets` が返すマニフェストの値が、ファイル名から出力相対パスに変わる
+- `AssetPipeline.processAssets` の戻り値が `[String: String]` から `AssetManifest` に変わり、
+  値がファイル名から出力相対パスに変わる。`saveManifest` / `loadManifest` も同様
+- `AssetProcessor.processAssetContent`（処理して書き込む）を削除し、処理結果を返す API に置き換える
 
 `config.yaml` に対する破壊的変更は無い。`features.fingerprint` はデフォルト false で、既存の
 設定ファイルの意味は変わらない。
