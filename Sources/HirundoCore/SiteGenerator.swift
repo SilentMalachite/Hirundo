@@ -396,6 +396,10 @@ public class SiteGenerator {
 
         configureAssetPipeline()
 
+        // Cleared before the call, not just overwritten after: if `processAssets` throws below,
+        // this generator must not be left holding a previous build's manifest for a later
+        // finalization step (`asset references`) to read as if it described this build's output.
+        assetManifest = AssetManifest()
         let manifest = try assetPipeline.processAssets(
             from: staticURL.path,
             to: outputURL.path
