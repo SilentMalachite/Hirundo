@@ -8,8 +8,11 @@ public final class DevelopmentServer: @unchecked Sendable {
     private let liveReload: Bool
     private let server: HttpServer
     private let fileManager: FileManager
-    private var hotReloadManager: HotReloadManager?
     private let outputPath: String
+    private let injector = LiveReloadScriptInjector()
+
+    /// The hub the `/livereload` endpoint registers its clients with.
+    public let liveReloadHub: LiveReloadHub
 
     // Concurrency: lifecycle guard to make stop() idempotent and thread-safe
     private actor LifecycleState {
@@ -28,7 +31,8 @@ public final class DevelopmentServer: @unchecked Sendable {
         host: String,
         liveReload: Bool,
         fileManager: FileManager = .default,
-        outputDirectory: String = "_site"
+        outputDirectory: String = "_site",
+        hub: LiveReloadHub? = nil
     ) {
         self.fileManager = fileManager
         self.projectPath = projectPath
@@ -37,32 +41,44 @@ public final class DevelopmentServer: @unchecked Sendable {
         self.liveReload = liveReload
         self.server = HttpServer()
         self.outputPath = URL(fileURLWithPath: projectPath).appendingPathComponent(outputDirectory).path
-        
+        self.liveReloadHub = hub ?? LiveReloadHub()
+
         setupRoutes()
     }
-    
+
     public func start() async throws {
-        try server.start(UInt16(port), forceIPv4: false, priority: .default)
-        
-        print("Development server started at http://\(host):\(port)")
+        let listen = try resolveListenAddress(host: host)
+        if listen.forceIPv4 {
+            server.listenAddressIPv4 = listen.address
+        } else {
+            server.listenAddressIPv6 = listen.address
+        }
+        try server.start(UInt16(port), forceIPv4: listen.forceIPv4, priority: .default)
+        print("Development server started at http://\(listen.displayHost):\(port)")
     }
-    
+
     /// Gracefully stop the server and related resources (idempotent)
     public func stop() async {
         let shouldStop = await lifecycle.markStoppingIfNeeded()
         guard shouldStop else { return }
         server.stop()
-        if let hotReloadManager {
-            await hotReloadManager.stop()
-        }
     }
-    
+
     private func setupRoutes() {
         if liveReload {
-            // WebSocket endpoint for live reload
+            // WebSocket endpoint for live reload. `connected`/`disconnected` register and
+            // unregister the client with the hub so `broadcast` can reach every open tab.
             server["/livereload"] = websocket(
-                text: { [weak self] session, text in
-                    self?.handleWebSocketMessage(session, text: text)
+                text: { session, text in
+                    if text == "ping" { session.writeText("pong") }
+                },
+                connected: { [hub = liveReloadHub] session in
+                    let client = WebSocketLiveReloadClient(session)
+                    Task { await hub.add(client) }
+                },
+                disconnected: { [hub = liveReloadHub] session in
+                    let id = ObjectIdentifier(session)
+                    Task { await hub.remove(id: id) }
                 }
             )
         }
@@ -123,27 +139,30 @@ public final class DevelopmentServer: @unchecked Sendable {
             let data = try Data(contentsOf: URL(fileURLWithPath: filePath))
             let fileExtension = URL(fileURLWithPath: filePath).pathExtension
             let contentType = mimeType(for: fileExtension)
-            
+
+            // Inject the live-reload client script into HTML responses only. Injection failure
+            // (e.g. the file isn't valid UTF-8, which shouldn't happen for an .html file but
+            // isn't guaranteed) must never turn into a serving failure, so fall back to the
+            // original bytes unchanged.
+            var body = data
+            if liveReload, contentType.hasPrefix("text/html"), let html = String(data: data, encoding: .utf8),
+               let injected = injector.inject(into: html).data(using: .utf8) {
+                body = injected
+            }
+
             let headers = [
                 "Content-Type": contentType,
                 "Cache-Control": "no-cache, no-store, must-revalidate"
             ]
-            
+
             return .raw(200, "OK", headers) { writer in
-                try writer.write(data)
+                try writer.write(body)
             }
         } catch {
             return .internalServerError
         }
     }
-    
-    private func handleWebSocketMessage(_ session: WebSocketSession, text: String) {
-        // Simple ping/pong for keepalive
-        if text == "ping" {
-            session.writeText("pong")
-        }
-    }
-    
+
     private func mimeType(for fileExtension: String) -> String {
         switch fileExtension.lowercased() {
         case "html", "htm": return "text/html; charset=utf-8"
@@ -162,15 +181,21 @@ public final class DevelopmentServer: @unchecked Sendable {
         default: return "application/octet-stream"
         }
     }
-    
-    
-    
+
     deinit {
         // Ensure resources are released, idempotently
         server.stop()
-        Task { [lifecycle, hotReloadManager] in
-            _ = await lifecycle.markStoppingIfNeeded()
-            await hotReloadManager?.stop()
-        }
     }
+}
+
+/// Adapts Swifter's session to the hub's client protocol.
+///
+/// `id` is the *session's* identity, not the wrapper's: `connected` and `disconnected`
+/// hand back the same session but this wrapper is built twice, so keying on the wrapper
+/// would leave every disconnected client registered forever.
+final class WebSocketLiveReloadClient: LiveReloadClient, @unchecked Sendable {
+    private let session: WebSocketSession
+    init(_ session: WebSocketSession) { self.session = session }
+    var id: ObjectIdentifier { ObjectIdentifier(session) }
+    func send(_ text: String) { session.writeText(text) }
 }

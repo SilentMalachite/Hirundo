@@ -190,4 +190,181 @@ final class DevelopmentServerTests: XCTestCase {
         let (_, missingResponse) = try await URLSession.shared.data(from: missing)
         XCTAssertEqual((missingResponse as? HTTPURLResponse)?.statusCode, 404, "GET /nope.html")
     }
+
+    // MARK: - Live Reload Injection Tests
+
+    func testStaticFileRequest_whenLiveReloadEnabled_injectsScriptBeforeBodyClose() async throws {
+        let html = "<!DOCTYPE html><html><body><p>Hello</p></body></html>"
+        try html.write(
+            to: tempDir.appendingPathComponent("_site/inject.html"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let port = Int.random(in: 20000...30000)
+        let server = DevelopmentServer(
+            projectPath: tempDir.path,
+            port: port,
+            host: "localhost",
+            liveReload: true
+        )
+        try await server.start()
+
+        let url = URL(string: "http://127.0.0.1:\(port)/inject.html")!
+        let (data, response) = try await URLSession.shared.data(from: url)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+
+        let body = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertTrue(body.contains("/livereload"))
+        XCTAssertTrue(body.contains("location.reload()"))
+        let scriptRange = try XCTUnwrap(body.range(of: "/livereload"))
+        let bodyCloseRange = try XCTUnwrap(body.range(of: "</body>"))
+        XCTAssertLessThan(scriptRange.lowerBound, bodyCloseRange.lowerBound)
+
+        await server.stop()
+    }
+
+    func testStaticFileRequest_whenLiveReloadDisabled_doesNotInjectScript() async throws {
+        let html = "<!DOCTYPE html><html><body><p>Hello</p></body></html>"
+        try html.write(
+            to: tempDir.appendingPathComponent("_site/noinject.html"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let port = Int.random(in: 20000...30000)
+        let server = DevelopmentServer(
+            projectPath: tempDir.path,
+            port: port,
+            host: "localhost",
+            liveReload: false
+        )
+        try await server.start()
+
+        let url = URL(string: "http://127.0.0.1:\(port)/noinject.html")!
+        let (data, response) = try await URLSession.shared.data(from: url)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(String(data: data, encoding: .utf8), html)
+
+        await server.stop()
+    }
+
+    func testStaticFileRequest_whenLiveReloadEnabledAndCSSRequested_doesNotInjectScript() async throws {
+        let css = "body {}"
+        try css.write(
+            to: tempDir.appendingPathComponent("_site/style.css"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let port = Int.random(in: 20000...30000)
+        let server = DevelopmentServer(
+            projectPath: tempDir.path,
+            port: port,
+            host: "localhost",
+            liveReload: true
+        )
+        try await server.start()
+
+        let url = URL(string: "http://127.0.0.1:\(port)/style.css")!
+        let (data, response) = try await URLSession.shared.data(from: url)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(String(data: data, encoding: .utf8), css)
+
+        await server.stop()
+    }
+
+    func testStaticFileRequest_whenLiveReloadEnabledAndBinaryFileRequested_servesBytesUnchanged() async throws {
+        let bytes = Data([0x89, 0x50, 0x4E, 0x47, 0xFF, 0xFE])
+        try bytes.write(to: tempDir.appendingPathComponent("_site/image.png"))
+
+        let port = Int.random(in: 20000...30000)
+        let server = DevelopmentServer(
+            projectPath: tempDir.path,
+            port: port,
+            host: "localhost",
+            liveReload: true
+        )
+        try await server.start()
+
+        let url = URL(string: "http://127.0.0.1:\(port)/image.png")!
+        let (data, response) = try await URLSession.shared.data(from: url)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(data, bytes)
+
+        await server.stop()
+    }
+
+    // MARK: - Bind Address Tests
+
+    func testStart_whenHostIsIPv4Literal_servesOverThatAddress() async throws {
+        let port = Int.random(in: 20000...30000)
+        let server = DevelopmentServer(
+            projectPath: tempDir.path,
+            port: port,
+            host: "127.0.0.1",
+            liveReload: false
+        )
+        try await server.start()
+
+        let url = URL(string: "http://127.0.0.1:\(port)/")!
+        let (_, response) = try await URLSession.shared.data(from: url)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+
+        await server.stop()
+    }
+
+    func testStart_whenHostIsIPv6Loopback_servesOverThatAddress() async throws {
+        let port = Int.random(in: 20000...30000)
+        let server = DevelopmentServer(
+            projectPath: tempDir.path,
+            port: port,
+            host: "::1",
+            liveReload: false
+        )
+
+        do {
+            try await server.start()
+        } catch {
+            throw XCTSkip("IPv6 loopback is not available on this machine: \(error)")
+        }
+
+        let url = URL(string: "http://[::1]:\(port)/")!
+        let (_, response) = try await URLSession.shared.data(from: url)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+
+        await server.stop()
+    }
+
+    func testStart_whenHostIsNotNumeric_throwsListenAddressError() async throws {
+        let port = Int.random(in: 20000...30000)
+        let server = DevelopmentServer(
+            projectPath: tempDir.path,
+            port: port,
+            host: "example.com",
+            liveReload: false
+        )
+
+        do {
+            try await server.start()
+            XCTFail("Expected start() to throw for a non-numeric host")
+        } catch let error as ListenAddressError {
+            XCTAssertEqual(error, .notNumeric("example.com"))
+        }
+    }
+
+    // MARK: - Hub Wiring Tests
+
+    func testInit_whenHubProvided_usesProvidedHubInstance() {
+        let hub = LiveReloadHub()
+        let server = DevelopmentServer(
+            projectPath: tempDir.path,
+            port: 8080,
+            host: "localhost",
+            liveReload: true,
+            hub: hub
+        )
+
+        XCTAssertTrue(server.liveReloadHub === hub)
+    }
 }
