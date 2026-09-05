@@ -2,8 +2,14 @@ import Foundation
 
 /// セキュリティとパフォーマンス制限設定
 public struct Limits: Codable, Sendable {
+    /// 設定ファイル自身のサイズ上限。
+    ///
+    /// これから読もうとしているファイルの中から読むことはできないため、`limits` のキーでは
+    /// なく定数として持つ（かつては `limits.maxConfigFileSize` として受け付けていたが、
+    /// どこからも読まれていなかった）。
+    public static let maxConfigFileSize = 1_048_576
+
     public let maxMarkdownFileSize: Int
-    public let maxConfigFileSize: Int
     public let maxFrontMatterSize: Int
     public let maxFilenameLength: Int
     public let maxTitleLength: Int
@@ -15,7 +21,6 @@ public struct Limits: Codable, Sendable {
     
     public init(
         maxMarkdownFileSize: Int = 10_485_760, // 10MB
-        maxConfigFileSize: Int = 1_048_576, // 1MB
         maxFrontMatterSize: Int = 100_000, // 100KB
         maxFilenameLength: Int = 255,
         maxTitleLength: Int = 200,
@@ -23,10 +28,10 @@ public struct Limits: Codable, Sendable {
         maxUrlLength: Int = 2000,
         maxAuthorNameLength: Int = 100,
         maxEmailLength: Int = 254,
-        maxLanguageCodeLength: Int = 10
+        // 35 is the longest well-formed BCP 47 tag in practice; 10 cut off `nan-Hant-TW`.
+        maxLanguageCodeLength: Int = 35
     ) {
         self.maxMarkdownFileSize = maxMarkdownFileSize
-        self.maxConfigFileSize = maxConfigFileSize
         self.maxFrontMatterSize = maxFrontMatterSize
         self.maxFilenameLength = maxFilenameLength
         self.maxTitleLength = maxTitleLength
@@ -38,7 +43,7 @@ public struct Limits: Codable, Sendable {
     }
     
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case maxMarkdownFileSize, maxConfigFileSize, maxFrontMatterSize, maxFilenameLength
+        case maxMarkdownFileSize, maxFrontMatterSize, maxFilenameLength
         case maxTitleLength, maxDescriptionLength, maxUrlLength, maxAuthorNameLength
         case maxEmailLength, maxLanguageCodeLength
     }
@@ -62,7 +67,6 @@ public struct Limits: Codable, Sendable {
             return try ConfigValidation.validatePositiveInt(decoded, fieldName: key.stringValue)
         }
         self.maxMarkdownFileSize = try limit(.maxMarkdownFileSize, or: defaults.maxMarkdownFileSize)
-        self.maxConfigFileSize = try limit(.maxConfigFileSize, or: defaults.maxConfigFileSize)
         self.maxFrontMatterSize = try limit(.maxFrontMatterSize, or: defaults.maxFrontMatterSize)
         self.maxFilenameLength = try limit(.maxFilenameLength, or: defaults.maxFilenameLength)
         self.maxTitleLength = try limit(.maxTitleLength, or: defaults.maxTitleLength)
@@ -71,5 +75,22 @@ public struct Limits: Codable, Sendable {
         self.maxAuthorNameLength = try limit(.maxAuthorNameLength, or: defaults.maxAuthorNameLength)
         self.maxEmailLength = try limit(.maxEmailLength, or: defaults.maxEmailLength)
         self.maxLanguageCodeLength = try limit(.maxLanguageCodeLength, or: defaults.maxLanguageCodeLength)
+    }
+}
+
+extension CodingUserInfoKey {
+    /// Carries the already-decoded `limits` block down to the models that enforce it.
+    ///
+    /// `site` and `author` are validated against the configured lengths, but a decoder has no
+    /// way to look sideways at another key of the document it is decoding. `HirundoConfig.parse`
+    /// therefore decodes `limits` first and passes the result in through `userInfo`.
+    static let hirundoLimits = CodingUserInfoKey(rawValue: "com.hirundo.limits")!
+}
+
+extension Decoder {
+    /// The configured limits, or the defaults when decoding something other than a whole
+    /// `HirundoConfig` (a bare `Site`, say).
+    var hirundoLimits: Limits {
+        return userInfo[.hirundoLimits] as? Limits ?? Limits()
     }
 }

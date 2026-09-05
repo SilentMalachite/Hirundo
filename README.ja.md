@@ -394,7 +394,6 @@ features:
 # セキュリティとパフォーマンスの制限。各キーは省略可能で、以下の値はいずれも省略時のデフォルトです。
 limits:
   maxMarkdownFileSize: 10485760      # 10MB
-  maxConfigFileSize: 1048576         # 1MB
   maxFrontMatterSize: 100000         # 100KB
   maxFilenameLength: 255
   maxTitleLength: 200
@@ -402,7 +401,7 @@ limits:
   maxUrlLength: 2000
   maxAuthorNameLength: 100
   maxEmailLength: 254
-  maxLanguageCodeLength: 10
+  maxLanguageCodeLength: 35
 ```
 
 最小限の設定は、必須の2項目だけです。
@@ -569,12 +568,13 @@ Hirundoには4つの組み込み機能があり、`features` ブロックで切�
   る相手はサイトを閲覧でき、IPアドレスでサイトを開けばライブリロードにも接続できます。開発
   サーバーを信頼できないネットワークに公開しないでください。
 - **アセットのフィンガープリント、ソースマップ、JS/CSSの結合**。
-  `build.enableAssetFingerprinting`、`enableSourceMaps`、`concatenateJS`、`concatenateCSS` は
-  設定パーサーに受け付けられますが、どこでも使用されていません。
-- **`limits` の10キーのうち6キー**。`maxConfigFileSize`、`maxDescriptionLength`、
-  `maxUrlLength`、`maxAuthorNameLength`、`maxEmailLength`、`maxLanguageCodeLength` は
-  パースも検証もされますが、どこからも読まれていません。効果があるのは
-  `maxMarkdownFileSize`、`maxFrontMatterSize`、`maxFilenameLength`、`maxTitleLength` の4つだけです。
+  `build.enableAssetFingerprinting` / `enableSourceMaps` / `concatenateJS` / `concatenateCSS`
+  というキーはもう存在しません。以前のバージョンはこれらをパースしていましたが、どれも
+  何もしていなかったため削除しました。フィンガープリントと結合は `AssetPipeline` の
+  ライブラリレベルの機能としては残っていますが、生成されたHTMLの `href` / `src` を
+  書き換える処理がどこにも無いため、有効にすると存在しないファイルを指すサイトができます。
+  ソースマップはどの経路でも生成されません。`config.yaml` から届くアセット関連の設定は
+  `features.minify` だけです。
 - **フロントマターの `layout:`**。`template:` を使用してください。
 
 `config.yaml` にこの一覧のキーを書いている場合、`hirundo validate` がすべて報告します。

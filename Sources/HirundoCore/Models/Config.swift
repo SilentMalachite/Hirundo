@@ -77,12 +77,24 @@ public struct HirundoConfig: Codable, Sendable {
         self.limits = try container.decodeIfPresent(Limits.self, forKey: .limits) ?? Limits()
     }
     
+    /// Only `limits`, so that it can be read before the blocks whose validation depends on it.
+    private struct LimitsOnly: Decodable {
+        let limits: Limits?
+    }
+    
     public static func parse(from yaml: String) throws -> HirundoConfig {
         do {
             let decoder = YAMLDecoder()
+            // Two passes: `site` and `author` are validated against the configured lengths, and
+            // a decoder cannot look sideways at another key of the document it is decoding.
+            let limits = try decoder.decode(LimitsOnly.self, from: yaml).limits ?? Limits()
             // `Site.init(from:)` routes through the validating initializer, so an empty or
             // malformed URL has already been rejected by the time this returns.
-            return try decoder.decode(HirundoConfig.self, from: yaml)
+            return try decoder.decode(
+                HirundoConfig.self,
+                from: yaml,
+                userInfo: [.hirundoLimits: limits]
+            )
         } catch let error as ConfigError {
             throw error
         } catch let error as DecodingError {
@@ -129,10 +141,49 @@ public struct HirundoConfig: Codable, Sendable {
             if let configError = context.underlyingError as? ConfigError {
                 return configError
             }
+            // Anything else — a duplicate key, a tab where spaces belong — comes back as the
+            // same "The given data was not valid YAML." sentence. The YAML parser's own error
+            // carries the line and column; `localizedDescription` would throw them away.
+            if let underlying = context.underlyingError {
+                let prefix = context.codingPath.isEmpty ? "" : "\(path(context.codingPath)): "
+                // A duplicate-key error quotes the whole document back as its context, which
+                // for a large configuration means a megabyte on stderr and in CI logs. The
+                // useful part — which key, which line — comes first.
+                var detail = String(describing: underlying)
+                if detail.count > 500 {
+                    detail = detail.prefix(500) + "… (truncated)"
+                }
+                return .parseError(prefix + detail)
+            }
             return .parseError("\(path(context.codingPath)): \(context.debugDescription)")
         @unknown default:
             return .parseError(error.localizedDescription)
         }
+    }
+    
+    /// Reads a configuration file, refusing one large enough to be a mistake.
+    ///
+    /// The cap is `Limits.maxConfigFileSize`, a constant rather than a `limits` key: a file's
+    /// own size limit cannot be read out of that same file.
+    static func readConfigFile(at url: URL) throws -> String {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw ConfigError.fileNotFound(url.path)
+        }
+        // Reading one byte past the cap, rather than asking for the file's size, is what makes
+        // this hold: `attributesOfItem` reports the size of a symlink and not of its target, and
+        // a file can grow between being measured and being read.
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: Limits.maxConfigFileSize + 1) ?? Data()
+        guard data.count <= Limits.maxConfigFileSize else {
+            throw ConfigError.invalidValue(
+                "Configuration file is larger than \(Limits.maxConfigFileSize) bytes"
+            )
+        }
+        guard let yaml = String(data: data, encoding: .utf8) else {
+            throw ConfigError.parseError("Configuration file is not valid UTF-8")
+        }
+        return yaml
     }
     
     public static func load(from url: URL) throws -> HirundoConfig {
@@ -141,8 +192,7 @@ public struct HirundoConfig: Codable, Sendable {
         }
         
         do {
-            let yaml = try String(contentsOf: url, encoding: .utf8)
-            return try parse(from: yaml)
+            return try parse(from: try readConfigFile(at: url))
         } catch let error as ConfigError {
             // `parse` already produced a configuration error with a usable message; wrapping it
             // again only prefixed the text a second time.

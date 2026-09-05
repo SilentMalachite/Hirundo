@@ -151,6 +151,26 @@ final class ConfigParseTests: XCTestCase {
         }
     }
 
+    func testADuplicateKeyIsReportedWithSomethingMoreThanNotValidYAML() {
+        // Duplicating a block is an easy mistake to make by pasting. "The given data was not
+        // valid YAML." names neither the key nor the line, which is no help at all.
+        let yaml = """
+        site:
+          title: "First"
+          url: "https://example.com"
+        site:
+          title: "Second"
+          url: "https://example.com"
+        """
+        XCTAssertThrowsError(try HirundoConfig.parse(from: yaml)) { error in
+            let message = error.localizedDescription
+            XCTAssertFalse(
+                message.contains("The given data was not valid YAML"),
+                "Got: \(message)"
+            )
+        }
+    }
+
     // MARK: - Validation on the decode path
     //
     // `Site` and `Author` were the only config models without an `init(from:)`, so the
@@ -273,6 +293,132 @@ final class ConfigParseTests: XCTestCase {
                 error.localizedDescription.contains("maxTitleLength"),
                 "Got: \(error.localizedDescription)"
             )
+        }
+    }
+
+    // MARK: - `limits` actually limiting things
+
+    func testSiteTitleLengthUsesTheConfiguredLimit() {
+        let yaml = """
+        site:
+          title: "A title of twenty-nine chars"
+          url: "https://example.com"
+        limits:
+          maxTitleLength: 5
+        """
+        XCTAssertThrowsError(try HirundoConfig.parse(from: yaml)) { error in
+            XCTAssertTrue(
+                error.localizedDescription.contains("cannot exceed 5"),
+                "Got: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    func testARaisedTitleLimitIsHonoured() throws {
+        let title = String(repeating: "a", count: 300)
+        let yaml = """
+        site:
+          title: "\(title)"
+          url: "https://example.com"
+        limits:
+          maxTitleLength: 400
+        """
+        let config = try HirundoConfig.parse(from: yaml)
+        XCTAssertEqual(config.site.title, title)
+    }
+
+    func testAuthorEmailLengthUsesTheConfiguredLimit() {
+        let yaml = """
+        site:
+          title: "My Site"
+          url: "https://example.com"
+          author:
+            name: "Someone"
+            email: "someone@example.com"
+        limits:
+          maxEmailLength: 5
+        """
+        XCTAssertThrowsError(try HirundoConfig.parse(from: yaml)) { error in
+            XCTAssertTrue(
+                error.localizedDescription.contains("cannot exceed 5"),
+                "Got: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    func testALongButWellFormedLanguageTagIsAcceptedByDefault() throws {
+        let yaml = """
+        site:
+          title: "My Site"
+          url: "https://example.com"
+          language: "nan-Hant-TW"
+        """
+        let config = try HirundoConfig.parse(from: yaml)
+        XCTAssertEqual(config.site.language, "nan-Hant-TW")
+    }
+
+    func testLoadRejectsAConfigFileLargerThanTheBuiltInCap() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hirundo-huge-config-\(UUID().uuidString).yaml")
+        // The cap cannot come from the file being read, so it is a constant.
+        let padding = String(repeating: "# padding\n", count: (Limits.maxConfigFileSize / 10) + 1)
+        try (padding + "site:\n  title: \"T\"\n  url: \"https://example.com\"\n")
+            .write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        XCTAssertThrowsError(try HirundoConfig.load(from: url)) { error in
+            XCTAssertTrue(
+                error.localizedDescription.contains("larger than"),
+                "Got: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    func testTheConfigSizeCapIsNotBypassedByASymlink() throws {
+        // A `config.yaml` symlinked into a dotfiles repository is an ordinary setup, and
+        // `attributesOfItem` reports the size of the link, not of its target.
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hirundo-symlinked-config-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let target = directory.appendingPathComponent("huge.yaml")
+        let padding = String(repeating: "# padding\n", count: (Limits.maxConfigFileSize / 10) + 1)
+        try (padding + "site:\n  title: \"T\"\n  url: \"https://example.com\"\n")
+            .write(to: target, atomically: true, encoding: .utf8)
+        let link = directory.appendingPathComponent("config.yaml")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+
+        XCTAssertThrowsError(try HirundoConfig.load(from: link)) { error in
+            XCTAssertTrue(
+                error.localizedDescription.contains("larger than"),
+                "Got: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    func testAYAMLErrorMessageStaysBounded() throws {
+        // Yams' duplicate-key error quotes the whole document back. Reproducing all of it would
+        // put up to a megabyte on stderr and into CI logs.
+        let filler = String(repeating: "# padding padding padding padding\n", count: 2_000)
+        let yaml = """
+        \(filler)
+        site:
+          title: "First"
+          url: "https://example.com"
+        site:
+          title: "Second"
+          url: "https://example.com"
+        """
+        XCTAssertGreaterThan(yaml.count, 60_000)
+
+        XCTAssertThrowsError(try HirundoConfig.parse(from: yaml)) { error in
+            XCTAssertLessThan(
+                error.localizedDescription.count,
+                1_000,
+                "Message was \(error.localizedDescription.count) characters"
+            )
+            XCTAssertTrue(error.localizedDescription.contains("site"), "Lost the duplicated key")
         }
     }
 }

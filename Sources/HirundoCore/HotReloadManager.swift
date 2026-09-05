@@ -328,6 +328,10 @@ public final class HotReloadManager: @unchecked Sendable {
     private func shouldIgnore(path: String) -> Bool {
         let fileName = URL(fileURLWithPath: path).lastPathComponent
         
+        if Self.isAtomicWriteTemporaryFile(fileName) {
+            return true
+        }
+        
         for pattern in ignorePatterns {
             if matchesPattern(fileName, pattern: pattern) {
                 return true
@@ -335,6 +339,28 @@ public final class HotReloadManager: @unchecked Sendable {
         }
         
         return false
+    }
+    
+    /// `index.md.sb-56e0572d-GAYA6W` — the scratch file Foundation writes beside the target
+    /// during an atomic save, then renames away.
+    ///
+    /// Every Cocoa editor saves this way, and so does `String.write(to:atomically: true)`, so a
+    /// single save reports two paths: this one and the real file. Without this check the extra
+    /// path reaches the callback as a change to a file that no longer exists, doubling the
+    /// reported change count and defeating the user's own ignore patterns — `*.tmp` does not
+    /// match `notes.tmp.sb-…`, so a pattern meant to silence a file would not silence its save.
+    static func isAtomicWriteTemporaryFile(_ fileName: String) -> Bool {
+        guard let range = fileName.range(of: ".sb-", options: .backwards) else { return false }
+        let suffix = fileName[range.upperBound...]
+        // `<8 hex digits>-<random alphanumerics>`. The hex half is a machine identifier and has
+        // been eight digits wherever this was checked; requiring that length keeps an ordinary
+        // name like `report.sb-abc-def` from being mistaken for a scratch file.
+        let parts = suffix.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 2, parts[0].count == 8, parts[1].count >= 4 else { return false }
+        // ASCII only: `isHexDigit` and `isNumber` accept fullwidth digits and every other
+        // script, and a real content file must never be mistaken for a scratch file.
+        return parts[0].allSatisfy { $0.isASCII && $0.isHexDigit }
+            && parts[1].allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
     
     private func matchesPattern(_ string: String, pattern: String) -> Bool {

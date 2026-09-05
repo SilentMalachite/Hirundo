@@ -79,12 +79,15 @@ Processes static assets with security focus:
 - File type validation
 - Content fingerprinting and concatenation
 
-Fingerprinting, source maps, and concatenation are library-level options on
-`AssetPipeline`/`AssetConcatenator`. The matching `build:` keys
-(`enableAssetFingerprinting`, `enableSourceMaps`, `concatenateJS`,
-`concatenateCSS`) are decoded by `Models/Build.swift` but nothing outside the
-model reads them yet, so they cannot be turned on from `config.yaml`. The only
-asset option wired to configuration is `features.minify`.
+Fingerprinting and concatenation are library-level options on
+`AssetPipeline`/`AssetConcatenator`, not reachable from `config.yaml`: the
+matching `build:` keys were removed because nothing outside `Models/Build.swift`
+ever read them. Neither option is usable as it stands — nothing rewrites the
+`href`/`src` references in generated HTML, so a fingerprinted or bundled asset
+is one no page loads. `AssetPipeline.enableSourceMaps` and the `sourceMap`
+options are dead storage; no source map is produced anywhere. The only asset
+option wired to configuration is `features.minify`, which covers CSS and JS
+assets and not HTML.
 
 **Security Measures:**
 - Path traversal prevention

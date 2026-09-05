@@ -14,16 +14,17 @@ public struct Site: Codable, Sendable {
         description: String? = nil,
         url: String,
         language: String? = "en-US",
-        author: Author? = nil
+        author: Author? = nil,
+        limits: Limits = Limits()
     ) throws {
         // タイトルの検証（簡素化）
-        self.title = try ConfigValidation.validateNonEmptyAndLength(title, maxLength: 200, fieldName: "Site title")
+        self.title = try ConfigValidation.validateNonEmptyAndLength(title, maxLength: limits.maxTitleLength, fieldName: "Site title")
         
         // 説明の検証（簡素化）
-        self.description = try ConfigValidation.validateOptionalLength(description, maxLength: 500, fieldName: "Site description")
+        self.description = try ConfigValidation.validateOptionalLength(description, maxLength: limits.maxDescriptionLength, fieldName: "Site description")
         
         // URLの検証（簡素化）
-        let trimmedUrl = try ConfigValidation.validateNonEmptyAndLength(url, maxLength: 2000, fieldName: "Site URL")
+        let trimmedUrl = try ConfigValidation.validateNonEmptyAndLength(url, maxLength: limits.maxUrlLength, fieldName: "Site URL")
         guard ConfigValidation.isValidURL(trimmedUrl) else {
             throw ConfigError.invalidValue("Invalid URL format: \(trimmedUrl)")
         }
@@ -31,9 +32,7 @@ public struct Site: Codable, Sendable {
         
         // 言語コードの検証（簡素化）
         if let language = language {
-            // 35 is the longest well-formed BCP 47 language tag in practice; 10 cut off tags
-            // such as `nan-Hant-TW`.
-            let trimmedLanguage = try ConfigValidation.validateLength(language, maxLength: 35, fieldName: "Language code")
+            let trimmedLanguage = try ConfigValidation.validateLength(language, maxLength: limits.maxLanguageCodeLength, fieldName: "Language code")
             guard ConfigValidation.isValidLanguageCode(trimmedLanguage) else {
                 throw ConfigError.invalidValue("Invalid language code format: \(trimmedLanguage)")
             }
@@ -63,7 +62,8 @@ public struct Site: Codable, Sendable {
             description: container.decodeIfPresent(String.self, forKey: .description),
             url: container.decode(String.self, forKey: .url),
             language: container.decodeIfPresent(String.self, forKey: .language),
-            author: container.decodeIfPresent(Author.self, forKey: .author)
+            author: container.decodeIfPresent(Author.self, forKey: .author),
+            limits: decoder.hirundoLimits
         )
     }
 }

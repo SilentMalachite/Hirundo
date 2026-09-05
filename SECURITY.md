@@ -68,11 +68,13 @@ site, and can reach live reload as well by addressing the server by IP.
 
 ### Recommended Settings
 
+The configuration file's own size cap is not a `limits` key — a file cannot declare its own
+limit — but a fixed 1 MB ceiling enforced when `config.yaml` is read.
+
 ```yaml
 # Basic limits for content files
 limits:
   maxMarkdownFileSize: 1048576      # 1MB
-  maxConfigFileSize: 102400         # 100KB
   maxFrontMatterSize: 10240         # 10KB
   maxFilenameLength: 200            # Reasonable limit
   maxTitleLength: 100               # SEO-friendly limit

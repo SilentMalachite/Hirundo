@@ -33,21 +33,6 @@ public enum ConfigDiagnostics {
         HirundoConfig.CodingKeys.limits.rawValue: keys(of: Limits.CodingKeys.self)
     ]
 
-    /// Keys the decoder accepts but nothing ever reads. They are in `CodingKeys`, so the scan
-    /// above counts them as recognized — yet writing one still does nothing, which is exactly
-    /// the kind of silence this type exists to break.
-    private static let acceptedButUnusedKeysByBlock: [String: Set<String>] = [
-        HirundoConfig.CodingKeys.build.rawValue: [
-            "enableAssetFingerprinting", "enableSourceMaps", "concatenateJS", "concatenateCSS"
-        ],
-        // The four limits not listed here — maxMarkdownFileSize, maxFrontMatterSize,
-        // maxFilenameLength, maxTitleLength — are the only ones anything reads.
-        HirundoConfig.CodingKeys.limits.rawValue: [
-            "maxConfigFileSize", "maxDescriptionLength", "maxUrlLength",
-            "maxAuthorNameLength", "maxEmailLength", "maxLanguageCodeLength"
-        ]
-    ]
-
     private static func keys<K: CodingKey & CaseIterable>(of _: K.Type) -> Set<String> {
         return Set(K.allCases.map { $0.stringValue })
     }
@@ -100,7 +85,9 @@ public enum ConfigDiagnostics {
         }
         let yaml: String
         do {
-            yaml = try String(contentsOf: url, encoding: .utf8)
+            yaml = try HirundoConfig.readConfigFile(at: url)
+        } catch let error as ConfigError {
+            throw error
         } catch {
             // Matches `HirundoConfig.load`, so a read failure is still a configuration error and
             // gets the same framing from the CLI.
@@ -138,19 +125,15 @@ public enum ConfigDiagnostics {
                 continue
             }
             let presentChildren = Set(block.keys)
-            for child in block.keys.sorted() {
-                if !recognizedChildren.contains(child) {
-                    warnings.append(
-                        "Unknown key '\(key).\(child)' — it is ignored."
-                            + suggestion(
-                                for: child,
-                                among: recognizedChildren,
-                                alreadyUsed: presentChildren
-                            )
-                    )
-                } else if acceptedButUnusedKeysByBlock[key]?.contains(child) == true {
-                    warnings.append("'\(key).\(child)' is accepted but nothing acts on it.")
-                }
+            for child in block.keys.sorted() where !recognizedChildren.contains(child) {
+                warnings.append(
+                    "Unknown key '\(key).\(child)' — it is ignored."
+                        + suggestion(
+                            for: child,
+                            among: recognizedChildren,
+                            alreadyUsed: presentChildren
+                        )
+                )
             }
         }
 

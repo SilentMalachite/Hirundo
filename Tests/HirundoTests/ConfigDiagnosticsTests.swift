@@ -36,10 +36,9 @@ final class ConfigDiagnosticsTests: XCTestCase {
         XCTAssertTrue(report.warnings.contains { $0.contains("features.sitemp") }, "Got: \(report.warnings)")
     }
 
-    func testAKeyThatDecodesButIsNeverActedOnIsReported() throws {
-        // `build.enableAssetFingerprinting` and friends decode into `Build` and are then read by
-        // nothing. Being in `CodingKeys` made them look recognized, so they were the one class
-        // of dead key the scan stayed quiet about.
+    func testARemovedAssetKeyIsReportedAsUnknown() throws {
+        // `build.enableAssetFingerprinting` and friends used to decode into `Build` and be read
+        // by nothing. They were removed, so a config still carrying one now hears about it.
         let yaml = """
         site:
           title: "My Site"
@@ -92,41 +91,24 @@ final class ConfigDiagnosticsTests: XCTestCase {
         XCTAssertFalse(report.warnings[0].contains("Did you mean"), "Got: \(report.warnings[0])")
     }
 
-    func testALimitThatNothingReadsIsReported() throws {
-        let yaml = """
-        site:
-          title: "My Site"
-          url: "https://example.com"
 
-        limits:
-          maxUrlLength: 100
-        """
-
-        let report = try ConfigDiagnostics.inspect(yaml: yaml)
-
-        XCTAssertEqual(report.warnings.count, 1, "Got: \(report.warnings)")
-        XCTAssertTrue(
-            report.warnings.contains { $0.contains("limits.maxUrlLength") },
-            "Got: \(report.warnings)"
-        )
-    }
-
-    func testASuggestionIsStableWhenTwoKeysAreEquallyClose() throws {
-        // `concatenateCS` is one edit from both `concatenateCSS` and `concatenateJS`. Picking
-        // from an unordered Set made the message vary between runs of the same command.
+    func testTheSameConfigAlwaysProducesTheSameSuggestion() throws {
+        // Candidates come from a `Set`, whose iteration order varies per process. Picking the
+        // closest match without a tie-break made the same command print different advice on
+        // different runs; the comparator now orders by (distance, name).
         let yaml = """
         site:
           title: "My Site"
           url: "https://example.com"
 
         build:
-          concatenateCS: true
+          contentDirectori: "content"
         """
 
         for _ in 0..<5 {
             let report = try ConfigDiagnostics.inspect(yaml: yaml)
             XCTAssertTrue(
-                report.warnings.contains { $0.contains("Did you mean 'concatenateCSS'?") },
+                report.warnings.contains { $0.contains("Did you mean 'contentDirectory'?") },
                 "Got: \(report.warnings)"
             )
         }

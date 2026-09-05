@@ -7,20 +7,12 @@ public struct Build: Codable, Sendable {
     public let outputDirectory: String
     public let staticDirectory: String
     public let templatesDirectory: String
-    public let enableAssetFingerprinting: Bool?
-    public let enableSourceMaps: Bool?
-    public let concatenateJS: Bool?
-    public let concatenateCSS: Bool?
     
     public init(
         contentDirectory: String = "content",
         outputDirectory: String = "_site",
         staticDirectory: String = "static",
-        templatesDirectory: String = "templates",
-        enableAssetFingerprinting: Bool? = nil,
-        enableSourceMaps: Bool? = nil,
-        concatenateJS: Bool? = nil,
-        concatenateCSS: Bool? = nil
+        templatesDirectory: String = "templates"
     ) throws {
         // ディレクトリパスの検証（簡素化）
         try Self.validateDirectory(contentDirectory, name: "contentDirectory")
@@ -44,52 +36,13 @@ public struct Build: Codable, Sendable {
         self.outputDirectory = outputDirectory
         self.staticDirectory = staticDirectory
         self.templatesDirectory = templatesDirectory
-        self.enableAssetFingerprinting = enableAssetFingerprinting
-        self.enableSourceMaps = enableSourceMaps
-        self.concatenateJS = concatenateJS
-        self.concatenateCSS = concatenateCSS
     }
     
     /// デフォルトのビルド設定を作成
     public static func defaultBuild() -> Build {
-        do {
-            return try Build()
-        } catch {
-            // エラーが発生した場合は安全なデフォルト値を使用
-            return Build(
-                contentDirectory: "content",
-                outputDirectory: "_site",
-                staticDirectory: "static",
-                templatesDirectory: "templates",
-                enableAssetFingerprinting: nil,
-                enableSourceMaps: nil,
-                concatenateJS: nil,
-                concatenateCSS: nil,
-                skipValidation: true
-            )
-        }
-    }
-    
-    /// 内部イニシャライザ（検証スキップ）
-    private init(
-        contentDirectory: String,
-        outputDirectory: String,
-        staticDirectory: String,
-        templatesDirectory: String,
-        enableAssetFingerprinting: Bool?,
-        enableSourceMaps: Bool?,
-        concatenateJS: Bool?,
-        concatenateCSS: Bool?,
-        skipValidation: Bool
-    ) {
-        self.contentDirectory = contentDirectory
-        self.outputDirectory = outputDirectory
-        self.staticDirectory = staticDirectory
-        self.templatesDirectory = templatesDirectory
-        self.enableAssetFingerprinting = enableAssetFingerprinting
-        self.enableSourceMaps = enableSourceMaps
-        self.concatenateJS = concatenateJS
-        self.concatenateCSS = concatenateCSS
+        // The four directory names below are distinct and relative, which is everything the
+        // initializer validates, so this cannot actually throw.
+        return try! Build()
     }
     
     public init(from decoder: Decoder) throws {
@@ -99,26 +52,17 @@ public struct Build: Codable, Sendable {
         let outputDirectory = try container.decodeIfPresent(String.self, forKey: .outputDirectory) ?? "_site"
         let staticDirectory = try container.decodeIfPresent(String.self, forKey: .staticDirectory) ?? "static"
         let templatesDirectory = try container.decodeIfPresent(String.self, forKey: .templatesDirectory) ?? "templates"
-        let enableAssetFingerprinting = try container.decodeIfPresent(Bool.self, forKey: .enableAssetFingerprinting)
-        let enableSourceMaps = try container.decodeIfPresent(Bool.self, forKey: .enableSourceMaps)
-        let concatenateJS = try container.decodeIfPresent(Bool.self, forKey: .concatenateJS)
-        let concatenateCSS = try container.decodeIfPresent(Bool.self, forKey: .concatenateCSS)
         
         try self.init(
             contentDirectory: contentDirectory,
             outputDirectory: outputDirectory,
             staticDirectory: staticDirectory,
-            templatesDirectory: templatesDirectory,
-            enableAssetFingerprinting: enableAssetFingerprinting,
-            enableSourceMaps: enableSourceMaps,
-            concatenateJS: concatenateJS,
-            concatenateCSS: concatenateCSS
+            templatesDirectory: templatesDirectory
         )
     }
     
     enum CodingKeys: String, CodingKey, CaseIterable {
         case contentDirectory, outputDirectory, staticDirectory, templatesDirectory
-        case enableAssetFingerprinting, enableSourceMaps, concatenateJS, concatenateCSS
     }
     
     /// ディレクトリパスの検証（簡素化）

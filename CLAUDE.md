@@ -154,8 +154,10 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 
 `hirundo init` が生成する `config.yaml` が正となる形式です。トップレベルで解釈されるキーは
 `site` / `build` / `server` / `blog` / `features` / `limits` の6つのみで、`site` 以外はすべて
-オプションです（省略時は下記のデフォルト値が使われます）。未知のキーは無視されるため、
-綴り間違いはエラーにならず黙って無視される点に注意してください。
+オプションです（省略時は下記のデフォルト値が使われます）。未知のキーはビルド時には無視される
+ため、綴り間違いはエラーになりません。`hirundo validate` を実行すると報告されますが、
+検査対象はトップレベルとその1階層下までなので、`site.author.emial` のような深い階層の
+綴り間違いは検出されません。
 
 ```yaml
 site:
@@ -193,7 +195,6 @@ features:
 # セキュリティとパフォーマンス制限（オプション。以下の値はいずれも省略時のデフォルト）
 limits:
   maxMarkdownFileSize: 10485760     # 10MB
-  maxConfigFileSize: 1048576        # 1MB
   maxFrontMatterSize: 100000        # 100KB
   maxFilenameLength: 255
   maxTitleLength: 200
@@ -201,7 +202,7 @@ limits:
   maxUrlLength: 2000
   maxAuthorNameLength: 100
   maxEmailLength: 254
-  maxLanguageCodeLength: 10
+  maxLanguageCodeLength: 35
 ```
 
 `hirundo init` は `features` までを書き出し、`limits` は出力しません（デフォルト値で動作します）。
