@@ -41,6 +41,10 @@ func handleError(_ error: Error, context: String, verbose: Bool = false) {
         let hirundoError = scaffoldError.toHirundoError()
         eprint(hirundoError.userMessage)
         eprint("\n📍 Specific issue: \(scaffoldError.localizedDescription)")
+    } else if let contentError = error as? ContentScaffoldError {
+        let hirundoError = contentError.toHirundoError()
+        eprint(hirundoError.userMessage)
+        eprint("\n📍 Specific issue: \(contentError.localizedDescription)")
     } else {
         // Generic error handling
         eprint("\n❌ \(context) failed")
