@@ -65,10 +65,6 @@ hirundo serve
 
 Your site will be available at `http://localhost:8080` with live reload enabled.
 
-> `hirundo serve` serves whatever is already in the output directory. Run `hirundo build`
-> at least once before the first `serve`, otherwise every request returns 404 because
-> there is nothing to serve yet.
-
 ## Commands
 
 Every command also accepts `--verbose`, which prints the underlying error instead of
@@ -160,23 +156,32 @@ Start the development server with live reload.
 hirundo serve [options]
 
 Options:
-  --port <port>      Server port (default: 8080)
-  --host <host>      Server host (default: localhost)
+  --port <port>      Server port (defaults to server.port in config.yaml)
+  --host <host>      Numeric address to bind to (default: localhost)
   --no-reload        Disable live reload
   --no-browser       Don't open browser automatically
+  --drafts           Include draft posts
   --verbose          Show verbose error information
 ```
 
-The server reads `config.yaml` from the current directory to find the output directory,
-then serves files out of it:
+`serve` reads `config.yaml` from the current directory, builds the site once, then starts
+serving while watching for changes. For both the port and live reload, the precedence is
+CLI flag > `server` block in `config.yaml` > built-in default (port 8080, live reload on):
+an explicit `--port` overrides `server.port`, and `--no-reload` always disables live reload
+no matter what `server.liveReload` says; omit both and `config.yaml` decides.
+
+`--host` is the address the server actually binds to, and only a numeric address is
+accepted — a host name is rejected. The default, `localhost`, resolves to the IPv4 loopback
+address, so only this machine can connect. Pass `--host 0.0.0.0` to accept connections from
+other machines; doing so exposes the live reload WebSocket with no authentication, so only
+do this on a trusted network.
 
 - Directory requests resolve to that directory's `index.html`, so `/`, `/about`, and
   `/about/` all work.
 - Requests that would climb out of the output directory (`/../../etc/passwd`) are rejected.
-- With live reload on, a WebSocket endpoint is exposed at `/livereload`.
-
-`--port` and `--host` are command-line only — `server.port` in `config.yaml` is not
-consulted by `serve`.
+- With live reload on, `serve` watches the content, templates and static directories (not
+  the output directory) and rebuilds on change, then pushes a reload to every connected
+  browser over a WebSocket exposed at `/livereload`.
 
 ### `hirundo new`
 Create new content.
