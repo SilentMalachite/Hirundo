@@ -146,7 +146,9 @@ hirundo build [オプション]
 （`config.yaml` があるディレクトリ）の内側にとどまる場合だけです。つまりビルドが読む
 Markdownはプロジェクト内のものに限られます。マシン上のそれ以外の場所を指すリンクや、
 プロジェクトディレクトリ自身を指すリンク（`content/up -> ..`）は読み飛ばし、出力
-ディレクトリ・`static`・`templates` を指すリンクも同様に読み飛ばします。同じディレクトリに
+ディレクトリ・`static`・`templates` を指すリンクも同様に読み飛ばします。単一のファイルを
+指すリンクにも同じ規則が適用され、`content/notes.md -> ../shared/notes.md` はビルドされ、
+`content/leak.md -> /Users/someone/private-notes.md` は読み飛ばされます。同じディレクトリに
 入るのは1ビルドにつき1回だけなので、互いを指し合うリンクやすでに走査済みの場所を指す
 リンクも無限にたどらず終了します。どう判断したかはビルド中にすべて表示されます
 （`Following content symlink: content/posts -> ../shared-posts`）。

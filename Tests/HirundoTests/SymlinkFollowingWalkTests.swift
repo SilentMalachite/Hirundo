@@ -102,6 +102,99 @@ final class SymlinkFollowingWalkTests: XCTestCase {
         XCTAssertEqual(Set(try entries(of: projectWalk()).map(relativeToContent)), ["index.md"])
     }
 
+    /// A link naming one file reaches one file, but that is enough to publish it:
+    /// `content/leak.md -> /Users/someone/private-notes.md` would be read and turned into a
+    /// page. The boundary is the same one the directory links are held to.
+    func testALinkToAFileOutsideTheProjectIsRefused() throws {
+        try write("secret", to: outsideDir.appendingPathComponent("private-notes.md"))
+        try write("b", to: contentDirectory.appendingPathComponent("index.md"))
+        try makeSymbolicLink(
+            at: contentDirectory.appendingPathComponent("leak.md"),
+            to: outsideDir.appendingPathComponent("private-notes.md").path
+        )
+
+        XCTAssertEqual(Set(try entries(of: projectWalk()).map(relativeToContent)), ["index.md"])
+    }
+
+    /// The legitimate half of the same rule: a file kept elsewhere *in the project* is what a
+    /// site owner links to, and it still resolves — at the path under `content/` the link sits
+    /// at, so the page keeps the URL that path implies.
+    func testALinkToAFileInsideTheProjectIsFollowedAtItsLogicalPath() throws {
+        try write("shared", to: tempDir.appendingPathComponent("shared/notes.md"))
+        try write("b", to: contentDirectory.appendingPathComponent("index.md"))
+        try makeSymbolicLink(
+            at: contentDirectory.appendingPathComponent("notes.md"),
+            to: "../shared/notes.md"
+        )
+
+        XCTAssertEqual(
+            Set(try entries(of: projectWalk()).map(relativeToContent)),
+            ["index.md", "notes.md"]
+        )
+    }
+
+    /// The same, one level down: a file link found behind a followed directory link is held to
+    /// the boundary too, or the hole simply moves.
+    func testALinkToAFileOutsideTheProjectIsRefusedBehindAFollowedDirectoryLink() throws {
+        try write("secret", to: outsideDir.appendingPathComponent("private-notes.md"))
+        try makeDirectory("shared-pages", under: tempDir)
+        try write("a", to: tempDir.appendingPathComponent("shared-pages/guide.md"))
+        try makeSymbolicLink(
+            at: tempDir.appendingPathComponent("shared-pages/leak.md"),
+            to: outsideDir.appendingPathComponent("private-notes.md").path
+        )
+        try makeSymbolicLink(at: contentDirectory.appendingPathComponent("shared"), to: "../shared-pages")
+
+        XCTAssertEqual(
+            Set(try entries(of: projectWalk()).map(relativeToContent)),
+            ["shared/guide.md"]
+        )
+    }
+
+    // MARK: - What the walk says out loud
+
+    /// Both READMEs quote this line verbatim as the build's account of what it included, so
+    /// its wording is documented behaviour rather than a debug aid.
+    func testTheFollowLineReadsExactlyAsBothReadmesQuoteIt() throws {
+        try makeDirectory("shared-posts", under: tempDir)
+        try write("a", to: tempDir.appendingPathComponent("shared-posts/hello.md"))
+        try makeSymbolicLink(at: contentDirectory.appendingPathComponent("posts"), to: "../shared-posts")
+
+        let printed = try capturingStandardOutput {
+            _ = try entries(of: announcingProjectWalk())
+        }
+
+        XCTAssertTrue(
+            printed.contains("Following content symlink: content/posts -> ../shared-posts"),
+            "printed instead:\n\(printed)"
+        )
+    }
+
+    /// A refused link to a file has to read like a refused link to a directory: one boundary,
+    /// one vocabulary, so a site owner reading the build log is not left guessing whether the
+    /// two kinds are governed by different rules.
+    func testAFileLinkAndADirectoryLinkAreRefusedInTheSameWords() throws {
+        try write("secret", to: outsideDir.appendingPathComponent("private-notes.md"))
+        try makeSymbolicLink(at: contentDirectory.appendingPathComponent("leak"), to: outsideDir.path)
+        try makeSymbolicLink(
+            at: contentDirectory.appendingPathComponent("leak.md"),
+            to: outsideDir.appendingPathComponent("private-notes.md").path
+        )
+
+        let printed = try capturingStandardOutput {
+            _ = try entries(of: announcingProjectWalk())
+        }
+
+        XCTAssertTrue(
+            printed.contains("Skipping content symlink outside the project: content/leak.md ->"),
+            "printed instead:\n\(printed)"
+        )
+        XCTAssertTrue(
+            printed.contains("Skipping content symlink outside the project: content/leak ->"),
+            "printed instead:\n\(printed)"
+        )
+    }
+
     /// A walk that does not terminate would hang the whole suite, so the deadline is the
     /// assertion.
     func testACycleOfLinksTerminates() throws {
@@ -181,6 +274,44 @@ final class SymlinkFollowingWalkTests: XCTestCase {
             boundary: .project(root: tempDir.path, excludingDirectoriesNamed: ["_site", "static", "templates"]),
             announcesDecisions: false
         )
+    }
+
+    /// The walk exactly as a build configures it, printing included.
+    private func announcingProjectWalk() -> SymlinkFollowingWalk {
+        return SymlinkFollowingWalk(
+            boundary: .project(root: tempDir.path, excludingDirectoriesNamed: ["_site", "static", "templates"]),
+            announcesDecisions: true
+        )
+    }
+
+    /// Runs `body` with `stdout` redirected into a pipe, and returns what was written there.
+    ///
+    /// The walk announces its decisions with `print`, so reading the real descriptor is the
+    /// only way to assert the wording the documentation quotes. A handful of lines is far
+    /// inside the pipe buffer, so no reader thread is needed — but the write end has to be
+    /// closed before the read, or it would wait for an end that never comes.
+    private func capturingStandardOutput(_ body: () throws -> Void) rethrows -> String {
+        let pipe = Pipe()
+        fflush(stdout)
+        let saved = dup(STDOUT_FILENO)
+        dup2(pipe.fileHandleForWriting.fileDescriptor, STDOUT_FILENO)
+
+        var restored = false
+        func restore() {
+            guard !restored else { return }
+            restored = true
+            fflush(stdout)
+            dup2(saved, STDOUT_FILENO)
+            close(saved)
+            try? pipe.fileHandleForWriting.close()
+        }
+        // Every exit path, a thrown error included: leaving stdout pointed at a pipe nobody
+        // reads would silently swallow the rest of the suite's output.
+        defer { restore() }
+
+        try body()
+        restore()
+        return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
     }
 
     /// Runs the walk on a background thread with a deadline, so a traversal that fails to

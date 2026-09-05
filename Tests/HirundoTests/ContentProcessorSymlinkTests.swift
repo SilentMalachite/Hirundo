@@ -120,6 +120,47 @@ final class ContentProcessorSymlinkTests: XCTestCase {
         XCTAssertEqual(collectRelativePaths(), ["linked.md"])
     }
 
+    /// The single-file version of the leak the containment rules exist for. A link naming one
+    /// file exposes one file rather than a tree, but the build still reads it and publishes a
+    /// page from it, so the boundary applies to it too — which is what both READMEs promise
+    /// when they say the build reads Markdown from inside the project only.
+    func testSymlinkToAMarkdownFileOutsideTheProjectIsSkipped() throws {
+        try FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+        try write(markdown(title: "Private"), to: outsideDir.appendingPathComponent("private-notes.md"))
+        try write(markdown(title: "Home"), to: contentDirectory.appendingPathComponent("index.md"))
+        try makeSymbolicLink(
+            at: contentDirectory.appendingPathComponent("leak.md"),
+            to: outsideDir.appendingPathComponent("private-notes.md").path
+        )
+
+        XCTAssertEqual(collectRelativePaths(), ["index.md"])
+    }
+
+    /// Where a site owner would notice: the page that link would have published is not in the
+    /// output, and neither is a line of what it held.
+    func testBuildDoesNotPublishAFileLinkedFromOutsideTheProject() async throws {
+        try makeSite()
+        try FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+        try write(
+            markdown(title: "Private", body: "Salary review notes."),
+            to: outsideDir.appendingPathComponent("private-notes.md")
+        )
+        try makeSymbolicLink(
+            at: contentDirectory.appendingPathComponent("leak.md"),
+            to: outsideDir.appendingPathComponent("private-notes.md").path
+        )
+
+        let generator = try SiteGenerator(projectPath: tempDir.path)
+        try await generator.build()
+
+        let output = tempDir.appendingPathComponent("_site")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: output.appendingPathComponent("leak/index.html").path),
+            "a file linked from outside the project must not be published: \(outputTree(output))"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("index.html").path))
+    }
+
     func testBrokenSymlinkDoesNotStopTheWalk() throws {
         try write(markdown(title: "Home"), to: contentDirectory.appendingPathComponent("index.md"))
         try makeSymbolicLink(at: contentDirectory.appendingPathComponent("gone"), to: "../nowhere")

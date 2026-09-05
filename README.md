@@ -145,8 +145,11 @@ the file actually lives. A link is followed only while it stays inside the proje
 directory (the one holding `config.yaml`), so the build reads Markdown from inside the
 project only: a link to anywhere else on the machine, or to the project directory itself
 (`content/up -> ..`), is skipped, as is one pointing into the output, `static` or
-`templates` directory. A directory is entered once per build, so links pointing at each
-other, or back at somewhere already walked, terminate instead of being followed forever.
+`templates` directory. The same rule applies to a link naming a single file:
+`content/notes.md -> ../shared/notes.md` is built, `content/leak.md ->
+/Users/someone/private-notes.md` is skipped. A directory is entered once per build, so
+links pointing at each other, or back at somewhere already walked, terminate instead of
+being followed forever.
 Every decision is printed as the build makes it — `Following content symlink:
 content/posts -> ../shared-posts`.
 

@@ -15,8 +15,13 @@ import Foundation
 ///   one, however it was reached. Re-publishing the previous build, or publishing a template as
 ///   a page, is never what a link meant.
 ///
+/// Both apply to a link to a single file as much as to a link to a directory. The reach is
+/// smaller — one file rather than a tree — but the outcome is the same kind of thing:
+/// `content/leak.md -> /Users/someone/private-notes.md` is read and published as a page.
+///
 /// The case the feature exists for — `content/posts -> ../shared-posts`, a sibling inside the
-/// project — passes both and needs no configuration to work.
+/// project — passes both and needs no configuration to work, and so does the single-file
+/// version of it, `content/notes.md -> ../shared/notes.md`.
 public struct SymlinkBoundary: Sendable, Equatable {
     /// Directory every followed target must sit strictly inside, or `nil` for "the directory
     /// being walked", which is the boundary that needs nothing configured.
@@ -41,7 +46,8 @@ public struct SymlinkBoundary: Sendable, Equatable {
     }
 }
 
-/// Walks a directory tree, descending into the directory symlinks ``boundary`` allows.
+/// Walks a directory tree, descending into the directory symlinks ``boundary`` allows and
+/// reporting the file symlinks it allows.
 ///
 /// `FileManager`'s enumerator stops at a symlinked directory instead of walking into it, so a
 /// site keeping part of its content elsewhere — `content/posts -> ../shared-posts` — built
@@ -92,6 +98,7 @@ struct SymlinkFollowingWalk {
                 link: root,
                 reportedAs: root,
                 to: target,
+                isDirectory: true,
                 under: root,
                 excluding: excluded,
                 visitedDirectories: &visitedDirectories
@@ -127,21 +134,31 @@ struct SymlinkFollowingWalk {
         while let fileURL = enumerator.nextObject() as? URL {
             // Checked before the caller's own filter: a linked directory rarely looks like the
             // files being collected, and the filter would drop it before it could be followed.
-            if let target = Self.directorySymlinkTarget(of: fileURL),
-               let logicalURL = Self.logicalURL(for: fileURL, enumeratedFrom: root) {
+            guard let link = Self.link(at: fileURL) else {
+                onEntry(fileURL)
+                continue
+            }
+            let logicalURL = Self.logicalURL(for: fileURL, enumeratedFrom: root)
+
+            if link.isDirectory {
+                guard let logicalURL else {
+                    onEntry(fileURL)
+                    continue
+                }
                 guard shouldFollow(
                     link: fileURL,
                     reportedAs: logicalURL,
-                    to: target,
+                    to: link.target,
+                    isDirectory: true,
                     under: root,
                     excluding: excluded,
                     visitedDirectories: &visitedDirectories
                 ) else {
                     continue
                 }
-                onFollowedDirectory(target)
+                onFollowedDirectory(link.target)
                 walk(
-                    resolved: target,
+                    resolved: link.target,
                     reportedAs: logicalURL,
                     under: root,
                     excluding: excluded,
@@ -152,6 +169,20 @@ struct SymlinkFollowingWalk {
                 continue
             }
 
+            // A link to a file reaches only the one file it names, but that is enough:
+            // `content/leak.md -> /Users/someone/private-notes.md` is read and published as a
+            // page. The same boundary therefore applies, and reports itself the same way.
+            guard shouldFollow(
+                link: fileURL,
+                reportedAs: logicalURL ?? fileURL,
+                to: link.target,
+                isDirectory: false,
+                under: root,
+                excluding: excluded,
+                visitedDirectories: &visitedDirectories
+            ) else {
+                continue
+            }
             onEntry(fileURL)
         }
     }
@@ -196,20 +227,27 @@ struct SymlinkFollowingWalk {
         for entry in entries {
             let logicalURL = logicalDirectory.appendingPathComponent(entry.lastPathComponent)
 
-            if let target = Self.directorySymlinkTarget(of: entry) {
+            if let link = Self.link(at: entry) {
                 guard shouldFollow(
                     link: entry,
                     reportedAs: logicalURL,
-                    to: target,
+                    to: link.target,
+                    isDirectory: link.isDirectory,
                     under: root,
                     excluding: excluded,
                     visitedDirectories: &visitedDirectories
                 ) else {
                     continue
                 }
-                onFollowedDirectory(target)
+                guard link.isDirectory else {
+                    // A contained link to a file: reported at its logical path like any other
+                    // file here, so its page keeps the URL its path under the root implies.
+                    onEntry(logicalURL)
+                    continue
+                }
+                onFollowedDirectory(link.target)
                 walk(
-                    resolved: target,
+                    resolved: link.target,
                     reportedAs: logicalURL,
                     under: root,
                     excluding: excluded,
@@ -240,21 +278,33 @@ struct SymlinkFollowingWalk {
         }
     }
 
-    /// Decides whether the walk descends into `target`, the directory `linkURL` resolves to,
-    /// and says out loud what it decided.
+    /// Decides whether the walk follows `linkURL` to `target`, and says out loud what it
+    /// decided.
+    ///
+    /// One rule for both kinds of link. A link to a directory exposes everything under it and
+    /// a link to a file exposes one file, but a published page is a published page: whichever
+    /// it is, the target has to be inside the boundary and out of the build directories, and
+    /// the reason a link was refused reads the same either way. Only the two checks that mean
+    /// nothing for a file — the target being the project root, and the target having been
+    /// walked already — are limited to directories.
     ///
     /// - Parameters:
     ///   - linkURL: The symlink itself, where it really sits on disk.
     ///   - logicalURL: Path the link is reported at, used for the printed line.
     ///   - target: `linkURL` with its symlinks resolved.
+    ///   - isDirectory: Whether `target` is a directory the walk would descend into, rather
+    ///     than a file it would hand to `onEntry`.
     ///   - root: The directory the walk started from; the boundary when none was configured.
     ///   - excluded: Directories never entered.
-    ///   - visitedDirectories: Canonical paths already walked. The target is recorded here only
-    ///     when it is about to be walked, so a refused link never shadows a later legitimate one.
+    ///   - visitedDirectories: Canonical paths already walked. A directory target is recorded
+    ///     here only when it is about to be walked, so a refused link never shadows a later
+    ///     legitimate one. A file target is never recorded: two links to the same file are two
+    ///     pages, not a cycle.
     private func shouldFollow(
         link linkURL: URL,
         reportedAs logicalURL: URL,
         to target: URL,
+        isDirectory: Bool,
         under root: URL,
         excluding excluded: Set<String>,
         visitedDirectories: inout Set<String>
@@ -276,9 +326,11 @@ struct SymlinkFollowingWalk {
             announce("Skipping content symlink into a build directory: \(description)")
             return false
         }
-        guard visitedDirectories.insert(targetPath).inserted else {
-            announce("Skipping content symlink already walked: \(description)")
-            return false
+        if isDirectory {
+            guard visitedDirectories.insert(targetPath).inserted else {
+                announce("Skipping content symlink already walked: \(description)")
+                return false
+            }
         }
         announce("Following content symlink: \(description)")
         return true
@@ -347,23 +399,42 @@ struct SymlinkFollowingWalk {
             .appendingPathComponent(entry.lastPathComponent)
     }
 
-    /// Resolves `url` when it is a symlink pointing at a directory, `nil` otherwise.
+    /// A symlink the walk has to make a decision about, and what it resolves to.
+    struct Link {
+        /// `linkURL` with its symlinks resolved: the file or directory actually reached.
+        let target: URL
+        /// Whether `target` is a directory, which is what decides between descending into it
+        /// and reporting the link as a single entry.
+        let isDirectory: Bool
+    }
+
+    /// Resolves `url` when it is a symlink to something that exists, `nil` otherwise.
     ///
-    /// Symlinks to files need no help: the enumerator reports them like any other entry and
-    /// reading one already follows the link.
-    private static func directorySymlinkTarget(of url: URL) -> URL? {
+    /// Both kinds of link come back, because both cross the containment boundary: reading
+    /// through `content/leak.md -> /Users/someone/notes.md` publishes that file as a page just
+    /// as surely as a directory link publishes a tree. A *broken* link is `nil` — it reaches
+    /// nothing, so there is nothing to contain — and is passed on untouched, exactly as before.
+    private static func link(at url: URL) -> Link? {
         guard let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey]),
               values.isSymbolicLink == true else {
             return nil
         }
         let resolved = url.resolvingSymlinksInPath()
         var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory),
-              isDirectory.boolValue else {
-            // Broken link, or a link to a file.
+        guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory) else {
+            // Broken link.
             return nil
         }
-        return resolved
+        return Link(target: resolved, isDirectory: isDirectory.boolValue)
+    }
+
+    /// Resolves `url` when it is a symlink pointing at a directory, `nil` otherwise.
+    ///
+    /// Only the walked root needs this narrower question: a root that links to a file is not a
+    /// directory to walk at all, and there is nothing to enumerate either way.
+    private static func directorySymlinkTarget(of url: URL) -> URL? {
+        guard let link = link(at: url), link.isDirectory else { return nil }
+        return link.target
     }
 
     /// Identity a directory is remembered by, so the same one is never entered twice.
