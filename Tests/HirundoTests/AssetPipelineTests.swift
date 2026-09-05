@@ -306,6 +306,39 @@ final class AssetPipelineTests: XCTestCase {
             "CSS のハッシュは url(...) を書き換えた後のバイト列に対して取られるべき"
         )
     }
+
+    func testCSSToCSSReferenceIsLeftUnresolved() throws {
+        // パス2は全 CSS を同時に扱うため、CSS が別の CSS を url(...) / @import で参照していても
+        // 参照先のハッシュ名はまだ決まっていない。ファイルシステムの列挙順に関わらず、常に
+        // 無変更で残らなければならない（パス1完了時点のマニフェストには CSS のエントリが
+        // 一つも無いので、この振る舞いは処理順に依存しない）。
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        pipeline.enableFingerprinting = true
+
+        try "@import url(\"theme.css\");\nbody { color: red; }".write(
+            to: sourceDir.appendingPathComponent("style.css"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "body { margin: 0; }".write(
+            to: sourceDir.appendingPathComponent("theme.css"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        let outputPath = try XCTUnwrap(manifest["style.css"])
+        let outputContent = try String(contentsOf: destDir.appendingPathComponent(outputPath), encoding: .utf8)
+
+        XCTAssertTrue(
+            outputContent.contains("url(\"theme.css\")"),
+            "CSS→CSS参照はハッシュ名を解決できないため無変更で残るべき。実際: \(outputContent)"
+        )
+    }
 }
 
 // (Plugin-based test helpers removed in Stage 2)

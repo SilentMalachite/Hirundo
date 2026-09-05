@@ -59,12 +59,17 @@ public class AssetPipeline {
             )
         }
 
-        // パス2: CSS。
+        // パス2: CSS。全 CSS を同時に扱うため、あるスタイルシートが処理順で先に来た別の
+        // スタイルシートを `url(...)` で参照していても、そのハッシュ名はまだ決まっていない
+        // （CSS→CSS参照は解決しない、が仕様）。パス1完了時点のマニフェストを固定して使うことで、
+        // 列挙順に処理結果が左右されないようにする。
+        let pass1Manifest = manifest
         for stylesheet in stylesheets {
             try processStylesheet(
                 stylesheet.url,
                 relativePath: stylesheet.relativePath,
                 destinationPath: destinationPath,
+                pass1Manifest: pass1Manifest,
                 manifest: &manifest
             )
         }
@@ -109,27 +114,42 @@ public class AssetPipeline {
     }
 
     /// CSS。最小化してから `url(...)` を書き換え、**その結果**をハッシュする。
+    ///
+    /// `url(...)` の書き換えは、フィンガープリントが無効なときは必ず no-op（マニフェストの
+    /// 値はすべてキーと等しいので `AssetManifest.rewrite` は常に `nil` を返す）。それにも
+    /// 関わらず書き換えと警告を無条件に走らせると、フィンガープリントを有効にしていない
+    /// 既定のビルドでも「CSS→CSS 参照は解決できない」という無関係な警告が出てしまうため、
+    /// ここで `enableFingerprinting` を見て丸ごとスキップする。
     private func processStylesheet(
         _ fileURL: URL,
         relativePath: String,
         destinationPath: String,
+        pass1Manifest: AssetManifest,
         manifest: inout AssetManifest
     ) throws {
         let content = try String(contentsOf: fileURL, encoding: .utf8)
         let processed = processor.processCSS(content, options: cssOptions)
-        let result = AssetReferenceRewriter.rewriteCSS(
-            processed,
-            manifest: manifest,
-            inDirectory: AssetManifest.parentDirectory(of: relativePath)
-        )
 
-        for reference in result.unresolvedStylesheetReferences {
-            warn("\(relativePath): url(\(reference)) points at another stylesheet; "
-                 + "fingerprinting does not rewrite CSS-to-CSS references")
+        let finalContent: String
+        if enableFingerprinting {
+            let result = AssetReferenceRewriter.rewriteCSS(
+                processed,
+                manifest: pass1Manifest,
+                inDirectory: AssetManifest.parentDirectory(of: relativePath)
+            )
+
+            for reference in result.unresolvedStylesheetReferences {
+                warn("\(relativePath): url(\(reference)) points at another stylesheet; "
+                     + "fingerprinting does not rewrite CSS-to-CSS references")
+            }
+
+            finalContent = result.content
+        } else {
+            finalContent = processed
         }
 
         try write(
-            Data(result.content.utf8),
+            Data(finalContent.utf8),
             relativePath: relativePath,
             destinationPath: destinationPath,
             manifest: &manifest
@@ -172,10 +192,7 @@ public class AssetPipeline {
             at: outputURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        if fileManager.fileExists(atPath: outputURL.path) {
-            try fileManager.removeItem(atPath: outputURL.path)
-        }
-        try data.write(to: outputURL)
+        try data.write(to: outputURL, options: .atomic)
 
         manifest[relativePath] = outputRelativePath
     }
