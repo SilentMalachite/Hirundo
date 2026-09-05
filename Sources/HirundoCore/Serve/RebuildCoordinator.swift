@@ -13,7 +13,9 @@ public struct RebuildIncomplete: Error, LocalizedError {
     public let messages: [String]
 
     public var errorDescription: String? {
-        "Build finished with \(failCount) failure(s) out of \(successCount + failCount) file(s): " +
+        // `failCount` also covers whole-site steps (static assets, sitemap, …), not just files,
+        // so the two counts are reported separately rather than summed into a file total.
+        "Build finished with \(failCount) failure(s), \(successCount) file(s) succeeded: " +
             messages.joined(separator: "; ")
     }
 }

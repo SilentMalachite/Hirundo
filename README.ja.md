@@ -304,6 +304,27 @@ hirundo clean [オプション]
 > `--force` を付けない限り、削除対象のパスを一覧表示するだけです。出力ディレクトリは
 > `config.yaml` の `build.outputDirectory` から読み取られ、無ければ `_site` になります。
 
+### `hirundo validate`
+ビルドせずに設定ファイルだけを検査します。
+
+```bash
+hirundo validate [オプション]
+
+オプション:
+  --config <ファイル>  設定ファイルのパス（デフォルト: config.yaml）
+  --verbose            詳細なエラー情報を表示
+```
+
+報告される問題は2種類あります。デコードできない設定は**エラー**で、終了コードは非0になり、
+原因となったキーを名指しします（`Missing required field: site.url`、
+`Invalid configuration value: blog.postsPerPage: expected Int`）。デコードはできるが Hirundo が
+解釈しないキーが含まれている場合 — 綴り間違いや、[`timeouts` / `server.cors`](#未実装の項目)
+のように配線されていないブロック — は stderr への**警告**にとどまり、終了コードは0のままです。
+それらを黙って無視するのがパーサーの実際の挙動だからです。
+
+検査するのはトップレベルとその1階層下までです（`features.sitemp` は検出されます）。
+それより深い階層は見ていません。
+
 ## プロジェクト構造
 
 ```
@@ -370,8 +391,7 @@ features:
   searchIndex: true
   minify: true
 
-# セキュリティとパフォーマンスの制限。このブロックを書く場合は10キーすべてが必要です。
-# 以下の値はいずれも省略時のデフォルトです。
+# セキュリティとパフォーマンスの制限。各キーは省略可能で、以下の値はいずれも省略時のデフォルトです。
 limits:
   maxMarkdownFileSize: 10485760      # 10MB
   maxConfigFileSize: 1048576         # 1MB
@@ -395,10 +415,15 @@ site:
 
 ### 注意点
 
-- **`limits` はオール・オア・ナッシングです。** 他のブロックと異なり、キー単位のデフォルト値が
-  ありません。`limits:` ブロックを書く場合は**10キーすべて**を列挙する必要があります。1つでも
-  欠けると `Failed to parse configuration: The data couldn't be read because it is missing.`
-  でビルドが失敗します。デフォルト値のままでよい場合は、ブロックごと省略してください。
+- **オプションの各ブロックは一部のキーだけを書けます。** `features` / `limits` / `build` /
+  `server` / `blog` はいずれも、書かなかったキーにデフォルト値を使います。制限値を1つ変える
+  ために残り9つを書き直す必要はありません。解釈されないキーは `hirundo validate` が報告します。
+- **値はデコードされるだけでなく検証されます。** `site.url` はスキームとホストを持つURLで
+  なければならず、`site.language` は BCP 47 として妥当なタグ（`en`、`en-US`、`zh-Hans` など）、
+  `site.author.email` はメールアドレスの形式である必要があります。`limits` の各値は正の整数で
+  なければなりません。これらに反する設定は、黙って無視されるのではなくビルドが失敗します。
+  なお `site.*` の長さ上限は固定値（タイトル200、説明500、URL 2000、著者名100、メール254）で、
+  `limits` ブロックからは**読まれません**。
 - **`features` はリストではなくマッピングです。** 旧来のプラグイン形式はもはや受け付けられず、
   パースエラーになります。
   ```yaml
@@ -546,7 +571,13 @@ Hirundoには4つの組み込み機能があり、`features` ブロックで切�
 - **アセットのフィンガープリント、ソースマップ、JS/CSSの結合**。
   `build.enableAssetFingerprinting`、`enableSourceMaps`、`concatenateJS`、`concatenateCSS` は
   設定パーサーに受け付けられますが、どこでも使用されていません。
+- **`limits` の10キーのうち6キー**。`maxConfigFileSize`、`maxDescriptionLength`、
+  `maxUrlLength`、`maxAuthorNameLength`、`maxEmailLength`、`maxLanguageCodeLength` は
+  パースも検証もされますが、どこからも読まれていません。効果があるのは
+  `maxMarkdownFileSize`、`maxFrontMatterSize`、`maxFilenameLength`、`maxTitleLength` の4つだけです。
 - **フロントマターの `layout:`**。`template:` を使用してください。
+
+`config.yaml` にこの一覧のキーを書いている場合、`hirundo validate` がすべて報告します。
 
 ## セキュリティ
 

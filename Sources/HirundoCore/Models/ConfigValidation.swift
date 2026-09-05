@@ -50,11 +50,13 @@ public struct ConfigValidation {
         return url.scheme != nil && url.host != nil
     }
     
-    /// 言語コードの形式を検証（簡素化）
+    /// 言語コードの形式を検証（BCP 47 のサブタグ構造）
+    ///
+    /// `xx` と `xx-YY` だけに限ると `zh-Hans`（スクリプトサブタグ）や `haw`（3文字コード）と
+    /// いった正当なタグを拒否してしまうため、サブタグの並びとして検証する。
     public static func isValidLanguageCode(_ language: String) -> Bool {
-        // 基本的な言語コード形式をチェック（例: en, en-US, ja-JP）
-        let languageRegex = "^[a-z]{2}(-[A-Z]{2})?$"
-        let languagePredicate = NSPredicate(format: "SELF MATCHES[c] %@", languageRegex)
+        let languageRegex = "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$"
+        let languagePredicate = NSPredicate(format: "SELF MATCHES %@", languageRegex)
         return languagePredicate.evaluate(with: language)
     }
     

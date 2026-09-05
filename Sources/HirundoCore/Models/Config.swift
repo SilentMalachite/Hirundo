@@ -23,7 +23,9 @@ public struct HirundoConfig: Codable, Sendable {
     public let features: Features
     public let limits: Limits
     
-    enum CodingKeys: String, CodingKey {
+    /// `CaseIterable` so that `ConfigDiagnostics` can report keys the decoder ignores without
+    /// keeping a second copy of this list that could drift out of sync.
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case site, build, server, blog, features, limits
     }
     
@@ -78,17 +80,58 @@ public struct HirundoConfig: Codable, Sendable {
     public static func parse(from yaml: String) throws -> HirundoConfig {
         do {
             let decoder = YAMLDecoder()
-            let config = try decoder.decode(HirundoConfig.self, from: yaml)
-            
-            if config.site.url.isEmpty {
-                throw ConfigError.missingRequiredField("url")
-            }
-            
-            return config
+            // `Site.init(from:)` routes through the validating initializer, so an empty or
+            // malformed URL has already been rejected by the time this returns.
+            return try decoder.decode(HirundoConfig.self, from: yaml)
         } catch let error as ConfigError {
             throw error
+        } catch let error as DecodingError {
+            throw configError(for: error)
         } catch {
             throw ConfigError.parseError(error.localizedDescription)
+        }
+    }
+    
+    /// Renders a `DecodingError` as a message that names the key that went wrong.
+    ///
+    /// `DecodingError.localizedDescription` is a generic Foundation sentence — "The data
+    /// couldn't be read because it is missing." — with no key path at all, which is useless for
+    /// a file the user wrote by hand.
+    private static func configError(for error: DecodingError) -> ConfigError {
+        func path(_ codingPath: [CodingKey], _ missingKey: CodingKey? = nil) -> String {
+            let keys = codingPath + (missingKey.map { [$0] } ?? [])
+            return keys.isEmpty ? "(top level)" : keys.map { $0.stringValue }.joined(separator: ".")
+        }
+        
+        /// The decoder names the YAML node type it wanted — "Mapping", "Scalar" — which means
+        /// nothing to someone editing a configuration file.
+        func describe(_ type: Any.Type) -> String {
+            switch String(describing: type) {
+            case "Mapping": return "a block of keys"
+            case "Sequence": return "a list"
+            case "Scalar": return "a single value"
+            default: return "\(type)"
+            }
+        }
+        
+        switch error {
+        case .keyNotFound(let key, let context):
+            return .missingRequiredField(path(context.codingPath, key))
+        case .typeMismatch(let type, let context):
+            return .invalidValue("\(path(context.codingPath)): expected \(describe(type))")
+        case .valueNotFound(let type, let context):
+            return .invalidValue("\(path(context.codingPath)): expected \(describe(type)), found nothing")
+        case .dataCorrupted(let context):
+            // Yams re-wraps anything a model's `init(from:)` threw as `dataCorrupted` with an
+            // empty coding path and "The given data was not valid YAML" — which is simply false
+            // when the YAML parsed and a validation rule rejected a value. The real reason is
+            // the only useful thing here.
+            if let configError = context.underlyingError as? ConfigError {
+                return configError
+            }
+            return .parseError("\(path(context.codingPath)): \(context.debugDescription)")
+        @unknown default:
+            return .parseError(error.localizedDescription)
         }
     }
     
@@ -100,6 +143,10 @@ public struct HirundoConfig: Codable, Sendable {
         do {
             let yaml = try String(contentsOf: url, encoding: .utf8)
             return try parse(from: yaml)
+        } catch let error as ConfigError {
+            // `parse` already produced a configuration error with a usable message; wrapping it
+            // again only prefixed the text a second time.
+            throw error
         } catch {
             throw ConfigError.parseError(error.localizedDescription)
         }

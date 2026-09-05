@@ -41,7 +41,7 @@ public struct Blog: Codable, Sendable {
         )
     }
     
-    enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case postsPerPage, generateArchive, generateCategories, generateTags
     }
     

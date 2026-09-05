@@ -305,6 +305,27 @@ Options:
 > without `--force` it just lists the paths it would remove. The output directory is read
 > from `build.outputDirectory` in `config.yaml`, falling back to `_site`.
 
+### `hirundo validate`
+Check the configuration file without building anything.
+
+```bash
+hirundo validate [options]
+
+Options:
+  --config <file>  Configuration file path (default: config.yaml)
+  --verbose        Show verbose error information
+```
+
+It reports two different kinds of problem. A file that cannot be decoded is an **error**: the
+command exits non-zero and names the key at fault — `Missing required field: site.url`,
+`Invalid configuration value: blog.postsPerPage: expected Int`. A file that decodes but
+contains keys Hirundo does not act on — a typo, or a block that was never wired up such as
+[`timeouts` or `server.cors`](#not-yet-implemented) — is a **warning** on stderr and still
+exits 0, because silently ignoring those keys is what the parser genuinely does.
+
+Keys are checked at the top level and one level in (`features.sitemp` is caught); nothing
+deeper than that is inspected.
+
 ## Project Structure
 
 ```
@@ -369,8 +390,7 @@ features:
   searchIndex: true
   minify: true
 
-# Security and performance limits. All ten keys are required if this block is present.
-# The values below are the defaults.
+# Security and performance limits. Every key is optional; the values below are the defaults.
 limits:
   maxMarkdownFileSize: 10485760     # 10MB
   maxConfigFileSize: 1048576        # 1MB
@@ -394,10 +414,17 @@ site:
 
 ### Gotchas
 
-- **`limits` is all-or-nothing.** Unlike every other block, it has no per-key defaults when
-  decoding. If you include a `limits:` block you must list **all ten** keys — omitting even
-  one fails the build with `Failed to parse configuration: The data couldn't be read because
-  it is missing.` If you only want the defaults, omit the block entirely.
+- **Every optional block takes a subset of its keys.** `features`, `limits`, `build`,
+  `server` and `blog` each default the keys you leave out, so raising one limit means writing
+  one line, not restating the other nine. `hirundo validate` reports keys that are not
+  recognized.
+- **Values are validated, not just decoded.** `site.url` must be a URL with a scheme and a
+  host, `site.language` must be a well-formed BCP 47 tag (`en`, `en-US`, `zh-Hans`),
+  `site.author.email` must be an e-mail address, and every `limits` value must be a positive
+  integer. A configuration that breaks one of these fails the build rather than being
+  accepted and quietly ignored. Note that the `site.*` length caps are fixed constants
+  (title 200, description 500, URL 2000, author name 100, e-mail 254) — they are **not**
+  taken from the `limits` block.
 - **`features` is a mapping, not a list.** The legacy plugin form is no longer accepted and
   is a hard parse error:
   ```yaml
@@ -544,7 +571,13 @@ They are not:
 - **Asset fingerprinting, source maps, and JS/CSS concatenation.** `build.enableAssetFingerprinting`,
   `enableSourceMaps`, `concatenateJS`, and `concatenateCSS` are accepted by the config parser
   but are not acted on anywhere.
+- **Six of the ten `limits`.** `maxConfigFileSize`, `maxDescriptionLength`, `maxUrlLength`,
+  `maxAuthorNameLength`, `maxEmailLength` and `maxLanguageCodeLength` are parsed and validated
+  but read nowhere. Only `maxMarkdownFileSize`, `maxFrontMatterSize`, `maxFilenameLength` and
+  `maxTitleLength` have any effect.
 - **`layout:` in frontmatter.** Use `template:`.
+
+`hirundo validate` reports every key in this list that your `config.yaml` sets.
 
 ## Security
 

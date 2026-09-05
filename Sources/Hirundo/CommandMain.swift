@@ -17,7 +17,8 @@ struct HirundoCommand: AsyncParsableCommand {
             BuildCommand.self,
             ServeCommand.self,
             NewCommand.self,
-            CleanCommand.self
+            CleanCommand.self,
+            ValidateCommand.self
         ]
     )
 }

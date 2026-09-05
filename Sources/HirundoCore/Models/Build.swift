@@ -116,7 +116,7 @@ public struct Build: Codable, Sendable {
         )
     }
     
-    enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case contentDirectory, outputDirectory, staticDirectory, templatesDirectory
         case enableAssetFingerprinting, enableSourceMaps, concatenateJS, concatenateCSS
     }

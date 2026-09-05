@@ -20,4 +20,18 @@ public struct Author: Codable, Sendable {
             self.email = nil
         }
     }
+    
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case name, email
+    }
+    
+    /// Routes decoding through the throwing initializer above, which the synthesized decoder
+    /// would otherwise bypass — leaving the e-mail format and length rules unenforced.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            name: container.decode(String.self, forKey: .name),
+            email: container.decodeIfPresent(String.self, forKey: .email)
+        )
+    }
 }

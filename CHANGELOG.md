@@ -11,8 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SECURITY**: `hirundo serve` now screens the `/livereload` WebSocket handshake before upgrading the connection: `Host` must be an IP literal or `localhost`, and `Origin` must be an http(s) URL whose host and port match it. This blocks cross-site WebSocket hijacking by another page open in the developer's browser, and DNS rebinding past that origin check. Refusals return `403` and print a sanitized reason to stderr, repeated only when the reason changes so a refused browser's endless reconnecting reports itself once
 - Note: the check is not authentication. There is no token and no configuration — `config.yaml` is unchanged — and anyone who can reach the port can still read the served site
 
+### Fixed
+- **CRITICAL**: `buildWithRecovery` skipped everything after page rendering — static assets, archive/category/tag pages, and the `sitemap` / `rss` / `searchIndex` feature outputs — while reporting success. `hirundo serve` uses that path for its initial build *and* every rebuild, so the development server served a site with no CSS and no blog index pages; `hirundo build --continue-on-error` produced the same partial output. Both build paths now run one shared list of finalization steps, and a step that fails is reported as a `writing` error instead of being skipped silently
+- A `features:` or `limits:` block had to spell out **all** of its keys — the synthesized decoder required every one — so `features: {sitemap: true}` failed the whole parse. Each key now defaults independently, as the documentation always said
+- Configuration errors named no key: any structural problem surfaced as `Failed to parse configuration: The data couldn't be read because it is missing.` Errors now report the coding path (`Missing required field: site.url`, `Invalid configuration value: blog.postsPerPage: expected Int`), and a validation error raised by a model is no longer reported as invalid YAML
+- `HirundoConfig.load` re-wrapped a `ConfigError` that `parse` had already produced, reporting it as a parse failure whatever it actually was — and prefixing "Failed to parse configuration:" twice when it genuinely was one
+
+### Added
+- `hirundo validate` — checks `config.yaml` without building. Undecodable configurations exit non-zero naming the key at fault; keys Hirundo does not act on (a typo, or a block that was never wired up such as `timeouts` or `server.cors`) are reported as warnings and exit 0. Keys are checked at the top level and one level in, with a "Did you mean …?" suggestion for near misses. Error messages have suggested this command for some time; it did not exist until now
+
 ### Changed
+- **BREAKING**: `site` and `author` are now validated when read from `config.yaml`. They were the only models whose throwing initializer the decoder bypassed, so the documented rules — URL format, title/description length, language code format, e-mail format — did not apply to a configuration file. A `config.yaml` that violates them now fails the build instead of being accepted silently
+- **BREAKING**: `limits` values must be positive integers. `maxMarkdownFileSize: 0` previously made every Markdown file "too large" with an error that mentioned neither the limit nor the configuration
 - docs: README/README.ja/CLAUDE/ARCHITECTURE/SECURITY/AGENTS describe the live-reload handshake check and no longer say `/livereload` accepts connections directly
+- docs: README/README.ja no longer claim `limits` is all-or-nothing, and CLAUDE.md no longer describes `minify` as minifying HTML (it covers CSS and JS assets only)
 
 ## [1.1.4] - 2025-10-28
 

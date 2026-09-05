@@ -86,23 +86,8 @@ public class SiteGenerator {
             includeDrafts: includeDrafts
         )
         
-        // Generate archive pages
-        try archiveGenerator.generateArchivePage(posts: posts, outputURL: outputURL)
-        try archiveGenerator.generateCategoryPages(posts: posts, outputURL: outputURL)
-        try archiveGenerator.generateTagPages(posts: posts, outputURL: outputURL)
-        
-        // Process static assets
-        try processStaticAssets(outputURL: outputURL)
-
-        // Built-in features (Stage 2)
-        if config.features.sitemap {
-            try generateSitemap(outputURL: outputURL)
-        }
-        if config.features.rss {
-            try generateRSS(posts: posts, outputURL: outputURL)
-        }
-        if config.features.searchIndex {
-            try generateSearchIndex(pages: pages, posts: posts, outputURL: outputURL)
+        for step in finalizationSteps(pages: pages, posts: posts, outputURL: outputURL) {
+            try step.run()
         }
         
         // Print build summary
@@ -181,12 +166,84 @@ public class SiteGenerator {
             }
         }
         
+        // The same finalization `build` runs, one step at a time so that a failing step is
+        // reported rather than aborting the ones after it. Skipping this block is what used to
+        // make `--continue-on-error` — and every `hirundo serve` rebuild — emit a site with no
+        // static assets, no archive pages and none of the `features` output.
+        for step in finalizationSteps(pages: processedPages, posts: processedPosts, outputURL: outputURL) {
+            try Task.checkCancellation()
+            do {
+                try step.run()
+            } catch is CancellationError {
+                // A cancelled rebuild is not a build error to report; it is the caller giving up.
+                throw CancellationError()
+            } catch {
+                failCount += 1
+                errors.append(BuildErrorDetail(
+                    file: step.name,
+                    stage: .writing,
+                    error: error,
+                    recoverable: true
+                ))
+            }
+        }
+        
         return BuildResult(
             success: failCount == 0,
             errors: errors,
             successCount: successCount,
             failCount: failCount
         )
+    }
+    
+    private struct FinalizationStep {
+        /// Names the output the step produces, so a failure reads like the build's other error
+        /// lines rather than like a source file.
+        let name: String
+        let run: () throws -> Void
+    }
+    
+    /// Everything that happens after the individual pages have been rendered: the blog index
+    /// pages, the static asset pipeline, and the opt-in `features` outputs.
+    ///
+    /// Both build paths run this same list in this same order. `build` stops at the first
+    /// failure; `buildWithRecovery` records it and moves on. Keeping the list in one place is
+    /// what guarantees the two paths produce the same site.
+    private func finalizationSteps(
+        pages: [Page],
+        posts: [Post],
+        outputURL: URL
+    ) -> [FinalizationStep] {
+        var steps: [FinalizationStep] = [
+            FinalizationStep(name: "archive") {
+                try self.archiveGenerator.generateArchivePage(posts: posts, outputURL: outputURL)
+            },
+            FinalizationStep(name: "categories") {
+                try self.archiveGenerator.generateCategoryPages(posts: posts, outputURL: outputURL)
+            },
+            FinalizationStep(name: "tags") {
+                try self.archiveGenerator.generateTagPages(posts: posts, outputURL: outputURL)
+            },
+            FinalizationStep(name: "static assets") {
+                try self.processStaticAssets(outputURL: outputURL)
+            }
+        ]
+        if config.features.sitemap {
+            steps.append(FinalizationStep(name: "sitemap.xml") {
+                try self.generateSitemap(outputURL: outputURL)
+            })
+        }
+        if config.features.rss {
+            steps.append(FinalizationStep(name: "rss.xml") {
+                try self.generateRSS(posts: posts, outputURL: outputURL)
+            })
+        }
+        if config.features.searchIndex {
+            steps.append(FinalizationStep(name: "search-index.json") {
+                try self.generateSearchIndex(pages: pages, posts: posts, outputURL: outputURL)
+            })
+        }
+        return steps
     }
     
     // Private methods

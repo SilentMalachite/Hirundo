@@ -20,7 +20,7 @@ public struct Server: Codable, Sendable {
         self.init(port: port, liveReload: liveReload)
     }
     
-    enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case port, liveReload
     }
     

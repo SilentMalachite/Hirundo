@@ -31,7 +31,9 @@ public struct Site: Codable, Sendable {
         
         // 言語コードの検証（簡素化）
         if let language = language {
-            let trimmedLanguage = try ConfigValidation.validateLength(language, maxLength: 10, fieldName: "Language code")
+            // 35 is the longest well-formed BCP 47 language tag in practice; 10 cut off tags
+            // such as `nan-Hant-TW`.
+            let trimmedLanguage = try ConfigValidation.validateLength(language, maxLength: 35, fieldName: "Language code")
             guard ConfigValidation.isValidLanguageCode(trimmedLanguage) else {
                 throw ConfigError.invalidValue("Invalid language code format: \(trimmedLanguage)")
             }
@@ -41,6 +43,28 @@ public struct Site: Codable, Sendable {
         }
         
         self.author = author
+    }
+    
+    /// Spelled out (rather than left to synthesis) so that `ConfigDiagnostics` can report keys
+    /// the decoder ignores without keeping a second copy of this list.
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case title, description, url, language, author
+    }
+    
+    /// Routes decoding through the throwing initializer above.
+    ///
+    /// The synthesized decoder assigns straight to the stored properties, so every rule in that
+    /// initializer — URL shape, title and description length, language code format — was dead
+    /// for anything read from `config.yaml`. An absent `language` stays absent, as before.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            title: container.decode(String.self, forKey: .title),
+            description: container.decodeIfPresent(String.self, forKey: .description),
+            url: container.decode(String.self, forKey: .url),
+            language: container.decodeIfPresent(String.self, forKey: .language),
+            author: container.decodeIfPresent(Author.self, forKey: .author)
+        )
     }
 }
 

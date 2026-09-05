@@ -95,6 +95,16 @@ hirundo new page "チーム紹介" --path about/team      # → content/about/te
 - `--open` は `$VISUAL` / `$EDITOR` を許可リストで検証してから起動します。
   失敗しても終了コードは 0 のままです。
 
+### 設定ファイルの検査
+```bash
+hirundo validate
+```
+- ビルドせずに `config.yaml` だけを読みます。デコードできない場合は原因のキーを名指しして
+  終了コード1で終わります（`Missing required field: site.url` など）。
+- デコードはできるが Hirundo が解釈しないキー（綴り間違い、`timeouts`、`server.cors` など）は
+  stderr への警告にとどまり、終了コードは0のままです。検査するのはトップレベルと
+  その1階層下までです。
+
 ### テストの実行
 ```bash
 swift test
@@ -135,7 +145,10 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 - **sitemap**: sitemap.xml生成
 - **rss**: ブログのRSSフィード生成
 - **searchIndex**: 検索インデックス（JSON）の生成
-- **minify**: HTML出力の最小化
+- **minify**: アセットパイプラインでのCSS/JS最小化（**HTML出力は対象外**）
+
+各フラグは独立して省略できます（`features: {sitemap: true}` のように1つだけ書けます）。
+`limits` も同様に、指定したキーだけが上書きされ、残りはデフォルト値になります。
 
 ## 設定ファイル（config.yaml）
 
