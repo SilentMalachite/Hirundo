@@ -13,41 +13,14 @@ struct NewCommand: ParsableCommand {
     )
 }
 
-/// Settings `hirundo new` needs from `config.yaml`, with the fallback used when there is
-/// no config file to read.
-///
-/// Only `build.contentDirectory` and the two length limits matter here, so this resolves
-/// to `Build`/`Limits` rather than a whole `HirundoConfig` — synthesising a `HirundoConfig`
-/// would mean inventing a `site.title` and `site.url` that nothing reads.
-struct NewContentContext {
-    let projectRoot: URL
-    let build: Build
-    let limits: Limits
-
-    /// Reads `config.yaml` from `projectRoot`, falling back to defaults when it is absent
-    /// or unreadable. Matches how `hirundo clean` resolves its output directory: a missing
-    /// config is not a reason to refuse to create a file.
-    static func resolve(projectRoot: URL) -> NewContentContext {
-        let configURL = projectRoot.appendingPathComponent("config.yaml")
-        guard FileManager.default.fileExists(atPath: configURL.path) else {
-            return NewContentContext(
-                projectRoot: projectRoot,
-                build: Build.defaultBuild(),
-                limits: Limits()
-            )
-        }
-        guard let config = try? HirundoConfig.load(from: configURL) else {
-            FileHandle.standardError.write(Data(
-                "⚠️  Could not read config.yaml; using default directories.\n".utf8
-            ))
-            return NewContentContext(
-                projectRoot: projectRoot,
-                build: Build.defaultBuild(),
-                limits: Limits()
-            )
-        }
-        return NewContentContext(projectRoot: projectRoot, build: config.build, limits: config.limits)
-    }
+/// Warns on stderr when `NewContentContext.resolve` fell back to defaults because
+/// `config.yaml` could not be read or parsed. A missing config stays silent — that is
+/// normal, matching how `hirundo clean` resolves its output directory.
+func warnIfConfigUnreadable(_ context: NewContentContext) {
+    guard context.fallback == .unreadable else { return }
+    FileHandle.standardError.write(Data(
+        "⚠️  Could not read config.yaml; using default directories.\n".utf8
+    ))
 }
 
 /// Prints the created path and, when asked, hands the file to the user's editor.
@@ -93,10 +66,11 @@ struct NewPostCommand: ParsableCommand {
     mutating func run() throws {
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let context = NewContentContext.resolve(projectRoot: cwd)
+        warnIfConfigUnreadable(context)
 
         do {
             let result = try ContentScaffolder().scaffold(
-                in: context.projectRoot,
+                in: cwd,
                 build: context.build,
                 limits: context.limits,
                 kind: .post,
@@ -141,10 +115,11 @@ struct NewPageCommand: ParsableCommand {
     mutating func run() throws {
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let context = NewContentContext.resolve(projectRoot: cwd)
+        warnIfConfigUnreadable(context)
 
         do {
             let result = try ContentScaffolder().scaffold(
-                in: context.projectRoot,
+                in: cwd,
                 build: context.build,
                 limits: context.limits,
                 kind: .page,
