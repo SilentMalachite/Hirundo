@@ -84,22 +84,8 @@ public final class ContentProcessor: Sendable {
     ) async throws -> [ProcessedContent] {
         // First, collect all markdown file URLs
         var markdownURLs: [URL] = []
-        
-        guard let enumerator = FileManager.default.enumerator(
-            at: directoryURL,
-            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            throw ContentProcessorError.cannotEnumerateDirectory(directoryURL.path)
-        }
-        
-        // Collect markdown files from directory
-        var pendingURLs: [URL] = []
-        while let fileURL = enumerator.nextObject() as? URL {
-            guard fileURL.pathExtension == "md" || fileURL.pathExtension == "markdown" else {
-                continue
-            }
 
+        for fileURL in try collectMarkdownFiles(in: directoryURL) {
             // Check file size to warn about potentially large files
             if let fileSize = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
                fileSize > self.config.limits.maxMarkdownFileSize {
@@ -111,11 +97,9 @@ public final class ContentProcessor: Sendable {
                 }
             }
 
-            pendingURLs.append(fileURL)
+            markdownURLs.append(fileURL)
         }
-        
-        markdownURLs = pendingURLs
-        
+
         // Process files in batches to control memory usage
         var allProcessedContents: [ProcessedContent] = []
         let batches = markdownURLs.chunked(into: batchSize)
@@ -167,27 +151,8 @@ public final class ContentProcessor: Sendable {
         var allErrors: [(url: URL, error: Error)] = []
         
         // Collect markdown files first
-        var markdownURLs: [URL] = []
-        
-        guard let enumerator = FileManager.default.enumerator(
-            at: directoryURL,
-            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            throw ContentProcessorError.cannotEnumerateDirectory(directoryURL.path)
-        }
-        
-        // Collect markdown files from directory
-        var pendingURLs: [URL] = []
-        while let fileURL = enumerator.nextObject() as? URL {
-            guard fileURL.pathExtension == "md" || fileURL.pathExtension == "markdown" else {
-                continue
-            }
-            pendingURLs.append(fileURL)
-        }
-        
-        markdownURLs = pendingURLs
-        
+        let markdownURLs = try collectMarkdownFiles(in: directoryURL)
+
         let batches = markdownURLs.chunked(into: batchSize)
         
         for (batchIndex, batch) in batches.enumerated() {
@@ -240,6 +205,207 @@ public final class ContentProcessor: Sendable {
         return (contents: allProcessedContents, errors: allErrors)
     }
     
+    // MARK: - Content discovery
+
+    /// Collects every Markdown file under `directoryURL`, following symlinks to directories.
+    ///
+    /// `FileManager`'s enumerator stops at a symlinked directory instead of walking into it,
+    /// so a site keeping part of its content elsewhere — `content/posts -> ../shared-posts` —
+    /// built without those files and said nothing. `ContentScaffolder` writes to the literal
+    /// path the user names, symlinks included, so `hirundo new` was creating files the build
+    /// then ignored; the walk has to reach whatever the scaffolder can write.
+    ///
+    /// Every file is reported at its *logical* path — the one under `directoryURL` — never at
+    /// the resolved one. `SiteGenerator` derives the output URL from the path relative to the
+    /// content directory, so a file found through `content/shared` has to come back as
+    /// `content/shared/page.md` or its page moves.
+    ///
+    /// - Parameter directoryURL: Content directory to walk. May itself be a symlink.
+    /// - Returns: Logical URLs of the `.md` and `.markdown` files found, in enumeration order.
+    /// - Throws: `ContentProcessorError.cannotEnumerateDirectory` when `directoryURL` cannot
+    ///   be enumerated.
+    func collectMarkdownFiles(in directoryURL: URL) throws -> [URL] {
+        var collected: [URL] = []
+        // Seeded with the content directory itself, so `content/here -> .` is recognised as a
+        // loop rather than walked a second time.
+        var visitedDirectories: Set<String> = [Self.canonicalPath(of: directoryURL)]
+
+        // A content directory that is itself a symlink enumerates as empty, so walk its target.
+        if let target = Self.directorySymlinkTarget(of: directoryURL) {
+            collectMarkdownFiles(
+                inResolved: target,
+                reportedAs: directoryURL,
+                visitedDirectories: &visitedDirectories,
+                into: &collected
+            )
+            return collected
+        }
+
+        // Unchanged from before directory symlinks were followed: same call, same options, so
+        // a site with no symlinked content walks exactly as it always did.
+        guard let enumerator = FileManager.default.enumerator(
+            at: directoryURL,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            throw ContentProcessorError.cannotEnumerateDirectory(directoryURL.path)
+        }
+
+        while let fileURL = enumerator.nextObject() as? URL {
+            // Checked before the extension filter: a linked directory rarely ends in `.md`,
+            // and the filter would drop it before it could be followed.
+            if let target = Self.directorySymlinkTarget(of: fileURL),
+               let logicalURL = Self.logicalURL(for: fileURL, enumeratedFrom: directoryURL) {
+                guard visitedDirectories.insert(Self.canonicalPath(of: target)).inserted else {
+                    continue
+                }
+                collectMarkdownFiles(
+                    inResolved: target,
+                    reportedAs: logicalURL,
+                    visitedDirectories: &visitedDirectories,
+                    into: &collected
+                )
+                continue
+            }
+
+            guard Self.isMarkdown(fileURL) else {
+                continue
+            }
+            collected.append(fileURL)
+        }
+
+        return collected
+    }
+
+    /// Walks a directory reached through a symlink, reporting what it holds under
+    /// `logicalDirectory`.
+    ///
+    /// Shallow reads plus recursion rather than a second `enumerator`, because the logical
+    /// path is then built one component at a time — no arithmetic against a prefix the
+    /// enumerator is free to normalise (`/var` to `/private/var` on macOS).
+    ///
+    /// - Parameters:
+    ///   - resolvedDirectory: Directory to read, with its symlinks already resolved.
+    ///   - logicalDirectory: Path this directory is reported at, under the content directory.
+    ///   - visitedDirectories: Canonical paths already walked; a directory is entered once, so
+    ///     `content/loop -> ..` and links pointing at each other terminate instead of looping.
+    ///   - collected: Accumulates the Markdown files found, at their logical paths.
+    private func collectMarkdownFiles(
+        inResolved resolvedDirectory: URL,
+        reportedAs logicalDirectory: URL,
+        visitedDirectories: inout Set<String>,
+        into collected: inout [URL]
+    ) {
+        let entries: [URL]
+        do {
+            entries = try FileManager.default.contentsOfDirectory(
+                at: resolvedDirectory,
+                includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            // The enumerator skips directories it cannot read; say so rather than fail the
+            // build, since the whole point of this walk is that silence hides content.
+            print("Warning: Cannot read linked content directory: \(logicalDirectory.path) (\(error.localizedDescription))")
+            return
+        }
+
+        for entry in entries {
+            let logicalURL = logicalDirectory.appendingPathComponent(entry.lastPathComponent)
+
+            if let target = Self.directorySymlinkTarget(of: entry) {
+                guard visitedDirectories.insert(Self.canonicalPath(of: target)).inserted else {
+                    continue
+                }
+                collectMarkdownFiles(
+                    inResolved: target,
+                    reportedAs: logicalURL,
+                    visitedDirectories: &visitedDirectories,
+                    into: &collected
+                )
+                continue
+            }
+
+            if Self.isDirectory(entry) {
+                guard visitedDirectories.insert(Self.canonicalPath(of: entry)).inserted else {
+                    continue
+                }
+                collectMarkdownFiles(
+                    inResolved: entry,
+                    reportedAs: logicalURL,
+                    visitedDirectories: &visitedDirectories,
+                    into: &collected
+                )
+                continue
+            }
+
+            guard Self.isMarkdown(entry) else {
+                continue
+            }
+            collected.append(logicalURL)
+        }
+    }
+
+    /// Rewrites an enumerated URL so it is rooted at `root` exactly as the caller wrote it.
+    ///
+    /// The enumerator hands back its own normalisation of the path it was given, which on
+    /// macOS turns `/var/…` into `/private/var/…`. Left alone, that prefix travels with every
+    /// file found through a symlink and lands in the output path, so it is mapped back here.
+    /// Only the entry's ancestors need resolving, and they are always real directories — the
+    /// enumerator never descends through a link.
+    ///
+    /// - Returns: The entry under `root`, or `nil` if it is not below `root` at all.
+    private static func logicalURL(for entry: URL, enumeratedFrom root: URL) -> URL? {
+        let rootPath = canonicalPath(of: root)
+        let parentPath = canonicalPath(of: entry.deletingLastPathComponent())
+
+        if parentPath == rootPath {
+            return root.appendingPathComponent(entry.lastPathComponent)
+        }
+        guard parentPath.hasPrefix(rootPath + "/") else {
+            return nil
+        }
+        let relativeParent = String(parentPath.dropFirst(rootPath.count + 1))
+        return root
+            .appendingPathComponent(relativeParent)
+            .appendingPathComponent(entry.lastPathComponent)
+    }
+
+    /// Resolves `url` when it is a symlink pointing at a directory, `nil` otherwise.
+    ///
+    /// Symlinks to files need no help: the enumerator reports them like any other entry and
+    /// reading one already follows the link.
+    private static func directorySymlinkTarget(of url: URL) -> URL? {
+        guard let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey]),
+              values.isSymbolicLink == true else {
+            return nil
+        }
+        let resolved = url.resolvingSymlinksInPath()
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            // Broken link, or a link to a file.
+            return nil
+        }
+        return resolved
+    }
+
+    /// Identity a directory is remembered by, so the same one is never entered twice.
+    ///
+    /// `resolvingSymlinksInPath` gives one spelling per directory whichever link chain, `..`
+    /// segment, or `/private` prefix led there — the property the cycle check rests on.
+    private static func canonicalPath(of url: URL) -> String {
+        return url.resolvingSymlinksInPath().path
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        return (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+    }
+
+    private static func isMarkdown(_ url: URL) -> Bool {
+        return url.pathExtension == "md" || url.pathExtension == "markdown"
+    }
+
     public func renderMarkdownContent(_ result: MarkdownParseResult) -> String {
         // Use the built-in HTML formatter from swift-markdown for robustness and accuracy.
         return result.document?.htmlString ?? ""

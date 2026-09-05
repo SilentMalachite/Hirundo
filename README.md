@@ -138,6 +138,12 @@ If the configuration file does not exist, the build falls back to project defaul
 than failing. `--environment` is currently recorded and printed but does not change the
 output; it is reserved for future conditional behaviour.
 
+The content directory is walked through symlinks. If `content/posts` is a link to a
+directory elsewhere, the Markdown behind it is built, and each page keeps the URL its path
+under `content/` implies — `content/posts/hello.md` publishes at `/posts/hello/` wherever
+the file actually lives. A directory is entered once per build, so a link pointing back at
+somewhere already walked (`content/loop -> ..`) is skipped instead of followed forever.
+
 ### `hirundo serve`
 Start the development server with live reload.
 
