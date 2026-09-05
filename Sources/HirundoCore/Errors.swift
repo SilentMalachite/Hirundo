@@ -239,8 +239,11 @@ extension ContentScaffoldError {
         case .invalidSlug:
             code = "INVALID_SLUG"
             category = .configuration
-            suggestion = "Pass a --slug that names a single file, "
-                + "using letters, digits and hyphens only"
+            // Describes what is actually rejected. The slug is used verbatim as the file
+            // name, so there is no character-set rule to quote here beyond the separators
+            // and control characters that would stop it naming one file.
+            suggestion = "Pass a non-empty --slug that names a single file: no \"/\" or "
+                + "\"\\\", no control characters, and short enough for the file name limit"
         case .invalidPath:
             code = "INVALID_PATH"
             category = .configuration

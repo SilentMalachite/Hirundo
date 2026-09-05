@@ -176,7 +176,7 @@ hirundo new page <title> [--path <path>] [--template <template>] [--open] [--ver
 
 | Option | Meaning |
 |---|---|
-| `--slug` | File name without the `.md` extension. Defaults to a slug derived from the title. |
+| `--slug` | File name without the `.md` extension, used verbatim. Defaults to a slug derived from the title. |
 | `--categories` | Comma-separated. Blank entries and duplicates are dropped. |
 | `--tags` | Comma-separated. Blank entries and duplicates are dropped. |
 | `--template` | Value for the `template:` key. Defaults to `post.html`. |
@@ -213,18 +213,26 @@ starter pages `hirundo init` writes.
 
 **Notes**
 
-- The content directory comes from `build.contentDirectory` in `config.yaml`. With no
-  config file, `content` is used silently. If `config.yaml` exists but cannot be read,
-  `content` is used and a warning is printed.
+- The content directory comes from `build.contentDirectory` in `config.yaml`. If there is
+  no config file, or it exists but cannot be read, `content` is used and a warning is
+  printed on stderr saying which of the two happened; the file is still created and the
+  exit code stays 0. A missing config usually means you are not in a site root — the file
+  is written, but nothing there will build until a `config.yaml` exists.
 - **Neither command overwrites an existing file.** A collision is an error; pass a
   different `--slug` or `--path`, or edit the file that is already there.
 - `--slug` decides the **file name only**. No `slug:` key is written into the frontmatter:
   the output URL comes from the file name while RSS links come from the post's slug, so a
   `slug:` that disagreed with the file name would make the two point at different URLs.
+  A `--slug` you pass is used **verbatim** — it is not slugified — so it becomes the file
+  name and therefore the URL segment exactly as typed, spaces and non-ASCII included.
+  Only `/`, `\`, `.`, `..`, control characters and over-long values are rejected.
 - `--open` only runs editors on an allow-list (`vim`, `nvim`, `nano`, `emacs`, `code`,
-  `subl`, `vi`, `open`, and similar) and never goes through a shell. If `$EDITOR` is
-  unset, rejected, or fails to start, the command prints a warning and still exits 0 —
-  the file has already been written.
+  `subl`, `vi`, `open`, and similar) and never goes through a shell. The name is run on
+  its own, so a value carrying arguments (`code --wait`, `vim +startinsert`) is refused,
+  as is an absolute path outside a small fixed list.
+  If `$EDITOR` is unset, refused, or fails to start, the command prints a warning and
+  still exits 0 — the file has already been written. The warning distinguishes "nothing
+  set" from "set but refused", and names the refused value.
 
 ### `hirundo clean`
 Clean output directory and caches.

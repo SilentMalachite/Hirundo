@@ -6,8 +6,14 @@ public struct ContentScaffoldOptions: Sendable {
     public var title: String
     /// File name (without extension) for the new file. Derived from `title` when nil.
     public var slug: String?
-    /// Path relative to the content directory. Takes precedence over `slug` when both
-    /// are given; only `hirundo new page` passes it.
+    /// Path relative to the content directory. Takes precedence over `slug` **and over the
+    /// kind's own directory** when given; only `hirundo new page` passes it.
+    ///
+    /// That precedence matters for `.post`: a path is used exactly as written, so
+    /// `path: "notes/x"` writes `content/notes/x.md` with post front matter, while
+    /// `ContentProcessor` classifies content as a post by looking for `/posts/` (or
+    /// `/blog/`) in the path — the build would treat that file as a page. Callers passing
+    /// `path` with `.post` must include the posts directory themselves (`"posts/notes/x"`).
     public var path: String?
     public var categories: [String]
     public var tags: [String]
@@ -177,7 +183,7 @@ public struct ContentScaffolder {
         limits: Limits
     ) throws -> String {
         if let path = options.path {
-            return try sanitizedPath(path)
+            return try sanitizedPath(path, limits: limits)
         }
 
         let slug = try resolveSlug(options.slug, title: title, limits: limits)
@@ -192,7 +198,13 @@ public struct ContentScaffolder {
     private func resolveSlug(_ explicit: String?, title: String, limits: Limits) throws -> String {
         guard let explicit else {
             // Leave room for the ".md" the caller appends.
-            return title.slugify(maxLength: max(1, limits.maxFilenameLength - 3))
+            let derived = title.slugify(maxLength: max(1, limits.maxFilenameLength - 3))
+            // `slugify` trims the truncated form back to nothing when the cut lands in a
+            // run of hyphens, and its own "untitled" fallback sits after the truncation
+            // branch, so it can hand back "". Containing that here — rather than in
+            // `slugify`, which has other callers — keeps `posts/.md`, a hidden file, from
+            // ever being the destination.
+            return derived.isEmpty ? "untitled" : derived
         }
 
         let trimmed = explicit.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -220,14 +232,27 @@ public struct ContentScaffolder {
     ///
     /// `PathSanitizer.sanitize` returns an empty string for anything it refuses — `..`,
     /// `./`, a leading `/`, NUL bytes, a scheme — so an empty result is the rejection.
-    private func sanitizedPath(_ path: String) throws -> String {
+    private func sanitizedPath(_ path: String, limits: Limits) throws -> String {
         let sanitized = PathSanitizer.sanitize(path.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !sanitized.isEmpty else {
             throw ContentScaffoldError.invalidPath(
                 "Path must be relative to the content directory: \(path)"
             )
         }
-        return sanitized.hasSuffix(".md") ? sanitized : sanitized + ".md"
+        let withExtension = sanitized.hasSuffix(".md") ? sanitized : sanitized + ".md"
+
+        // The same file name limit `resolveSlug` applies, but per component: a deep chain
+        // of short directory names is legitimate, while any single over-long name would
+        // otherwise fail inside the write as a bare ENAMETOOLONG rather than as a clear
+        // rejection of the input.
+        for component in withExtension.split(separator: "/")
+        where component.count > limits.maxFilenameLength {
+            throw ContentScaffoldError.invalidPath(
+                "Path component exceeds the \(limits.maxFilenameLength)-character "
+                    + "file name limit: \(component)"
+            )
+        }
+        return withExtension
     }
 
     /// Belt-and-braces check that the resolved destination really sits inside the content
@@ -252,6 +277,13 @@ public struct ContentScaffolder {
     /// failure must not leave a truncated file behind) and must land on the literal path
     /// the user named, whereas `SiteFileManager` resolves symlinks — right for generated
     /// output under `_site`, wrong for content the user asked to create here.
+    ///
+    /// A consequence, and a deliberate one: `standardizedFileURL` does not resolve
+    /// symlinks, so a symlinked directory the user has already placed under `content/` will
+    /// take the write outside the content directory. That is not an escalation — planting
+    /// that symlink already needs write access to the content directory — and following the
+    /// user's own symlink is what they asked for. Do not "fix" this by switching to
+    /// `SiteFileManager`.
     private func write(_ contents: String, to destination: URL) throws {
         let parent = destination.deletingLastPathComponent()
         let createdRoot = topmostMissingAncestor(of: parent)

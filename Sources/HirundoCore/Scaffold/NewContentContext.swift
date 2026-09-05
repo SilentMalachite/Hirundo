@@ -3,9 +3,10 @@ import Foundation
 /// Why `NewContentContext.resolve` fell back to defaults instead of the values in
 /// `config.yaml`.
 ///
-/// Only `.unreadable` is worth telling the user about: a missing config is normal and
-/// expected — most commands (like `hirundo clean`) treat it the same way — so it stays
-/// silent.
+/// The two cases are different problems and the CLI reports them differently: a missing
+/// config usually means the command was run outside a site, while an unreadable one means
+/// the site is there but broken. `HirundoCore` says nothing about either; it only reports
+/// which happened.
 public enum NewContentContextFallback: Sendable, Equatable {
     /// No `config.yaml` file exists at the project root.
     case missing

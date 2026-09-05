@@ -68,9 +68,9 @@ hirundo build
 hirundo new post "記事タイトル"
 hirundo new post "記事タイトル" --slug custom-name --categories "swift,web" --tags "ssg" --draft
 
-# ページの作成 → content/<スラグ>.md
-hirundo new page "ページタイトル"
-hirundo new page "チーム紹介" --path about/team
+# ページの作成
+hirundo new page "ページタイトル"                    # → content/<スラグ>.md
+hirundo new page "チーム紹介" --path about/team      # → content/about/team.md
 ```
 
 - 生成先は `config.yaml` の `build.contentDirectory` に従います。

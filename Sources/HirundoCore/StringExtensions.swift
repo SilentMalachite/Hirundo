@@ -24,7 +24,10 @@ extension String {
         if encodedSlug.count > maxLength {
             let endIndex = encodedSlug.index(encodedSlug.startIndex, offsetBy: maxLength)
             let truncated = String(encodedSlug[..<endIndex])
-            // Ensure we don't end with a hyphen or a partial encoding
+            // Trim trailing hyphens, and a trailing "%" left by a cut that landed right
+            // before an escape. This is not a guarantee against partial encodings: a cut
+            // after "%E" still leaves a malformed escape, and the result can trim to "" —
+            // callers that turn a slug into a file name must handle both.
             return truncated.trimmingCharacters(in: CharacterSet(charactersIn: "-%"))
         }
         

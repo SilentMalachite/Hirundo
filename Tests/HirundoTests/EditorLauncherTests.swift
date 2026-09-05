@@ -64,4 +64,52 @@ final class EditorLauncherTests: XCTestCase {
 
         XCTAssertEqual(command, "vim")
     }
+
+    // MARK: - Telling "nothing set" apart from "set but refused"
+
+    func testResolveEditor_reportsNotConfiguredWhenNothingIsSet() {
+        XCTAssertEqual(EditorLauncher.resolveEditor(environment: [:]), .notConfigured)
+        XCTAssertEqual(
+            EditorLauncher.resolveEditor(environment: ["EDITOR": "   "]),
+            .notConfigured
+        )
+    }
+
+    func testResolveEditor_reportsTheRejectedValueForAnEditorWithArguments() {
+        // The common case: a perfectly good editor the allow-list refuses because the
+        // value carries a flag. Telling this user to "set $EDITOR" would be wrong.
+        XCTAssertEqual(
+            EditorLauncher.resolveEditor(environment: ["EDITOR": "code --wait"]),
+            .rejected(variable: "EDITOR", value: "code --wait")
+        )
+    }
+
+    func testResolveEditor_namesTheVariableThatWasSet() {
+        XCTAssertEqual(
+            EditorLauncher.resolveEditor(environment: ["VISUAL": "subl -w"]),
+            .rejected(variable: "VISUAL", value: "subl -w")
+        )
+    }
+
+    func testResolveEditor_reportsVisualWhenBothAreRejected() {
+        // $VISUAL takes precedence, so it is the value that would have been used.
+        XCTAssertEqual(
+            EditorLauncher.resolveEditor(environment: ["VISUAL": "subl -w", "EDITOR": "code --wait"]),
+            .rejected(variable: "VISUAL", value: "subl -w")
+        )
+    }
+
+    func testResolveEditor_reportsEditorWhenOnlyVisualIsBlank() {
+        XCTAssertEqual(
+            EditorLauncher.resolveEditor(environment: ["VISUAL": "", "EDITOR": "nvim -u NONE"]),
+            .rejected(variable: "EDITOR", value: "nvim -u NONE")
+        )
+    }
+
+    func testResolveEditor_resolvesBeforeReportingARejection() {
+        XCTAssertEqual(
+            EditorLauncher.resolveEditor(environment: ["VISUAL": "code --wait", "EDITOR": "vim"]),
+            .resolved("vim")
+        )
+    }
 }

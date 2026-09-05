@@ -74,7 +74,7 @@ public enum SecurityUtilities {
                             (isTestEnvironment && (sanitized.hasPrefix("/usr/bin/") || sanitized.hasPrefix("/usr/local/bin/")))
             
             if !isValidPath {
-                print("⚠️ Editor path '\(sanitized)' is not in the allowed paths for security reasons.")
+                warn("Editor path '\(sanitized)' is not in the allowed paths for security reasons.")
                 return nil
             }
         }
@@ -118,14 +118,14 @@ public enum SecurityUtilities {
             }
             
             if !executableFound && !isTestEnvironment {
-                print("⚠️ Editor executable '\(commandName)' not found in common paths.")
+                warn("Editor executable '\(commandName)' not found in common paths.")
                 return nil
             }
         } else {
             // For absolute paths, check if the file exists and is executable
             // In test environments, we'll accept allowed paths even if the file doesn't exist
             if !fileManager.isExecutableFile(atPath: sanitized) && !isTestEnvironment {
-                print("⚠️ Editor at path '\(sanitized)' is not an executable file.")
+                warn("Editor at path '\(sanitized)' is not an executable file.")
                 return nil
             }
         }
@@ -133,6 +133,14 @@ public enum SecurityUtilities {
         // Return just the command name for maximum security
         // This forces the use of PATH resolution rather than absolute paths
         return commandName
+    }
+
+    /// Writes a rejection notice to stderr.
+    ///
+    /// Not `print`: these notices explain why something was refused, and a command that
+    /// also writes a result to stdout (`hirundo new`) must not interleave the two.
+    private static func warn(_ message: String) {
+        try? FileHandle.standardError.write(contentsOf: Data("⚠️ \(message)\n".utf8))
     }
 }
 

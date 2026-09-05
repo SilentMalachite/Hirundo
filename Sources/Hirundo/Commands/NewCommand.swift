@@ -13,14 +13,27 @@ struct NewCommand: ParsableCommand {
     )
 }
 
-/// Warns on stderr when `NewContentContext.resolve` fell back to defaults because
-/// `config.yaml` could not be read or parsed. A missing config stays silent — that is
-/// normal, matching how `hirundo clean` resolves its output directory.
-func warnIfConfigUnreadable(_ context: NewContentContext) {
-    guard context.fallback == .unreadable else { return }
-    FileHandle.standardError.write(Data(
-        "⚠️  Could not read config.yaml; using default directories.\n".utf8
-    ))
+/// Warns on stderr when `NewContentContext.resolve` fell back to default directories
+/// instead of the values in `config.yaml`.
+///
+/// Both fallbacks are worth saying out loud, and they say different things. No config file
+/// usually means the command was run outside a site: the file is still created, but nothing
+/// there will ever build, because `SiteGenerator` requires a `config.yaml`. A config that
+/// exists but will not parse is a broken site, not a missing one. Either way the file has
+/// been written, so this is a warning and the exit code stays 0.
+func warnAboutConfigFallback(_ context: NewContentContext) {
+    let message: String
+    switch context.fallback {
+    case nil:
+        return
+    case .missing:
+        message = "No config.yaml here, so default directories were used. "
+            + "Run this from a Hirundo site root, or create one with 'hirundo init'."
+    case .unreadable:
+        message = "Could not read config.yaml; using default directories. "
+            + "Fix the config so the site builds with the settings you meant."
+    }
+    FileHandle.standardError.write(Data("⚠️  \(message)\n".utf8))
 }
 
 /// Prints the created path and, when asked, hands the file to the user's editor.
@@ -64,7 +77,7 @@ struct NewPostCommand: ParsableCommand {
     mutating func run() throws {
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let context = NewContentContext.resolve(projectRoot: cwd)
-        warnIfConfigUnreadable(context)
+        warnAboutConfigFallback(context)
 
         do {
             let result = try ContentScaffolder().scaffold(
@@ -113,7 +126,7 @@ struct NewPageCommand: ParsableCommand {
     mutating func run() throws {
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let context = NewContentContext.resolve(projectRoot: cwd)
-        warnIfConfigUnreadable(context)
+        warnAboutConfigFallback(context)
 
         do {
             let result = try ContentScaffolder().scaffold(

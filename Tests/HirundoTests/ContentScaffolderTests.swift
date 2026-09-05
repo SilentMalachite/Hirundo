@@ -108,6 +108,42 @@ final class ContentScaffolderTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.url.path))
     }
 
+    /// A derived slug that truncates back to nothing must not become a hidden `.md` file.
+    func testPost_fallsBackToUntitledWhenTheDerivedSlugTruncatesToNothing() throws {
+        // slugify cuts this to 37 hyphens, then trims hyphens off both ends, leaving "".
+        let result = try scaffold(
+            kind: .post,
+            ContentScaffoldOptions(title: String(repeating: "-", count: 60)),
+            limits: Limits(maxFilenameLength: 40)
+        )
+
+        XCTAssertEqual(result.relativePath, "content/posts/untitled.md")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.url.path))
+    }
+
+    /// An explicit `--slug` is used verbatim: it is not slugified, so whatever the user
+    /// types becomes the file name and therefore the URL segment. Deliberate — a strict
+    /// charset would refuse legitimate names like `Café-2026`.
+    func testPost_usesAnExplicitSlugVerbatimIncludingSpaces() throws {
+        let result = try scaffold(
+            kind: .post,
+            ContentScaffoldOptions(title: "T", slug: "My Post!")
+        )
+
+        XCTAssertEqual(result.relativePath, "content/posts/My Post!.md")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.url.path))
+    }
+
+    func testPost_usesAnExplicitSlugVerbatimIncludingNonASCII() throws {
+        let result = try scaffold(
+            kind: .post,
+            ContentScaffoldOptions(title: "T", slug: "café-2026")
+        )
+
+        XCTAssertEqual(result.relativePath, "content/posts/café-2026.md")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.url.path))
+    }
+
     func testPost_respectsACustomContentDirectory() throws {
         let build = try Build(contentDirectory: "docs")
         let result = try scaffold(kind: .post, ContentScaffoldOptions(title: "Hello"), build: build)
@@ -248,6 +284,58 @@ final class ContentScaffolderTests: XCTestCase {
         }
     }
 
+    /// `--path` enforces the same file name limit `--slug` does, so an over-long name is
+    /// rejected as bad input rather than surfacing as an ENAMETOOLONG write failure.
+    func testRejectsAPathComponentOverTheFilenameLimit() {
+        assertThrows(.invalidPath("")) {
+            try scaffold(
+                kind: .page,
+                ContentScaffoldOptions(title: "T", path: "a/" + String(repeating: "b", count: 300))
+            )
+        }
+    }
+
+    /// The limit is per component: many short directory names are legitimate however deep.
+    func testAcceptsADeepPathOfShortComponents() throws {
+        let result = try scaffold(
+            kind: .page,
+            ContentScaffoldOptions(title: "T", path: "a/b/c/d/e/f/g/h/deep"),
+            limits: Limits(maxFilenameLength: 20)
+        )
+
+        XCTAssertEqual(result.relativePath, "content/a/b/c/d/e/f/g/h/deep.md")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.url.path))
+    }
+
+    // MARK: - Rollback
+
+    /// A write that fails after directories were created must leave none of them behind.
+    ///
+    /// Reaching the write needs a name this scaffolder accepts but the filesystem does not:
+    /// `maxFilenameLength` is raised past what APFS allows (255 characters per component),
+    /// so the 300-character name clears `sanitizedPath` and then fails with ENAMETOOLONG.
+    func testFailedWriteRemovesOnlyTheDirectoriesItCreated() throws {
+        let contentDirectory = projectRoot.appendingPathComponent("content")
+        try FileManager.default.createDirectory(at: contentDirectory, withIntermediateDirectories: true)
+
+        assertThrows(.cannotWriteFile("")) {
+            try scaffold(
+                kind: .page,
+                ContentScaffoldOptions(title: "T", path: "a/" + String(repeating: "b", count: 300)),
+                limits: Limits(maxFilenameLength: 1000)
+            )
+        }
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: contentDirectory.appendingPathComponent("a").path),
+            "The directory this call created must be rolled back"
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: contentDirectory.path),
+            "A pre-existing directory must survive the rollback"
+        )
+    }
+
     // MARK: - Comma-separated option parsing
 
     func testParseList_returnsEmptyForNil() {
@@ -301,10 +389,19 @@ final class ContentScaffolderTests: XCTestCase {
             ContentScaffoldOptions(title: "Secret Post", draft: true)
         )
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.url.path))
+        // A companion that is *not* a draft, so the absence below means "excluded" rather
+        // than "the build produced nothing" or "the slug was something else".
+        _ = try scaffold(kind: .post, ContentScaffoldOptions(title: "Public Post"))
 
         let generator = try SiteGenerator(projectPath: projectRoot.path)
         try await generator.build(clean: true, includeDrafts: false)
 
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: projectRoot.appendingPathComponent("_site/posts/public-post/index.html").path
+            ),
+            "A non-draft post must reach the output directory"
+        )
         let output = projectRoot.appendingPathComponent("_site/posts/secret-post/index.html")
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: output.path),

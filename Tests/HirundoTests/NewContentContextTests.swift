@@ -24,7 +24,8 @@ final class NewContentContextTests: XCTestCase {
         )
     }
 
-    func testNoConfigFile_fallsBackToDefaultsWithoutWarning() {
+    // The CLI warns about both fallbacks; `resolve` only reports which one happened.
+    func testNoConfigFile_fallsBackToDefaultsAndSignalsMissing() {
         let context = NewContentContext.resolve(projectRoot: projectRoot)
 
         XCTAssertEqual(context.build.contentDirectory, Build.defaultBuild().contentDirectory)

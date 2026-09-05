@@ -45,11 +45,17 @@ final class ContentScaffoldErrorMappingTests: XCTestCase {
         )
     }
 
-    func testToHirundoError_whenSlugInvalid_suggestsUsableCharacters() {
+    func testToHirundoError_whenSlugInvalid_describesWhatIsActuallyRejected() {
         let info = ContentScaffoldError.invalidSlug("contains a slash").toHirundoError()
 
         XCTAssertNotNil(info.suggestion)
         XCTAssertTrue(info.suggestedAction.contains("--slug"))
+        // The slug is used verbatim as the file name, so the suggestion must not promise a
+        // character-set rule that `ContentScaffolder.resolveSlug` does not enforce.
+        XCTAssertFalse(
+            info.suggestedAction.lowercased().contains("letters, digits"),
+            "Got a suggestion promising an unenforced charset: \(info.suggestedAction)"
+        )
     }
 
     func testToHirundoError_whenPathInvalid_mentionsTheContentDirectory() {
