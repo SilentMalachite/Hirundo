@@ -175,8 +175,9 @@ supplies it, the port must be between 1 and 65535.
 `--host` is the address the server actually binds to, and accepts only a numeric address or
 the literal `localhost` — any other host name is rejected. The default, `localhost`,
 resolves to the IPv4 loopback address, so only this machine can connect. Pass
-`--host 0.0.0.0` to accept connections from other machines; doing so exposes the live
-reload WebSocket with no authentication, so only do this on a trusted network.
+`--host 0.0.0.0` to accept connections from other machines; anyone who can then reach this
+machine can read the site, so only do this on a trusted network. Open the site by IP
+address when you do — a host name is refused by the live-reload check described below.
 
 - Directory requests resolve to that directory's `index.html`, so `/`, `/about`, and
   `/about/` all work.
@@ -184,6 +185,17 @@ reload WebSocket with no authentication, so only do this on a trusted network.
 - With live reload on, `serve` watches the content, templates and static directories (not
   the output directory) and rebuilds on change, then pushes a reload to every connected
   browser over a WebSocket exposed at `/livereload`.
+- The `/livereload` handshake is screened before the connection is upgraded. It is accepted
+  only when the request carries an `Origin` header whose host and port match the `Host` it
+  was addressed to, and only when that `Host` is an IP address or `localhost`. Both rules
+  are needed: the first keeps another page that happens to be open in your browser from
+  attaching to your development server, and the second keeps a name that resolves to your
+  loopback address from satisfying the first. A refused handshake is answered with `403` and
+  the reason is printed to the terminal, repeated only when the reason changes — a refused
+  browser reconnects forever, and would otherwise say so forever. There is nothing to
+  configure, and the check is not
+  authentication — it identifies the page, not the person, and anyone who can reach the port
+  can still read the site.
 - Rebuilds do not clean the output directory. Deleting a page therefore leaves the HTML that
   was already built for it in place, and its URL keeps serving the old content; run
   `hirundo build --clean` to drop it.
@@ -523,9 +535,12 @@ They are not:
 - **Plugin architecture.** The plugin system was removed; the four flags under `features`
   replace it. There is no custom-plugin development support, and no `imageOptimization` or
   `syntaxHighlight` feature.
-- **WebSocket authentication for live reload.** There is no `/auth-token` endpoint and no
-  token handshake; `/livereload` accepts connections directly. Do not expose the development
-  server to an untrusted network.
+- **WebSocket authentication for live reload.** There is no `/auth-token` endpoint, no token
+  handshake, and nothing to configure. `/livereload` is guarded by an `Origin`/`Host` check
+  (see [`hirundo serve`](#hirundo-serve)), which keeps other pages in your browser out but
+  identifies no one: anyone who can reach the port can read the site, and can reach live
+  reload too by opening the site by IP address. Do not expose the development server to an
+  untrusted network.
 - **Asset fingerprinting, source maps, and JS/CSS concatenation.** `build.enableAssetFingerprinting`,
   `enableSourceMaps`, `concatenateJS`, and `concatenateCSS` are accepted by the config parser
   but are not acted on anywhere.
@@ -541,7 +556,9 @@ Hirundo implements security measures appropriate to a static site generator:
 - **Path validation**: `build` directories may not be absolute or contain `..`; the
   development server rejects request paths that escape the output directory.
 - **Asset processing**: CSS/JS processing with optional minification.
-- **Development server**: WebSocket session cleanup and file-watcher teardown on shutdown.
+- **Development server**: the live-reload handshake is accepted only from a same-origin page
+  that reached the server by address; WebSocket session cleanup and file-watcher teardown on
+  shutdown.
 
 See [SECURITY.md](SECURITY.md) for the security policy.
 

@@ -46,12 +46,23 @@ Hirundo includes basic security measures appropriate for a static site generator
 
 #### Development Server Security
 - **Basic WebSocket**: Simple live reload functionality on `/livereload`
+- **Handshake Screening**: `/livereload` is accepted only when `Host` is an IP
+  literal or `localhost` and `Origin` is an http(s) URL whose host and port match
+  that `Host`; anything else is answered with `403` and a sanitized reason on
+  stderr, repeated only when the reason changes so that a refused browser
+  reconnecting forever reports itself once. The `Origin` rule keeps another page
+  open in the developer's browser
+  from attaching to the server (cross-site WebSocket hijacking); the `Host` rule
+  keeps a name pointed at the loopback address from satisfying it (DNS rebinding)
 - **Output-Directory Confinement**: Requests whose resolved path falls outside
   the configured output directory are rejected
 - **Error Handling**: Proper error reporting without sensitive information leakage
 
 There is no CORS configuration and no WebSocket authentication; the server is
-intended for local development only.
+intended for local development only. The handshake check above is a same-origin
+check, not authentication: it has no token and no configuration, and it does not
+identify who is connecting. Anyone who can reach the port can read the served
+site, and can reach live reload as well by addressing the server by IP.
 
 ## Security Configuration
 
@@ -90,7 +101,9 @@ Before deploying Hirundo in production:
 Hirundo focuses on the minimal, appropriate safeguards for a static site generator. There is no dynamic execution of untrusted code.
 
 - Path handling uses standard Swift file APIs with proper error propagation.
-- WebSocket live-reload is basic and scoped to local development.
+- WebSocket live-reload is basic and scoped to local development. Its handshake is
+  screened by `Origin`/`Host` so that only the page this server served can connect;
+  that is not authentication and does not make the server safe to expose.
 - There is no plugin system at all. It was removed in Stage 2 and replaced by
   compiled-in feature toggles (`features:` in `config.yaml`), so there is no
   dynamic loading path to secure.

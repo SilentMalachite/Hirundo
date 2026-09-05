@@ -40,6 +40,7 @@
 - 秘密情報はコミットしない。サイト設定は `config.yaml` を利用し入力値を検証。
 - `config.yaml` のトップレベルキーは `site` / `build` / `server` / `blog` / `features` / `limits` の6つのみ。未知のキーは黙って無視される。
 - 設定の各種制限は `limits`（ファイルサイズ・文字数の10項目）で指定する。タイムアウト設定・CORS 設定・WebSocket 認証設定は存在しない。詳細は `SECURITY.md` を参照。
+- `/livereload` のハンドシェイクは `WebSocketOriginGuard` が `Origin` と `Host` で検証する（一致しなければ 403）。設定項目もトークンも無く、認証ではない。
 
 ## アーキテクチャ注意点
 - `hirundo` 実行ファイルは `HirundoCore` に委譲。機能追加はコアに実装し、CLI で公開する方針。

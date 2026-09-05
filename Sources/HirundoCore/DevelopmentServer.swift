@@ -10,6 +10,8 @@ public final class DevelopmentServer: @unchecked Sendable {
     private let fileManager: FileManager
     private let outputPath: String
     private let injector = LiveReloadScriptInjector()
+    private let originGuard = WebSocketOriginGuard()
+    private let refusalLog = RefusalLog()
 
     /// The hub the `/livereload` endpoint registers its clients with.
     public let liveReloadHub: LiveReloadHub
@@ -68,7 +70,7 @@ public final class DevelopmentServer: @unchecked Sendable {
         if liveReload {
             // WebSocket endpoint for live reload. `connected`/`disconnected` register and
             // unregister the client with the hub so `broadcast` can reach every open tab.
-            server["/livereload"] = websocket(
+            let upgrade = websocket(
                 text: { session, text in
                     if text == "ping" { session.writeText("pong") }
                 },
@@ -81,6 +83,32 @@ public final class DevelopmentServer: @unchecked Sendable {
                     Task { await hub.remove(id: id) }
                 }
             )
+
+            // The handshake is screened before Swifter upgrades the connection, because after
+            // the upgrade there is no response left to refuse with — and a rejected client must
+            // never reach the hub, or a page that has no business knowing when this project
+            // rebuilds would be told every time it does.
+            server["/livereload"] = { [originGuard, refusalLog] request in
+                switch originGuard.evaluate(
+                    origin: request.headers["origin"],
+                    host: request.headers["host"]
+                ) {
+                case .allow:
+                    return upgrade(request)
+                case .deny(let rejection):
+                    // Reported rather than dropped silently: from the browser's side a refusal
+                    // is indistinguishable from a server that stopped reloading, so the reason
+                    // has to appear somewhere the developer will look. Reported only when the
+                    // reason changes, because a refused client does not go away — the injected
+                    // script reconnects for as long as the tab is open, and a page refused
+                    // once would otherwise repeat itself every few seconds for the rest of the
+                    // session.
+                    if refusalLog.shouldReport(rejection.reason) {
+                        Self.warn("Refused a live reload connection: \(rejection.reason)")
+                    }
+                    return .forbidden
+                }
+            }
         }
 
         // Static files are served from the not-found handler, which runs after the
@@ -182,9 +210,38 @@ public final class DevelopmentServer: @unchecked Sendable {
         }
     }
 
+    /// Writes a notice to stderr rather than stdout, so it stays separate from the URLs and
+    /// build results `serve` prints as its normal output.
+    private static func warn(_ message: String) {
+        try? FileHandle.standardError.write(contentsOf: Data("⚠️  \(message)\n".utf8))
+    }
+
     deinit {
         // Ensure resources are released, idempotently
         server.stop()
+    }
+}
+
+/// Remembers the last refusal reported, so a client that keeps retrying is reported once.
+///
+/// Only the most recent reason is kept rather than a set of every reason seen: the reasons quote
+/// attacker-controlled headers, so a set would grow without bound for as long as someone cared to
+/// vary them. Keeping one means a refusal is repeated if it alternates with a different one,
+/// which is the right trade — two problems in a session are worth seeing twice.
+///
+/// `NSLock` because Swifter serves each connection on its own thread and this is read and written
+/// from a request handler, which cannot await.
+final class RefusalLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lastReason: String?
+
+    /// True when `reason` differs from the one reported before it.
+    func shouldReport(_ reason: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard lastReason != reason else { return false }
+        lastReason = reason
+        return true
     }
 }
 

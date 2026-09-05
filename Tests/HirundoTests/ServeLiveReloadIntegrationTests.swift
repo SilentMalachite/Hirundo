@@ -6,6 +6,15 @@ import XCTest
 /// handshake, FSEvents delivery, a debounce interval), so a fixed `sleep` before asserting would
 /// either be flaky on a slow machine or slow on a fast one. Polling lets the test proceed the
 /// moment the condition is true and only fail when it genuinely never becomes true.
+/// Opens a live-reload socket the way the injected client does: from the page this very server
+/// served. ``WebSocketOriginGuard`` refuses a handshake whose `Origin` names anything else, and a
+/// `URLSessionWebSocketTask` sends no `Origin` of its own, so these tests have to supply it.
+private func liveReloadTask(port: Int) -> URLSessionWebSocketTask {
+    var request = URLRequest(url: URL(string: "ws://127.0.0.1:\(port)/livereload")!)
+    request.setValue("http://127.0.0.1:\(port)", forHTTPHeaderField: "Origin")
+    return URLSession.shared.webSocketTask(with: request)
+}
+
 private func waitUntil(
     timeout: TimeInterval,
     pollInterval: TimeInterval = 0.05,
@@ -74,8 +83,7 @@ final class ServeLiveReloadIntegrationTests: XCTestCase {
         let port = Int.random(in: 20000...30000)
         try await startServer(hub: hub, port: port)
 
-        let url = URL(string: "ws://127.0.0.1:\(port)/livereload")!
-        let task = URLSession.shared.webSocketTask(with: url)
+        let task = liveReloadTask(port: port)
         task.resume()
         defer { task.cancel(with: .goingAway, reason: nil) }
 
@@ -104,8 +112,7 @@ final class ServeLiveReloadIntegrationTests: XCTestCase {
         let port = Int.random(in: 20000...30000)
         try await startServer(hub: hub, port: port)
 
-        let url = URL(string: "ws://127.0.0.1:\(port)/livereload")!
-        let task = URLSession.shared.webSocketTask(with: url)
+        let task = liveReloadTask(port: port)
         task.resume()
 
         let connected = await waitUntil(timeout: 5.0) { await hub.clientCount == 1 }
@@ -145,8 +152,7 @@ final class ServeLiveReloadIntegrationTests: XCTestCase {
         }
         try await manager.start()
 
-        let url = URL(string: "ws://127.0.0.1:\(port)/livereload")!
-        let task = URLSession.shared.webSocketTask(with: url)
+        let task = liveReloadTask(port: port)
         task.resume()
         defer { task.cancel(with: .goingAway, reason: nil) }
 

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- **SECURITY**: `hirundo serve` now screens the `/livereload` WebSocket handshake before upgrading the connection: `Host` must be an IP literal or `localhost`, and `Origin` must be an http(s) URL whose host and port match it. This blocks cross-site WebSocket hijacking by another page open in the developer's browser, and DNS rebinding past that origin check. Refusals return `403` and print a sanitized reason to stderr, repeated only when the reason changes so a refused browser's endless reconnecting reports itself once
+- Note: the check is not authentication. There is no token and no configuration — `config.yaml` is unchanged — and anyone who can reach the port can still read the served site
+
+### Changed
+- docs: README/README.ja/CLAUDE/ARCHITECTURE/SECURITY/AGENTS describe the live-reload handshake check and no longer say `/livereload` accepts connections directly
+
 ## [1.1.4] - 2025-10-28
 
 ### Changed

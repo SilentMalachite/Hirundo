@@ -114,7 +114,8 @@ struct ServeCommand: AsyncParsableCommand {
             print("📝 Drafts: \(includeDrafts ? "included" : "excluded")")
 
             if listen.isWildcard {
-                print("⚠️  Listening on all interfaces. The live reload WebSocket has no authentication — do not use this on an untrusted network.")
+                print("⚠️  Listening on all interfaces — anyone who can reach this machine can read the site.")
+                print("   Live reload accepts same-origin connections only, so open the site by IP address; a host name is refused.")
             }
 
             let projectRoot = URL(fileURLWithPath: currentDirectory)

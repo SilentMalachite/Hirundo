@@ -42,6 +42,8 @@ The files that actually exist under `Tests/HirundoTests/`:
 - SiteScaffolderTests, ScaffoldErrorMappingTests, InitDestinationResolverTests —
   `hirundo init` scaffolding, destination resolution, and error categorisation
 - DevelopmentServerTests — static file serving and path resolution
+- WebSocketOriginGuardTests, LiveReloadHandshakeTests — `Origin`/`Host` screening
+  of the `/livereload` handshake, as a unit and end to end over a real socket
 - HotReloadManagerTests, HotReloadIntegrationTest, FSEventsMemoryTests — file
   watching and live reload
 - SecurityTests — security validation and protection

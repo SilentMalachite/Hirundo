@@ -113,6 +113,23 @@ explicit routes have had their chance. Swifter's router matches literal path
 segments and `:name` variables — it does not interpret regular expressions — so
 a catch-all route cannot be expressed as `/(.*)`.
 
+**Handshake screening:** `WebSocketOriginGuard` (`Serve/WebSocketOriginGuard.swift`)
+decides every `/livereload` handshake before Swifter upgrades the connection,
+because after the upgrade there is no response left to refuse with. It accepts a
+request only when `Host` names an IP literal or `localhost` — a name means a
+resolver chose where the connection went, which is how DNS rebinding defeats an
+origin check on its own — and when `Origin` is an http(s) URL whose host and port
+equal that `Host`. Schemes are not compared — an `https` origin is accepted when it
+names the same host and port, which covers a TLS terminator that preserves the port
+— but a proxy on the default 443 will not match a plain-HTTP `Host`, so running the
+server behind one is not supported. This is a deliberate departure from RFC 6454,
+where an origin is scheme, host and port; the scheme is the part this server cannot
+observe about itself. A refusal writes one sanitized line to stderr (control
+characters stripped, 80 characters max, since the header values are attacker
+supplied) and returns `403`. The guard takes no configuration: relaxing either rule
+would be reintroducing the attack it stops. It is a same-origin check and not
+authentication — there is no token and no identity involved.
+
 `resolveFilePath(forRequestPath:)` maps a request to a file: directory requests
 (`/`, `/about`, `/about/`) resolve to that directory's `index.html`, and any
 path that standardizes outside the output directory is rejected.
@@ -209,8 +226,9 @@ HirundoConfig
 
 Notable absences, so they are not looked for: there is no `plugins` block (the
 plugin system was removed — `features` replaces it), no `timeouts` block, and
-no CORS or WebSocket-authentication configuration. `server` decodes only `port`
-(default `8080`) and `liveReload` (default `true`).
+no CORS or WebSocket-authentication configuration. The live-reload handshake
+check described above is likewise unconfigurable and has no keys. `server`
+decodes only `port` (default `8080`) and `liveReload` (default `true`).
 
 ### Validation Pipeline
 
