@@ -109,7 +109,57 @@ final class EditorLauncherTests: XCTestCase {
     func testResolveEditor_resolvesBeforeReportingARejection() {
         XCTAssertEqual(
             EditorLauncher.resolveEditor(environment: ["VISUAL": "code --wait", "EDITOR": "vim"]),
-            .resolved("vim")
+            .resolved(EditorLauncher.ResolvedEditor(command: "vim", rawValue: "vim"))
         )
+    }
+
+    // MARK: - Running what was validated
+
+    /// Validation returns only the command name, so the value it checked has to be carried
+    /// alongside it: an absolute path must be spawned as that path.
+    func testResolveEditor_keepsTheValueAnAbsolutePathWasValidatedFrom() {
+        XCTAssertEqual(
+            EditorLauncher.resolveEditor(environment: ["EDITOR": "/usr/bin/vim"]),
+            .resolved(EditorLauncher.ResolvedEditor(command: "vim", rawValue: "/usr/bin/vim"))
+        )
+    }
+
+    func testResolveEditor_trimsSurroundingWhitespaceFromTheValue() {
+        XCTAssertEqual(
+            EditorLauncher.resolveEditor(environment: ["EDITOR": "  /usr/bin/vim  "]),
+            .resolved(EditorLauncher.ResolvedEditor(command: "vim", rawValue: "/usr/bin/vim"))
+        )
+    }
+
+    /// `resolveEditorCommand` keeps handing back the bare command name whatever shape the
+    /// value had, because that is what its callers ask it for.
+    func testResolveEditorCommand_stillReturnsTheBareNameForAnAbsolutePath() {
+        XCTAssertEqual(
+            EditorLauncher.resolveEditorCommand(environment: ["EDITOR": "/usr/bin/vim"]),
+            "vim"
+        )
+    }
+
+    /// `EDITOR=/usr/bin/vim` must run that file, not whatever `vim` a `PATH` search finds:
+    /// a writable directory earlier in `PATH` would otherwise win over the validated one.
+    func testInvocation_runsTheExactExecutableForAnAbsolutePath() {
+        let editor = EditorLauncher.ResolvedEditor(command: "vim", rawValue: "/usr/bin/vim")
+
+        XCTAssertEqual(editor.invocation, .executable("/usr/bin/vim"))
+    }
+
+    /// A bare name is a request for a `PATH` lookup, which is not the bug — keep it.
+    func testInvocation_looksUpABareCommandNameOnPath() {
+        let editor = EditorLauncher.ResolvedEditor(command: "vim", rawValue: "vim")
+
+        XCTAssertEqual(editor.invocation, .pathLookup("vim"))
+    }
+
+    /// Validation strips characters before extracting the command name, so a path and the
+    /// name approved for it can in principle disagree. Nothing is run when they do.
+    func testInvocation_refusesWhenThePathAndTheValidatedNameDisagree() {
+        let editor = EditorLauncher.ResolvedEditor(command: "vim", rawValue: "/usr/bin/emacs")
+
+        XCTAssertEqual(editor.invocation, .inconsistent)
     }
 }

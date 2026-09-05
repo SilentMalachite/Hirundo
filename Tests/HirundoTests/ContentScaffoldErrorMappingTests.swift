@@ -11,6 +11,10 @@ final class ContentScaffoldErrorMappingTests: XCTestCase {
         XCTAssertEqual(ContentScaffoldError.invalidTitle("empty").toHirundoError().category, .configuration)
         XCTAssertEqual(ContentScaffoldError.invalidSlug("bad").toHirundoError().category, .configuration)
         XCTAssertEqual(ContentScaffoldError.invalidPath("bad").toHirundoError().category, .configuration)
+        XCTAssertEqual(
+            ContentScaffoldError.invalidMetadata("--tags bad").toHirundoError().category,
+            .configuration
+        )
     }
 
     func testToHirundoError_whenIOFails_usesFilesystemCategory() {
@@ -65,6 +69,35 @@ final class ContentScaffoldErrorMappingTests: XCTestCase {
         XCTAssertTrue(info.suggestedAction.contains("--path"))
     }
 
+    func testToHirundoError_whenMetadataInvalid_namesTheOptionThatWasRejected() {
+        let info = ContentScaffoldError
+            .invalidMetadata("--tags entries cannot contain control characters or line breaks")
+            .toHirundoError()
+
+        XCTAssertEqual(info.code, "INVALID_METADATA")
+        XCTAssertNotNil(info.suggestion)
+        XCTAssertTrue(
+            info.suggestedAction.contains("--tags"),
+            "Expected the failing option to be named, got: \(info.suggestedAction)"
+        )
+        XCTAssertNotEqual(info.suggestedAction, ErrorCategory.configuration.defaultSuggestedAction)
+        XCTAssertFalse(
+            info.userMessage.contains("File System Error"),
+            "A bad --tags value must not be presented as a file system error"
+        )
+    }
+
+    /// The option name is read off the details, so a payload that does not start with one
+    /// still has to produce usable advice rather than a mangled sentence.
+    func testToHirundoError_whenMetadataDetailsNameNoOption_listsThemAll() {
+        let info = ContentScaffoldError.invalidMetadata("something went wrong").toHirundoError()
+
+        XCTAssertNotNil(info.suggestion)
+        XCTAssertTrue(info.suggestedAction.contains("--categories"))
+        XCTAssertTrue(info.suggestedAction.contains("--tags"))
+        XCTAssertTrue(info.suggestedAction.contains("--template"))
+    }
+
     func testToHirundoError_whenIOFails_keepsTheGenericSuggestion() {
         XCTAssertNil(ContentScaffoldError.cannotWriteFile("/p").toHirundoError().suggestion)
         XCTAssertNil(ContentScaffoldError.cannotCreateDirectory("/p").toHirundoError().suggestion)
@@ -79,9 +112,21 @@ final class ContentScaffoldErrorMappingTests: XCTestCase {
         )
     }
 
+    func testErrorDescription_labelsAnInvalidMetadataValue() {
+        XCTAssertEqual(
+            ContentScaffoldError.invalidMetadata("--template cannot contain control characters")
+                .errorDescription,
+            "Invalid metadata: --template cannot contain control characters"
+        )
+    }
+
     func testEquatable_distinguishesCasesAndPayloads() {
         XCTAssertEqual(ContentScaffoldError.fileExists("/a"), ContentScaffoldError.fileExists("/a"))
         XCTAssertNotEqual(ContentScaffoldError.fileExists("/a"), ContentScaffoldError.fileExists("/b"))
         XCTAssertNotEqual(ContentScaffoldError.invalidSlug("x"), ContentScaffoldError.invalidPath("x"))
+        XCTAssertNotEqual(
+            ContentScaffoldError.invalidMetadata("x"),
+            ContentScaffoldError.invalidTitle("x")
+        )
     }
 }

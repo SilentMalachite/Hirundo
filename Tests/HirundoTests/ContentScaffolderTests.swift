@@ -55,6 +55,7 @@ final class ContentScaffolderTests: XCTestCase {
             case (.invalidTitle, .invalidTitle),
                  (.invalidSlug, .invalidSlug),
                  (.invalidPath, .invalidPath),
+                 (.invalidMetadata, .invalidMetadata),
                  (.fileExists, .fileExists),
                  (.cannotCreateDirectory, .cannotCreateDirectory),
                  (.cannotWriteFile, .cannotWriteFile):
@@ -65,6 +66,22 @@ final class ContentScaffolderTests: XCTestCase {
         } catch {
             XCTFail("Expected \(expected), got \(error)", file: file, line: line)
         }
+    }
+
+    /// Asserts that a rejected call wrote nothing: input is validated before the content
+    /// directory is touched, so not even an empty `content/` may be left behind.
+    private func assertNothingWasCreated(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: projectRoot.appendingPathComponent("content").path
+            ),
+            "Rejected input must not create anything",
+            file: file,
+            line: line
+        )
     }
 
     // MARK: - Post: location
@@ -305,6 +322,92 @@ final class ContentScaffolderTests: XCTestCase {
 
         XCTAssertEqual(result.relativePath, "content/a/b/c/d/e/f/g/h/deep.md")
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.url.path))
+    }
+
+    // MARK: - Front-matter values other than the title
+
+    /// `yamlQuoted` escapes only `\` and `"`, so a control character would be written raw
+    /// into the scalar and the generated file would fail to parse at build time — long
+    /// after `hirundo new` said it succeeded.
+    func testRejectsATagWithAControlCharacter() {
+        assertThrows(.invalidMetadata("")) {
+            try scaffold(
+                kind: .post,
+                ContentScaffoldOptions(title: "T", tags: ["swift\u{0007}web"])
+            )
+        }
+        assertNothingWasCreated()
+    }
+
+    func testRejectsACategoryWithAControlCharacter() {
+        assertThrows(.invalidMetadata("")) {
+            try scaffold(
+                kind: .post,
+                ContentScaffoldOptions(title: "T", categories: ["news\u{0001}"])
+            )
+        }
+        assertNothingWasCreated()
+    }
+
+    /// A line break would end the double-quoted scalar and break the front matter outright.
+    func testRejectsATemplateWithANewline() {
+        assertThrows(.invalidMetadata("")) {
+            try scaffold(
+                kind: .page,
+                ContentScaffoldOptions(title: "T", template: "post.html\nevil: true")
+            )
+        }
+        assertNothingWasCreated()
+    }
+
+    /// The same line separators the title rule adds on top of `controlCharacters`.
+    func testRejectsATagWithALineSeparator() {
+        assertThrows(.invalidMetadata("")) {
+            try scaffold(kind: .post, ContentScaffoldOptions(title: "T", tags: ["a\u{2028}b"]))
+        }
+        assertNothingWasCreated()
+    }
+
+    // MARK: - "index" is reserved for posts
+
+    /// `content/posts/index.md` publishes at `/posts/` while its RSS link is built from the
+    /// slug, giving `/posts/index/` — the divergence this scaffolder exists to prevent.
+    func testPost_rejectsAnExplicitIndexSlug() {
+        assertThrows(.invalidSlug("")) {
+            try scaffold(kind: .post, ContentScaffoldOptions(title: "Some Post", slug: "index"))
+        }
+        assertNothingWasCreated()
+    }
+
+    /// The same file is reachable without `--slug` at all: `hirundo new post "Index"`.
+    func testPost_rejectsATitleThatSlugifiesToIndex() {
+        assertThrows(.invalidSlug("")) {
+            try scaffold(kind: .post, ContentScaffoldOptions(title: "Index"))
+        }
+        assertNothingWasCreated()
+    }
+
+    func testPost_rejectingIndexExplainsWhy() {
+        do {
+            _ = try scaffold(kind: .post, ContentScaffoldOptions(title: "Index"))
+            XCTFail("Expected the reserved slug to be rejected")
+        } catch let error as ContentScaffoldError {
+            let message = error.localizedDescription
+            XCTAssertTrue(message.contains("/posts/"), "Got: \(message)")
+            XCTAssertTrue(message.contains("RSS"), "Got: \(message)")
+        } catch {
+            XCTFail("Expected a ContentScaffoldError, got \(error)")
+        }
+    }
+
+    /// Pages must keep working: `content/index.md` is the home page `hirundo init` writes,
+    /// and pages are not in the feed, so nothing can disagree.
+    func testPage_stillAcceptsIndex() throws {
+        let home = try scaffold(kind: .page, ContentScaffoldOptions(title: "Index"))
+        XCTAssertEqual(home.relativePath, "content/index.md")
+
+        let section = try scaffold(kind: .page, ContentScaffoldOptions(title: "T", path: "about/index"))
+        XCTAssertEqual(section.relativePath, "content/about/index.md")
     }
 
     // MARK: - Rollback

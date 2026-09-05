@@ -195,6 +195,9 @@ public enum ContentScaffoldError: Error, LocalizedError, Equatable, Sendable {
     case invalidTitle(String)
     case invalidSlug(String)
     case invalidPath(String)
+    /// A front-matter value other than the title — a category, a tag, or the template —
+    /// that cannot be written safely. The payload names the option it came from.
+    case invalidMetadata(String)
     case fileExists(String)
     case cannotCreateDirectory(String)
     case cannotWriteFile(String)
@@ -207,6 +210,8 @@ public enum ContentScaffoldError: Error, LocalizedError, Equatable, Sendable {
             return "Invalid slug: \(details)"
         case .invalidPath(let details):
             return "Invalid path: \(details)"
+        case .invalidMetadata(let details):
+            return "Invalid metadata: \(details)"
         case .fileExists(let path):
             return "File already exists: \(path)"
         case .cannotCreateDirectory(let path):
@@ -220,8 +225,9 @@ public enum ContentScaffoldError: Error, LocalizedError, Equatable, Sendable {
 extension ContentScaffoldError {
     /// Converts this error into the unified Hirundo error representation.
     ///
-    /// Input mistakes (an unusable title, slug, or path) are reported as configuration
-    /// problems so the CLI does not tell the user to check their disk space over a typo.
+    /// Input mistakes (an unusable title, slug, path, or front-matter value) are reported
+    /// as configuration problems so the CLI does not tell the user to check their disk
+    /// space over a typo.
     /// A name collision is a filesystem fact, but it carries its own suggestion because
     /// the generic "check permissions and disk space" advice is useless for it.
     /// - Returns: A `HirundoErrorInfo` with a stable code, a matching category, and an
@@ -249,6 +255,16 @@ extension ContentScaffoldError {
             category = .configuration
             suggestion = "Pass a --path relative to the content directory, "
                 + "for example --path about/team"
+        case .invalidMetadata(let details):
+            code = "INVALID_METADATA"
+            category = .configuration
+            // The details open with the option that was refused ("--tags entries …"), so
+            // the suggestion can point at that one option instead of listing all three.
+            let option = details.split(separator: " ").first.map(String.init) ?? ""
+            suggestion = option.hasPrefix("--")
+                ? "Pass a \(option) value without control characters or line breaks"
+                : "Pass --categories, --tags and --template values without control "
+                    + "characters or line breaks"
         case .fileExists:
             code = "FILE_EXISTS"
             category = .filesystem

@@ -86,7 +86,7 @@ public struct ContentScaffolder {
         self.fileManager = fileManager
     }
 
-    /// Scalars rejected in a title.
+    /// Scalars rejected in a title, and in every other value written into the front matter.
     ///
     /// `controlCharacters` covers only Cc and Cf, so it misses U+2028 LINE SEPARATOR and
     /// U+2029 PARAGRAPH SEPARATOR. Those would be written verbatim into the double-quoted
@@ -116,6 +116,7 @@ public struct ContentScaffolder {
         date: Date = Date()
     ) throws -> ContentScaffoldResult {
         let title = try validateTitle(options.title, maxLength: limits.maxTitleLength)
+        try validateMetadata(options)
         let contentDirectory = projectRoot
             .appendingPathComponent(build.contentDirectory)
             .standardizedFileURL
@@ -169,10 +170,42 @@ public struct ContentScaffolder {
             throw ContentScaffoldError.invalidTitle(error.localizedDescription)
         }
 
-        if trimmed.unicodeScalars.contains(where: { Self.forbiddenTitleScalars.contains($0) }) {
+        if Self.containsForbiddenScalar(trimmed) {
             throw ContentScaffoldError.invalidTitle("Title cannot contain control characters")
         }
         return trimmed
+    }
+
+    /// Rejects the front-matter values the title rule does not cover.
+    ///
+    /// Categories, tags, and the template are written into double-quoted YAML scalars by
+    /// `ScaffoldTemplates.yamlQuoted`, which escapes only `\` and `"`. Anything else lands
+    /// in the file verbatim, so the same scalars barred from a title have to be barred
+    /// here: a BEL makes the generated file fail to parse at build time — long after
+    /// `hirundo new` reported success — and a line break ends the scalar outright.
+    ///
+    /// Checked before the destination is resolved, so a bad value never leaves a file or a
+    /// directory behind.
+    private func validateMetadata(_ options: ContentScaffoldOptions) throws {
+        if options.categories.contains(where: Self.containsForbiddenScalar) {
+            throw ContentScaffoldError.invalidMetadata(
+                "--categories entries cannot contain control characters or line breaks"
+            )
+        }
+        if options.tags.contains(where: Self.containsForbiddenScalar) {
+            throw ContentScaffoldError.invalidMetadata(
+                "--tags entries cannot contain control characters or line breaks"
+            )
+        }
+        if let template = options.template, Self.containsForbiddenScalar(template) {
+            throw ContentScaffoldError.invalidMetadata(
+                "--template cannot contain control characters or line breaks"
+            )
+        }
+    }
+
+    private static func containsForbiddenScalar(_ value: String) -> Bool {
+        value.unicodeScalars.contains { forbiddenTitleScalars.contains($0) }
     }
 
     /// Resolves the destination path relative to the content directory, extension included.
@@ -189,11 +222,36 @@ public struct ContentScaffolder {
         let slug = try resolveSlug(options.slug, title: title, limits: limits)
         switch kind {
         case .post:
+            try validatePostSlug(slug)
             return "posts/\(slug).md"
         case .page:
             return "\(slug).md"
         }
     }
+
+    /// Rejects the one slug a post cannot have.
+    ///
+    /// `SiteGenerator` publishes an `index.md` as `index.html` in its own directory, so
+    /// `content/posts/index.md` would be served at `/posts/`. The RSS item link, though, is
+    /// built from `Post.slug` — the file's base name when the front matter carries none —
+    /// giving `/posts/index/`. That is exactly the output-URL-versus-RSS divergence this
+    /// scaffolder avoids by never writing a `slug:` key, and it is reachable from an
+    /// ordinary title, so it is refused up front.
+    ///
+    /// Pages are deliberately unaffected: `content/index.md` is the home page `hirundo
+    /// init` itself writes, `content/about/index.md` legitimately publishes at `/about/`,
+    /// and pages are not in the feed, so nothing can disagree.
+    private func validatePostSlug(_ slug: String) throws {
+        guard slug == Self.reservedPostSlug else { return }
+        throw ContentScaffoldError.invalidSlug(
+            "\"\(Self.reservedPostSlug)\" is reserved for posts: posts/index.md publishes "
+                + "at /posts/, but its RSS link would point at /posts/index/. Pass a "
+                + "different --slug."
+        )
+    }
+
+    /// The base name a post may not use. See ``validatePostSlug(_:)``.
+    private static let reservedPostSlug = "index"
 
     private func resolveSlug(_ explicit: String?, title: String, limits: Limits) throws -> String {
         guard let explicit else {

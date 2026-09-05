@@ -176,10 +176,10 @@ hirundo new page <title> [--path <path>] [--template <template>] [--open] [--ver
 
 | Option | Meaning |
 |---|---|
-| `--slug` | File name without the `.md` extension, used verbatim. Defaults to a slug derived from the title. |
-| `--categories` | Comma-separated. Blank entries and duplicates are dropped. |
-| `--tags` | Comma-separated. Blank entries and duplicates are dropped. |
-| `--template` | Value for the `template:` key. Defaults to `post.html`. |
+| `--slug` | File name without the `.md` extension, used verbatim. Defaults to a slug derived from the title. `index` is reserved for posts. |
+| `--categories` | Comma-separated. Blank entries and duplicates are dropped. Control characters and line breaks are rejected. |
+| `--tags` | Comma-separated. Blank entries and duplicates are dropped. Control characters and line breaks are rejected. |
+| `--template` | Value for the `template:` key. Defaults to `post.html`. Control characters and line breaks are rejected. |
 | `--draft` | Writes `draft: true`, so the file is skipped unless you build with `--drafts`. |
 | `--open` | Opens the new file in `$VISUAL`, else `$EDITOR`. |
 
@@ -205,7 +205,7 @@ template: "post.html"
 | Option | Meaning |
 |---|---|
 | `--path` | Path relative to the content directory. `--path about/team` creates `content/about/team.md`, intermediate directories included. Defaults to a slug derived from the title. Each component is limited to `limits.maxFilenameLength` characters (255 by default); an over-long one is rejected. A deep chain of short names is fine. |
-| `--template` | Value for the `template:` key. Defaults to `default.html`. |
+| `--template` | Value for the `template:` key. Defaults to `default.html`. Control characters and line breaks are rejected. |
 | `--open` | Opens the new file in `$VISUAL`, else `$EDITOR`. |
 
 Creates `<contentDirectory>/<path>.md`, with no `date:` key — the same shape as the
@@ -227,10 +227,20 @@ starter pages `hirundo init` writes.
   name and therefore the URL segment exactly as typed, spaces and non-ASCII included.
   What is rejected: `/`, `\`, `.`, `..`, control characters, a blank value, and anything
   over the file name limit.
+- **`index` is reserved for posts.** `content/posts/index.md` would publish at `/posts/`
+  while its RSS link would be built from the slug and point at `/posts/index/`, so both
+  `--slug index` and a title that slugifies to `index` are refused. Pages are unaffected:
+  `content/index.md` is the home page `hirundo init` writes, `content/about/index.md`
+  legitimately publishes at `/about/`, and pages are not in the feed.
+- `--categories`, `--tags`, and `--template` are written into the frontmatter as quoted
+  values, so control characters and line breaks are rejected before anything is created —
+  they would otherwise make the generated file fail to parse at build time.
 - `--open` only runs editors on an allow-list (`vim`, `nvim`, `nano`, `emacs`, `code`,
   `subl`, `vi`, `open`, and similar) and never goes through a shell. The name is run on
   its own, so a value carrying arguments (`code --wait`, `vim +startinsert`) is refused,
-  as is an absolute path outside a small fixed list.
+  as is an absolute path outside a small fixed list. What runs is what was checked: an
+  allowed absolute path (`/usr/bin/vim`) is executed as that exact file, and only a bare
+  name (`vim`) is looked up on `PATH`.
   If `$EDITOR` is unset, refused, or fails to start, the command prints a warning and
   still exits 0 — the file has already been written. The warning distinguishes "nothing
   set" from "set but refused", and names the refused value.
