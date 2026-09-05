@@ -78,6 +78,7 @@ public final class HotReloadManager: @unchecked Sendable {
     private let watchPaths: [String]
     private let debounceInterval: TimeInterval
     private let ignorePatterns: [String]
+    private let symlinkBoundary: SymlinkBoundary
     private let callback: @Sendable ([FileChange]) -> Void
     
     private var fsEventsWrapper: FSEventsWrapper?
@@ -91,14 +92,28 @@ public final class HotReloadManager: @unchecked Sendable {
     // Queue for synchronizing non-actor properties
     private let syncQueue = DispatchQueue(label: "com.hirundo.hotreload.sync")
     
+    /// Creates a watcher.
+    /// - Parameters:
+    ///   - watchPaths: Directories to watch. Each is walked once at ``start()``, and the
+    ///     directory symlinks under it that `symlinkBoundary` allows are watched as well.
+    ///   - debounceInterval: How long changes are collected before the callback runs.
+    ///   - ignorePatterns: File name globs never reported.
+    ///   - symlinkBoundary: Where the walk may go when it meets a directory symlink. Pass
+    ///     ``SymlinkBoundary/project(root:excludingDirectoriesNamed:)`` with the project's own
+    ///     root and build directories to watch exactly what the build reads — the two walks
+    ///     share their implementation precisely so they cannot disagree. The default keeps to
+    ///     the watched tree, which is the boundary that needs nothing configured.
+    ///   - callback: Called with the debounced batch of changes.
     public init(
         watchPaths: [String],
         debounceInterval: TimeInterval = 0.5,
         ignorePatterns: [String] = [],
+        symlinkBoundary: SymlinkBoundary = .walkedDirectory,
         callback: @escaping @Sendable ([FileChange]) -> Void
     ) {
         self.watchPaths = watchPaths
         self.debounceInterval = debounceInterval
+        self.symlinkBoundary = symlinkBoundary
         self.ignorePatterns = ignorePatterns + [
             ".*", // Hidden files
             "*.swp", "*.swo", "*~", // Editor temp files
@@ -114,14 +129,21 @@ public final class HotReloadManager: @unchecked Sendable {
         guard await !state.getRunning() else { return }
         
         await state.setRunning(true)
-        
-        // Scan existing files to populate knownFiles
-        await scanExistingFiles()
-        
+
+        // Scan existing files to populate knownFiles, and learn which directories are only
+        // reachable through a symlink.
+        let linkedDirectories = await scanExistingFiles()
+        // FSEvents watches directories by identity, not by name, so a directory reached
+        // through `content/posts -> ../shared-posts` delivers no events at all unless it is
+        // registered in its own right. Without this the build would include that content and
+        // the watcher would never notice it changing: the user edits a file, nothing happens,
+        // and the served page stays stale.
+        let allWatchPaths = watchPaths + linkedDirectories
+
         // Create FSEventsWrapper synchronously
         let wrapper = await withCheckedContinuation { continuation in
             syncQueue.sync {
-                self.fsEventsWrapper = FSEventsWrapper(paths: watchPaths) { [weak self] changes in
+                self.fsEventsWrapper = FSEventsWrapper(paths: allWatchPaths) { [weak self] changes in
                     guard let self = self else { return }
                     
                     Task {
@@ -137,37 +159,69 @@ public final class HotReloadManager: @unchecked Sendable {
         try wrapper?.start()
     }
     
-    private func scanExistingFiles() async {
-        let files = await withCheckedContinuation { continuation in
+    /// Records every file already present, and reports the directories that were only
+    /// reachable through a symlink.
+    ///
+    /// Uses ``SymlinkFollowingWalk``, the traversal `ContentProcessor` collects the build's
+    /// content with. `FileManager.enumerator` — which this used before — will not descend into
+    /// a symlinked directory, so the watcher's idea of the tree stopped exactly where the
+    /// build's no longer does.
+    ///
+    /// - Returns: Resolved paths of the directories reached through a followed symlink, for
+    ///   the watcher to register in their own right.
+    private func scanExistingFiles() async -> [String] {
+        let (files, linkedDirectories) = await withCheckedContinuation { continuation in
             syncQueue.async {
                 let fileManager = FileManager.default
                 var collectedFiles = Set<String>()
-                
+                var linkedDirectories: [String] = []
+                let walk = SymlinkFollowingWalk(
+                    boundary: self.symlinkBoundary,
+                    announcesDecisions: false
+                )
+
                 for watchPath in self.watchPaths {
-                    guard let enumerator = fileManager.enumerator(atPath: watchPath) else { continue }
-                    
-                    // Convert enumerator to array to avoid async iteration issues
-                    let allPaths = enumerator.allObjects.compactMap { $0 as? String }
-                    
-                    for filePath in allPaths {
-                        let fullPath = (watchPath as NSString).appendingPathComponent(filePath)
-                        
-                        var isDirectory: ObjCBool = false
-                        if fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) && !isDirectory.boolValue {
-                            if !self.shouldIgnore(path: fullPath) {
-                                collectedFiles.insert(fullPath)
+                    try? walk.walk(
+                        URL(fileURLWithPath: watchPath),
+                        onEntry: { entry in
+                            var isDirectory: ObjCBool = false
+                            guard fileManager.fileExists(atPath: entry.path, isDirectory: &isDirectory),
+                                  !isDirectory.boolValue,
+                                  !self.shouldIgnore(path: entry.path) else {
+                                return
                             }
+                            collectedFiles.insert(entry.path)
+                            // A file found through a symlink is reported at its logical path,
+                            // but FSEvents names the file where it physically lives. Both
+                            // spellings are remembered, or every change to that file would be
+                            // reported as a creation.
+                            let resolved = entry.resolvingSymlinksInPath().path
+                            if resolved != entry.path {
+                                collectedFiles.insert(resolved)
+                            }
+                        },
+                        onFollowedDirectory: { target in
+                            linkedDirectories.append(target.path)
                         }
-                    }
+                    )
                 }
-                
-                continuation.resume(returning: collectedFiles)
+
+                continuation.resume(returning: (collectedFiles, linkedDirectories))
             }
         }
-        
+
         await state.setKnownFiles(files)
+        return linkedDirectories
     }
     
+    /// Directories actually registered with the file-system watcher, empty before ``start()``.
+    ///
+    /// Internal, for tests: the watched set is where "the build sees this content but the
+    /// watcher does not" would show up, and nothing else exposes it.
+    var activeWatchPaths: [String] {
+        return syncQueue.sync { fsEventsWrapper?.paths ?? [] }
+    }
+
     public func stop() async {
         await state.setRunning(false)
         

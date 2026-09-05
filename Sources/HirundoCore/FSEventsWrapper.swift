@@ -5,7 +5,9 @@ import CoreServices
 
 // FSEvents wrapper for macOS
 internal class FSEventsWrapper {
-    private let paths: [String]
+    /// Directories registered with FSEvents. Readable so a test can check that the
+    /// directories only reachable through a symlink were registered too.
+    let paths: [String]
     private let callback: ([FileChange]) -> Void
     private var streamRef: FSEventStreamRef?
     private let eventQueue = DispatchQueue(label: "com.hirundo.fsevents", attributes: .concurrent)
@@ -167,7 +169,9 @@ internal class FSEventsWrapper {
 
 // Fallback implementation for non-macOS platforms
 internal class FSEventsWrapper {
-    private let paths: [String]
+    /// Directories being watched. Readable so a test can check that the directories only
+    /// reachable through a symlink were registered too.
+    let paths: [String]
     private let callback: ([FileChange]) -> Void
     private var sources: [DispatchSourceFileSystemObject] = []
     private let queue = DispatchQueue(label: "com.hirundo.fswatcher")
