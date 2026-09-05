@@ -148,4 +148,22 @@ final class AssetPrunerTests: XCTestCase {
 
         XCTAssertTrue(exists("robots-notes.txt"))
     }
+
+    func testKeepsADirectoryWhoseNameLooksLikeAFingerprintedFile() throws {
+        try "User-agent: *".write(to: staticDir.appendingPathComponent("robots.txt"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(
+            at: outputDir.appendingPathComponent("robots-0000000000000000.txt"),
+            withIntermediateDirectories: true
+        )
+        try write("keep me", to: "robots-0000000000000000.txt/keeper.html", under: outputDir)
+
+        try AssetPruner.prune(
+            outputDirectory: outputDir,
+            staticDirectory: staticDir,
+            keeping: AssetManifest()
+        )
+
+        XCTAssertTrue(exists("robots-0000000000000000.txt"))
+        XCTAssertTrue(exists("robots-0000000000000000.txt/keeper.html"))
+    }
 }
