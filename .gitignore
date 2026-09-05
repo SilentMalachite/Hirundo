@@ -100,3 +100,6 @@ test_markdown_api.swift
 # Local tool/cache directories
 .serena/
 .home/
+
+# Claude Code worktrees
+.claude/worktrees/
