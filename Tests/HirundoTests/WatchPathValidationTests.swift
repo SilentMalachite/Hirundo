@@ -1,8 +1,10 @@
 import XCTest
 @testable import HirundoCore
 
-/// Every case here is pure path arithmetic — no directory is created, because the rule is about
-/// what the configuration says, not about what happens to exist when `serve` starts.
+/// Almost every case here is pure path arithmetic, because the rule is about what the
+/// configuration says rather than about what happens to exist when `serve` starts. The one
+/// exception creates directories on purpose: it pins down that the answer stays the same when
+/// the output directory has not been built yet.
 final class WatchPathValidationTests: XCTestCase {
 
     private let root = "/projects/my-site"
@@ -94,6 +96,30 @@ final class WatchPathValidationTests: XCTestCase {
         )
 
         XCTAssertEqual(overlapping, ["\(root)/static/"], "the caller's spelling is echoed back")
+    }
+
+    func testWatchPathsOverlappingOutput_whenTheOutputDoesNotExistYet_stillReportsTheOverlap() throws {
+        // Regression: the first implementation standardized with `URL.standardizedFileURL`,
+        // which drops a leading `/private` only when the path exists. At startup the watched
+        // directories exist and the output directory usually does not, so under `/private/tmp`
+        // the watched path became `/tmp/…/static` while the output stayed
+        // `/private/tmp/…/static/out` — the overlap went unnoticed and `serve` rebuilt forever.
+        // `/private/tmp` is used deliberately: it is the aliased root that exposed the bug.
+        let base = URL(fileURLWithPath: "/private/tmp")
+            .appendingPathComponent("hirundo-watch-path-\(UUID().uuidString)")
+        let watched = base.appendingPathComponent("static")
+        try FileManager.default.createDirectory(at: watched, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let output = watched.appendingPathComponent("out").path
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output))
+
+        let overlapping = watchPathsOverlappingOutput(
+            watchPaths: [watched.path],
+            outputPath: output
+        )
+
+        XCTAssertEqual(overlapping, [watched.path])
     }
 
     // MARK: - Throwing Validator

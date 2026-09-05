@@ -55,11 +55,21 @@ public func validateWatchPaths(_ watchPaths: [String], outputPath: String) throw
     }
 }
 
-/// Absolute path with `.`/`..` removed and any trailing separator dropped. Symlinks are left
-/// alone: the watcher and the build both address files by the paths the configuration names,
-/// so resolving links here would compare something neither of them uses.
+/// Absolute path with `.`/`..` removed and any trailing separator dropped.
+///
+/// `URL.standardized` and not `URL.standardizedFileURL`: the latter consults the filesystem and
+/// drops a leading `/private` only when the resulting path exists, which silently defeats the
+/// whole check. At startup the watched directories exist and the output directory usually does
+/// not, so under `/private/tmp` (or any other aliased root) the watched path standardized to
+/// `/tmp/…/static` while the output stayed `/private/tmp/…/static/out` — no shared prefix, no
+/// overlap reported, and the rebuild loop shipped anyway. Comparing lexically makes the answer
+/// depend only on the configuration, which is what is actually being validated.
+///
+/// Symlinks are left alone for the same reason: the watcher and the build both address files by
+/// the paths the configuration names, so resolving links here would compare something neither
+/// of them uses.
 private func standardizedPath(_ path: String) -> String {
-    URL(fileURLWithPath: path).standardizedFileURL.path
+    URL(fileURLWithPath: path).standardized.path
 }
 
 /// True when `path` is `other` itself or a descendant of it. Both arguments must already be
