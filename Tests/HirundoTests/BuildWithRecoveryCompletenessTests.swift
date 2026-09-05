@@ -120,6 +120,78 @@ final class BuildWithRecoveryCompletenessTests: XCTestCase {
         XCTAssertTrue(exists("rss.xml"), "Steps after the failing one must still run")
     }
 
+    func testRecoveryBuildRewritesAssetReferencesWhenFingerprintingIsOn() async throws {
+        let config = """
+        site:
+          title: "Recovery Site"
+          url: "https://example.com"
+
+        features:
+          fingerprint: true
+        """
+        try write(config, to: "config.yaml")
+        try write("""
+        <!DOCTYPE html>
+        <html><head><link rel="stylesheet" href="/css/style.css"></head><body>{{ content }}</body></html>
+        """, to: "templates/default.html")
+
+        let generator = try SiteGenerator(projectPath: projectPath)
+        let result = try await generator.buildWithRecovery()
+        XCTAssertTrue(result.success, "Build reported failures: \(result.errors)")
+
+        let html = try String(contentsOf: outputURL.appendingPathComponent("index.html"), encoding: .utf8)
+        XCTAssertFalse(html.contains("/css/style.css"), "元のパスが残っている: \(html)")
+
+        // 書き換え先が実在すること。これが今まさに壊れている挙動。
+        let manifest = try JSONDecoder().decode(
+            [String: String].self,
+            from: Data(contentsOf: outputURL.appendingPathComponent("asset-manifest.json"))
+        )
+        let fingerprinted = try XCTUnwrap(manifest["css/style.css"])
+        XCTAssertTrue(html.contains("/" + fingerprinted), "書き換え後のパスが HTML に無い: \(html)")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: outputURL.appendingPathComponent(fingerprinted).path),
+            "HTML が実在しないファイルを指している"
+        )
+    }
+
+    func testRepeatedRebuildKeepsOnlyOneGenerationOfEachAsset() async throws {
+        let config = """
+        site:
+          title: "Recovery Site"
+          url: "https://example.com"
+
+        features:
+          fingerprint: true
+        """
+        try write(config, to: "config.yaml")
+
+        let generator = try SiteGenerator(projectPath: projectPath)
+        _ = try await generator.buildWithRecovery()
+
+        try write("body { color: blue; }\n", to: "static/css/style.css")
+        _ = try await generator.buildWithRecovery()
+
+        let cssFiles = try FileManager.default
+            .contentsOfDirectory(atPath: outputURL.appendingPathComponent("css").path)
+            .filter { $0.hasSuffix(".css") }
+        XCTAssertEqual(cssFiles.count, 1, "古い世代が残っている: \(cssFiles)")
+    }
+
+    func testFingerprintingIsOffByDefault() async throws {
+        let generator = try SiteGenerator(projectPath: projectPath)
+        _ = try await generator.buildWithRecovery()
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: outputURL.appendingPathComponent("css/style.css").path),
+            "既定ではハッシュを付けない"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: outputURL.appendingPathComponent("asset-manifest.json").path),
+            "既定ではマニフェストを書かない"
+        )
+    }
+
     // MARK: - Helpers
 
     private func write(_ contents: String, to relativePath: String) throws {

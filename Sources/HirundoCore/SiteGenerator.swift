@@ -12,7 +12,10 @@ public class SiteGenerator {
     private let templateRenderer: SiteTemplateRenderer
     private let archiveGenerator: ArchiveGenerator
     private let assetPipeline: AssetPipeline
-    
+
+    /// 直近の `processStaticAssets` が作ったマニフェスト。`asset references` ステップが読む。
+    private var assetManifest = AssetManifest()
+
     /// Designated initializer that accepts a resolved configuration
     /// - Parameters:
     ///   - projectPath: Root directory of the project (parent of the configuration file)
@@ -228,6 +231,11 @@ public class SiteGenerator {
                 try self.processStaticAssets(outputURL: outputURL)
             }
         ]
+        if config.features.fingerprint {
+            steps.append(FinalizationStep(name: "asset references") {
+                try self.rewriteAssetReferences(outputURL: outputURL)
+            })
+        }
         if config.features.sitemap {
             steps.append(FinalizationStep(name: "sitemap.xml") {
                 try self.generateSitemap(outputURL: outputURL)
@@ -380,36 +388,92 @@ public class SiteGenerator {
     private func processStaticAssets(outputURL: URL) throws {
         let staticURL = URL(fileURLWithPath: projectPath)
             .appendingPathComponent(config.build.staticDirectory)
-        
+
         guard siteFileManager.fileExists(at: staticURL.path) else {
+            assetManifest = AssetManifest()
             return
         }
-        
-        // Configure asset pipeline
+
         configureAssetPipeline()
-        
-        // Process assets through pipeline
+
         let manifest = try assetPipeline.processAssets(
             from: staticURL.path,
             to: outputURL.path
         )
-        
-        // Save manifest if generated
-        if !manifest.isEmpty {
-            let manifestPath = outputURL.appendingPathComponent("asset-manifest.json")
-            let manifestData = try JSONEncoder().encode(manifest)
-            try manifestData.write(to: manifestPath)
-        }
+        assetManifest = manifest
+
+        guard config.features.fingerprint else { return }
+
+        // 前の世代のハッシュ名の出力を落とす。serve は clean せずに再ビルドする。
+        try AssetPruner.prune(
+            outputDirectory: outputURL,
+            staticDirectory: staticURL,
+            keeping: manifest
+        )
+
+        try assetPipeline.saveManifest(
+            manifest,
+            to: outputURL.appendingPathComponent("asset-manifest.json").path
+        )
     }
-    
+
     private func configureAssetPipeline() {
-        // Configure built-in options from features
         if config.features.minify {
             assetPipeline.cssOptions.minify = true
             assetPipeline.jsOptions.minify = true
         }
+        assetPipeline.enableFingerprinting = config.features.fingerprint
     }
-    
+
+    /// 出力ツリーの HTML（と、パイプラインが作ったのではない CSS）の参照を、フィンガープリント
+    /// 済みの名前に差し替える。
+    ///
+    /// アセットパイプライン自身が生成したファイルは**書き換えない**。書き換えるとパス2で確定した
+    /// ハッシュがその中身を指さなくなる。具体的には、この時点ではマニフェストに全 CSS が載って
+    /// いるため、パス2で解決を見送った `@import url("other.css")` がここで解決してしまう。
+    private func rewriteAssetReferences(outputURL: URL) throws {
+        let manifest = assetManifest
+        guard !manifest.isEmpty else { return }
+        let generated = manifest.outputPaths
+
+        guard let walker = FileManager.default.enumerator(
+            at: outputURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        for case let fileURL as URL in walker {
+            try Task.checkCancellation()
+            guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+            else { continue }
+
+            let ext = fileURL.pathExtension.lowercased()
+            guard ext == "html" || ext == "htm" || ext == "css" else { continue }
+
+            guard let relativePath = Self.outputRelativePath(of: fileURL, under: outputURL),
+                  !generated.contains(relativePath) else { continue }
+
+            guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else { continue }
+
+            let directory = AssetManifest.parentDirectory(of: relativePath)
+            let rewritten = ext == "css"
+                ? AssetReferenceRewriter.rewriteCSS(content, manifest: manifest, inDirectory: directory).content
+                : AssetReferenceRewriter.rewriteHTML(content, manifest: manifest, inDirectory: directory)
+
+            guard rewritten != content else { continue }
+            try siteFileManager.writeFile(content: rewritten, to: fileURL)
+        }
+    }
+
+    /// 出力ディレクトリからの相対パス。出力の外なら `nil`。
+    private static func outputRelativePath(of fileURL: URL, under root: URL) -> String? {
+        let filePath = fileURL.standardizedFileURL.resolvingSymlinksInPath().path
+        let rootPath = root.standardizedFileURL.resolvingSymlinksInPath().path
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        guard filePath.hasPrefix(prefix) else { return nil }
+        return String(filePath.dropFirst(prefix.count))
+    }
+
     // MARK: - Built-in feature generators (sitemap, RSS, search index)
     private func generateSitemap(outputURL: URL) throws {
         let fm = FileManager.default
