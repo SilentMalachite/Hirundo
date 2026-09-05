@@ -96,21 +96,63 @@ public enum ConfigDiagnostics {
         return try inspect(yaml: yaml)
     }
 
+    /// Reads one logical mapping, following YAML merges without constructing its values.
+    private static func keyedNodes(in mapping: Node.Mapping) -> (values: [String: Node], hasComplexKeys: Bool) {
+        var values: [String: Node] = [:]
+        var hasComplexKeys = false
+        var pending = [mapping]
+        var visited = Set<ObjectIdentifier>()
+        let mergeTag = Tag(.merge)
+        while let current = pending.popLast() {
+            // Yams creates a distinct Tag instance per source mapping; aliases share it.
+            // Marks can collide for implicit complex keys, and hashing the whole Node would
+            // recursively visit alias contents. Reference identity avoids both problems.
+            if !visited.insert(ObjectIdentifier(current.tag)).inserted {
+                continue
+            }
+            // Explicit keys override merges; within merge sequences, the first mapping wins.
+            // Visit higher-priority sources first and keep the first value for each key.
+            for (key, value) in current.reversed() {
+                guard case let .scalar(scalar) = key else {
+                    hasComplexKeys = true
+                    continue
+                }
+                if key.tag != mergeTag, values[scalar.string] == nil {
+                    values[scalar.string] = value
+                }
+            }
+            for (key, value) in current where key.scalar != nil && key.tag == mergeTag {
+                if let merged = value.mapping {
+                    pending.append(merged)
+                } else if let sequence = value.sequence {
+                    pending.append(contentsOf: sequence.reversed().compactMap { $0.mapping })
+                }
+            }
+        }
+        return (values, hasComplexKeys)
+    }
+
     /// Reports keys at the top level and one level in — the two places a Hirundo configuration
     /// actually has keys. Anything deeper (`site.author`) is left alone.
     ///
     /// Only reached after `parse` has succeeded, so the document is known to be a mapping.
     private static func unrecognizedKeyWarnings(in yaml: String) -> [String] {
-        guard let root = (try? Yams.load(yaml: yaml)) as? [String: Any] else {
+        guard let root = (try? Yams.compose(yaml: yaml))?.mapping else {
             // Fail closed: saying nothing here would be indistinguishable from "no problems".
             return ["Could not re-read the configuration to check for unrecognized keys."]
         }
 
+        // Keep values as syntax nodes: constructing `Any` recursively expands aliases and
+        // Yams' dictionary constructor traps on complex keys. Read only scalar key names.
+        let entries = keyedNodes(in: root)
         let recognized = Set(recognizedTopLevelKeys)
-        let presentTopLevel = Set(root.keys)
+        let presentTopLevel = Set(entries.values.keys)
         var warnings: [String] = []
+        if entries.hasComplexKeys {
+            warnings.append("Non-scalar top-level keys are ignored.")
+        }
 
-        for key in root.keys.sorted() {
+        for (key, value) in entries.values.sorted(by: { $0.key < $1.key }) {
             guard recognized.contains(key) else {
                 warnings.append(
                     "Unknown top-level key '\(key)' — it is ignored."
@@ -119,13 +161,17 @@ public enum ConfigDiagnostics {
                 continue
             }
             guard
-                let block = root[key] as? [String: Any],
+                let block = value.mapping,
                 let recognizedChildren = recognizedKeysByBlock[key]
             else {
                 continue
             }
-            let presentChildren = Set(block.keys)
-            for child in block.keys.sorted() where !recognizedChildren.contains(child) {
+            let children = keyedNodes(in: block)
+            if children.hasComplexKeys {
+                warnings.append("Non-scalar keys in '\(key)' are ignored.")
+            }
+            let presentChildren = Set(children.values.keys)
+            for child in presentChildren.sorted() where !recognizedChildren.contains(child) {
                 warnings.append(
                     "Unknown key '\(key).\(child)' — it is ignored."
                         + suggestion(
