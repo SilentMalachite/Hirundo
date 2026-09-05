@@ -63,7 +63,8 @@ hirundo build
 hirundo serve
 ```
 
-サイトは `http://localhost:8080` でライブリロード機能と共に利用できます。
+サイトは `http://127.0.0.1:8080`（`serve` が表示し、ブラウザで開くアドレスです）で
+ライブリロード機能と共に利用できます。
 
 ## コマンド
 
@@ -169,7 +170,8 @@ hirundo serve [オプション]
 `config.yaml` の `server` ブロック > 組み込みの既定値（ポート8080、ライブリロード有効）の
 順です。`--port` を指定すると `server.port` を上書きし、`--no-reload` を指定すると
 `server.liveReload` の値に関わらずライブリロードを無効化します。どちらも指定しなければ
-`config.yaml` の設定に従います。
+`config.yaml` の設定に従います。ポートはどちらで指定した場合も 1〜65535 の範囲である必要が
+あります。
 
 `--host` はサーバーが実際にバインドするアドレスで、受け付けるのは数値アドレスと `localhost`
 の2種類のみです。それ以外のホスト名を渡すとエラーになります。デフォルトの `localhost` は
@@ -183,6 +185,13 @@ IPv4のループバックアドレスに解決されるため、接続できる�
 - ライブリロードが有効な場合、`serve` は `content` / `templates` / `static` の各ディレクトリ
   （出力ディレクトリは対象外）を監視して変更のたびに再ビルドし、接続中のすべてのブラウザに
   `/livereload` のWebSocket経由でリロードを送ります。
+- 再ビルドでは出力ディレクトリをクリーンしません。そのため、ページを削除してもすでに生成済み
+  のHTMLはそのまま残り、そのURLは古い内容を返し続けます。削除するには
+  `hirundo build --clean` を実行してください。
+- `config.yaml` は起動時に一度だけ読み込みます。`serve` の実行中に編集しても反映されません。
+  サーバーを停止してから起動し直してください。
+- `build.outputDirectory` が監視対象のディレクトリの内側にある場合（またはその逆の場合）、
+  `serve` は起動を拒否します。再ビルドのたびに次の再ビルドが始まり、止まらなくなるためです。
 
 ### `hirundo new`
 新しいコンテンツを作成します。
@@ -547,7 +556,7 @@ Hirundoは静的サイトジェネレーターとして適切なセキュリテ�
 cd test-hirundo
 swift run --package-path .. hirundo build --clean
 swift run --package-path .. hirundo serve
-# ブラウザで http://localhost:8080 を開き、test-hirundo/content/ 配下を編集
+# ブラウザで http://127.0.0.1:8080 を開き、test-hirundo/content/ 配下を編集
 ```
 
 ## 開発

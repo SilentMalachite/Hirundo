@@ -63,7 +63,8 @@ hirundo build
 hirundo serve
 ```
 
-Your site will be available at `http://localhost:8080` with live reload enabled.
+Your site will be available at `http://127.0.0.1:8080` — the address `serve` prints and opens —
+with live reload enabled.
 
 ## Commands
 
@@ -168,7 +169,8 @@ Options:
 serving while watching for changes. For both the port and live reload, the precedence is
 CLI flag > `server` block in `config.yaml` > built-in default (port 8080, live reload on):
 an explicit `--port` overrides `server.port`, and `--no-reload` always disables live reload
-no matter what `server.liveReload` says; omit both and `config.yaml` decides.
+no matter what `server.liveReload` says; omit both and `config.yaml` decides. Whichever source
+supplies it, the port must be between 1 and 65535.
 
 `--host` is the address the server actually binds to, and accepts only a numeric address or
 the literal `localhost` — any other host name is rejected. The default, `localhost`,
@@ -182,6 +184,13 @@ reload WebSocket with no authentication, so only do this on a trusted network.
 - With live reload on, `serve` watches the content, templates and static directories (not
   the output directory) and rebuilds on change, then pushes a reload to every connected
   browser over a WebSocket exposed at `/livereload`.
+- Rebuilds do not clean the output directory. Deleting a page therefore leaves the HTML that
+  was already built for it in place, and its URL keeps serving the old content; run
+  `hirundo build --clean` to drop it.
+- `config.yaml` is read once, at startup. Editing it while `serve` is running has no effect —
+  stop the server and start it again to pick up the new settings.
+- `serve` refuses to start when `build.outputDirectory` sits inside a watched directory (or
+  contains one), because each rebuild would then trigger the next one forever.
 
 ### `hirundo new`
 Create new content.
@@ -544,7 +553,7 @@ You can verify end-to-end using the provided fixture:
 cd test-hirundo
 swift run --package-path .. hirundo build --clean
 swift run --package-path .. hirundo serve
-# open http://localhost:8080 and edit files under test-hirundo/content/
+# open http://127.0.0.1:8080 and edit files under test-hirundo/content/
 ```
 
 ## Development
