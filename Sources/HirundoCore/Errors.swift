@@ -190,6 +190,85 @@ extension ScaffoldError {
     }
 }
 
+/// Errors raised while scaffolding a single Markdown content file.
+public enum ContentScaffoldError: Error, LocalizedError, Equatable, Sendable {
+    case invalidTitle(String)
+    case invalidSlug(String)
+    case invalidPath(String)
+    case fileExists(String)
+    case cannotCreateDirectory(String)
+    case cannotWriteFile(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidTitle(let details):
+            return "Invalid title: \(details)"
+        case .invalidSlug(let details):
+            return "Invalid slug: \(details)"
+        case .invalidPath(let details):
+            return "Invalid path: \(details)"
+        case .fileExists(let path):
+            return "File already exists: \(path)"
+        case .cannotCreateDirectory(let path):
+            return "Could not create directory: \(path)"
+        case .cannotWriteFile(let path):
+            return "Could not write file: \(path)"
+        }
+    }
+}
+
+extension ContentScaffoldError {
+    /// Converts this error into the unified Hirundo error representation.
+    ///
+    /// Input mistakes (an unusable title, slug, or path) are reported as configuration
+    /// problems so the CLI does not tell the user to check their disk space over a typo.
+    /// A name collision is a filesystem fact, but it carries its own suggestion because
+    /// the generic "check permissions and disk space" advice is useless for it.
+    /// - Returns: A `HirundoErrorInfo` with a stable code, a matching category, and an
+    ///   error-specific suggestion where one is useful.
+    public func toHirundoError() -> HirundoErrorInfo {
+        let code: String
+        let category: ErrorCategory
+        let suggestion: String?
+        switch self {
+        case .invalidTitle:
+            code = "INVALID_TITLE"
+            category = .configuration
+            suggestion = "Pass a non-empty title without control characters, "
+                + "for example: hirundo new post \"My First Post\""
+        case .invalidSlug:
+            code = "INVALID_SLUG"
+            category = .configuration
+            suggestion = "Pass a --slug that names a single file, "
+                + "using letters, digits and hyphens only"
+        case .invalidPath:
+            code = "INVALID_PATH"
+            category = .configuration
+            suggestion = "Pass a --path relative to the content directory, "
+                + "for example --path about/team"
+        case .fileExists:
+            code = "FILE_EXISTS"
+            category = .filesystem
+            suggestion = "Pass a different --slug or --path, or edit the existing file"
+        case .cannotCreateDirectory:
+            code = "CREATE_DIR_FAILED"
+            category = .filesystem
+            suggestion = nil
+        case .cannotWriteFile:
+            code = "WRITE_FAILED"
+            category = .filesystem
+            suggestion = nil
+        }
+        return HirundoErrorInfo(
+            category: category,
+            code: code,
+            details: self.localizedDescription,
+            suggestion: suggestion,
+            underlyingError: self
+        )
+    }
+}
+
 // Unified error system for consistent error handling
 public protocol HirundoError: Error, LocalizedError {
     var category: ErrorCategory { get }
