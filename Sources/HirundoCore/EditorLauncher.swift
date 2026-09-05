@@ -203,7 +203,11 @@ public enum EditorLauncher {
     /// - Returns: The child's process id, or the error number the spawn failed with.
     private static func spawn(executable: String, arguments: [String]) -> SpawnOutcome {
         var attributes: posix_spawnattr_t?
-        guard posix_spawnattr_init(&attributes) == 0 else { return .failed(errno) }
+        // The `posix_spawnattr_*` and `posix_spawn_file_actions_*` families return the error
+        // number directly and leave `errno` alone, so reporting `errno` here would surface
+        // whatever number some unrelated earlier call happened to leave behind.
+        let attributesCode = posix_spawnattr_init(&attributes)
+        guard attributesCode == 0 else { return .failed(attributesCode) }
         defer { posix_spawnattr_destroy(&attributes) }
 
         // A group of its own, so the terminal can be lent to the editor alone and a Ctrl-Z
@@ -215,19 +219,42 @@ public enum EditorLauncher {
         var emptyMask = sigset_t()
         sigemptyset(&emptyMask)
         posix_spawnattr_setsigmask(&attributes, &emptyMask)
+        // A disposition of `SIG_IGN` survives an `exec` where a handler does not, so an
+        // editor started from a process that ignores, say, SIGINT would ignore it too and
+        // Ctrl-C would do nothing. Resetting every signal to its default is what `Process`
+        // did before this code owned the spawn.
+        var allSignals = sigset_t()
+        sigfillset(&allSignals)
+        posix_spawnattr_setsigdefault(&attributes, &allSignals)
         posix_spawnattr_setflags(
             &attributes,
-            Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK)
+            Int16(
+                POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK
+                    | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_CLOEXEC_DEFAULT
+            )
         )
+
+        // `POSIX_SPAWN_CLOEXEC_DEFAULT` closes every descriptor that no file action names,
+        // so the editor sees the three it needs and nothing else — no cache file, no socket,
+        // no log handle this process happens to have open. A `dup2` of a descriptor onto
+        // itself is the documented way to say "keep this one": it copies nothing and only
+        // exempts the descriptor from the close. Without these three the editor would start
+        // with no terminal at all, which is why `Process` issues exactly the same ones.
+        var fileActions: posix_spawn_file_actions_t?
+        let actionsCode = posix_spawn_file_actions_init(&fileActions)
+        guard actionsCode == 0 else { return .failed(actionsCode) }
+        defer { posix_spawn_file_actions_destroy(&fileActions) }
+        for descriptor in [STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO] {
+            let dupCode = posix_spawn_file_actions_adddup2(&fileActions, descriptor, descriptor)
+            guard dupCode == 0 else { return .failed(dupCode) }
+        }
 
         var argv: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) }
         argv.append(nil)
         defer { for pointer in argv { free(pointer) } }
 
         var pid: pid_t = 0
-        // No file actions: the standard streams are inherited exactly as they are, which is
-        // what a full-screen terminal editor needs.
-        let code = posix_spawn(&pid, executable, nil, &attributes, argv, environ)
+        let code = posix_spawn(&pid, executable, &fileActions, &attributes, argv, environ)
         guard code == 0 else { return .failed(code) }
         return .spawned(pid)
     }
@@ -247,6 +274,10 @@ public enum EditorLauncher {
     /// stop ourselves — which is what makes the user's shell report the job as stopped and
     /// hand back the prompt — and, when the shell continues us with `fg`, lend the terminal
     /// out again, continue the editor, and go back to waiting.
+    ///
+    /// Where there is no shell to stop for — hirundo as the session leader, under `ssh -t` or
+    /// `docker run -it` — the stop is discarded and the same two lines simply resume the
+    /// editor instead. See the comment on the `raise` below.
     ///
     /// - Parameters:
     ///   - pid: The child to wait for.
@@ -280,10 +311,17 @@ public enum EditorLauncher {
             // Take the terminal back before stopping, so the shell finds it where it left it
             // rather than owned by a stopped process group.
             TerminalForeground.setForegroundGroup(previousGroup, on: descriptor)
-            // `SIGSTOP` rather than `SIGTSTP`: it cannot be caught, blocked, or — in an
-            // orphaned process group — discarded, so the stop the user asked for always
-            // happens.
-            raise(SIGSTOP)
+            // `SIGTSTP` rather than `SIGSTOP`, and the discard is the reason. POSIX throws a
+            // keyboard stop away when the process group is orphaned — no member has a parent
+            // in another group of the same session, so no shell is left to continue it —
+            // precisely so nothing can stop itself where nothing can resume it. That is our
+            // situation whenever hirundo is the session leader: `ssh -t host 'hirundo new
+            // … --open'`, `docker run -it`, any shell without job control. `SIGSTOP` there
+            // would be the unrecoverable hang this whole hand-over exists to remove, because
+            // it cannot be discarded. When the signal is discarded the code below simply runs
+            // on: the terminal goes back to the editor, the editor is continued, and the wait
+            // resumes — which is the right answer when there is no job control to return to.
+            raise(SIGTSTP)
             // Resumed by `fg`: the shell has given us the terminal back. Pass it on to the
             // editor, continue it, and carry on waiting.
             TerminalForeground.setForegroundGroup(childGroup, on: descriptor)
@@ -295,13 +333,19 @@ public enum EditorLauncher {
     ///
     /// `WIFSTOPPED` and friends are C macros, so they are not imported into Swift. Darwin
     /// spells a stop as the low byte being `0177`.
-    private static func isStopped(_ status: Int32) -> Bool {
+    ///
+    /// Internal rather than private so the replacement for the macro can be tested against
+    /// the statuses `waitpid` actually produces: getting it wrong turns a stopped editor into
+    /// a reported failure, or an exit into a stop that is waited on forever.
+    static func isStopped(_ status: Int32) -> Bool {
         return (status & 0xFF) == 0x7F
     }
 
     /// Whether a wait status describes a normal exit with code 0. A process killed by a
     /// signal has not edited anything successfully either.
-    private static func exitedCleanly(_ status: Int32) -> Bool {
+    ///
+    /// Internal for the same reason as ``isStopped(_:)``.
+    static func exitedCleanly(_ status: Int32) -> Bool {
         return (status & 0x7F) == 0 && ((status >> 8) & 0xFF) == 0
     }
 

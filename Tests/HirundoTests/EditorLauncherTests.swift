@@ -162,4 +162,62 @@ final class EditorLauncherTests: XCTestCase {
 
         XCTAssertEqual(editor.invocation, .inconsistent)
     }
+
+    // MARK: - Decoding what `waitpid` reports
+
+    // `WIFSTOPPED`, `WIFEXITED` and `WEXITSTATUS` are C macros, so Swift cannot call them and
+    // the wait loop reads the status by hand. Both readings decide something that fails
+    // silently when it is wrong: a stopped editor mistaken for a finished one is reported as a
+    // failed edit and never resumed, and a finished editor mistaken for a stopped one is
+    // waited on forever. The statuses below are built the way the kernel encodes them — the
+    // low byte is `0177` for a stop, zero for a normal exit and the terminating signal
+    // otherwise, with the exit code in the next byte up.
+
+    private func stopped(by signal: Int32) -> Int32 { (signal << 8) | 0x7F }
+    private func exited(with code: Int32) -> Int32 { code << 8 }
+    private func killed(by signal: Int32, dumpedCore: Bool = false) -> Int32 {
+        return dumpedCore ? signal | 0x80 : signal
+    }
+
+    func testIsStopped_recognisesAStop() {
+        // What a Ctrl-Z at the terminal produces, and what the editor's own `tcsetattr`
+        // produces when it is not the foreground group.
+        XCTAssertTrue(EditorLauncher.isStopped(stopped(by: SIGTSTP)))
+        XCTAssertTrue(EditorLauncher.isStopped(stopped(by: SIGTTOU)))
+        XCTAssertTrue(EditorLauncher.isStopped(stopped(by: SIGSTOP)))
+    }
+
+    func testIsStopped_isFalseForEveryWayOfEnding() {
+        XCTAssertFalse(EditorLauncher.isStopped(exited(with: 0)))
+        XCTAssertFalse(EditorLauncher.isStopped(exited(with: 1)))
+        // `0177` in the *high* byte is an exit code of 127, not a stop: the low byte is what
+        // says which of the two this is.
+        XCTAssertFalse(EditorLauncher.isStopped(exited(with: 127)))
+        XCTAssertFalse(EditorLauncher.isStopped(killed(by: SIGKILL)))
+        XCTAssertFalse(EditorLauncher.isStopped(killed(by: SIGSEGV, dumpedCore: true)))
+    }
+
+    func testExitedCleanly_isTrueOnlyForAZeroExit() {
+        XCTAssertTrue(EditorLauncher.exitedCleanly(exited(with: 0)))
+    }
+
+    func testExitedCleanly_isFalseForANonZeroExit() {
+        XCTAssertFalse(EditorLauncher.exitedCleanly(exited(with: 1)))
+        XCTAssertFalse(EditorLauncher.exitedCleanly(exited(with: 127)))
+        XCTAssertFalse(EditorLauncher.exitedCleanly(exited(with: 255)))
+    }
+
+    /// An editor killed by a signal has not saved anything either, core dump or not.
+    func testExitedCleanly_isFalseForASignalledExit() {
+        XCTAssertFalse(EditorLauncher.exitedCleanly(killed(by: SIGKILL)))
+        XCTAssertFalse(EditorLauncher.exitedCleanly(killed(by: SIGTERM)))
+        XCTAssertFalse(EditorLauncher.exitedCleanly(killed(by: SIGSEGV, dumpedCore: true)))
+    }
+
+    /// A stop is not an exit, and must never be read as a successful one — that is the pair of
+    /// readings the wait loop branches on.
+    func testExitedCleanly_isFalseForAStop() {
+        XCTAssertFalse(EditorLauncher.exitedCleanly(stopped(by: SIGTSTP)))
+        XCTAssertFalse(EditorLauncher.exitedCleanly(stopped(by: SIGTTOU)))
+    }
 }
