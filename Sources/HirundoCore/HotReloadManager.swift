@@ -98,7 +98,8 @@ public final class HotReloadManager: @unchecked Sendable {
     ///     directory symlinks under it that `symlinkBoundary` allows are watched as well.
     ///   - debounceInterval: How long changes are collected before the callback runs.
     ///   - ignorePatterns: File name globs never reported.
-    ///   - symlinkBoundary: Where the walk may go when it meets a directory symlink. Pass
+    ///   - symlinkBoundary: Where the walk may go when it meets a symlink, to a directory
+    ///     or to a file. Pass
     ///     ``SymlinkBoundary/project(root:excludingDirectoriesNamed:)`` with the project's own
     ///     root and build directories to watch exactly what the build reads — the two walks
     ///     share their implementation precisely so they cannot disagree. The default keeps to

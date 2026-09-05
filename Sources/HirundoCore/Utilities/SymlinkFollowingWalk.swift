@@ -76,7 +76,8 @@ struct SymlinkFollowingWalk {
     /// - Parameters:
     ///   - root: Directory to walk. May itself be a symlink, which enumerates as completely
     ///     empty and is the same silent failure one level up.
-    ///   - onEntry: Called for every entry that was not descended into, at its logical path.
+    ///   - onEntry: Called for every entry that was not descended into, at its logical path —
+    ///     except a symlink the boundary refused, which is skipped rather than reported.
     ///     Directories the enumerator yields are included, because filtering them out here
     ///     would cost a `stat` the callers already do their own way.
     ///   - onFollowedDirectory: Called with the *resolved* target of every symlink actually

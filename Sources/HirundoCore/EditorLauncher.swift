@@ -262,8 +262,9 @@ public enum EditorLauncher {
     /// What ``spawn(executable:arguments:)`` came back with.
     private enum SpawnOutcome {
         case spawned(pid_t)
-        /// The `errno` value `posix_spawn` reported. It returns the number directly rather
-        /// than through the global.
+        /// The error number reported by whichever of `posix_spawn`, `posix_spawnattr_*` or
+        /// `posix_spawn_file_actions_*` failed. All of them return it directly rather than
+        /// through the global `errno`.
         case failed(Int32)
     }
 
