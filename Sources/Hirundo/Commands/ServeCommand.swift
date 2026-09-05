@@ -111,7 +111,7 @@ struct ServeCommand: AsyncParsableCommand {
             let configURL = URL(fileURLWithPath: currentDirectory).appendingPathComponent("config.yaml")
             let config = try HirundoConfig.load(from: configURL)
 
-            let options = resolveServeOptions(cli: cliOptions, config: config.server)
+            let options = try resolveServeOptions(cli: cliOptions, config: config.server)
             let listen = try resolveListenAddress(host: hostArgument)
 
             print("🏠 Host: \(listen.displayHost)")
