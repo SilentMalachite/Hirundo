@@ -330,7 +330,7 @@ final class ContentScaffolderTests: XCTestCase {
     /// into the scalar and the generated file would fail to parse at build time — long
     /// after `hirundo new` said it succeeded.
     func testRejectsATagWithAControlCharacter() {
-        assertThrows(.invalidMetadata("")) {
+        assertThrows(.invalidMetadata(.tags, "")) {
             try scaffold(
                 kind: .post,
                 ContentScaffoldOptions(title: "T", tags: ["swift\u{0007}web"])
@@ -340,7 +340,7 @@ final class ContentScaffolderTests: XCTestCase {
     }
 
     func testRejectsACategoryWithAControlCharacter() {
-        assertThrows(.invalidMetadata("")) {
+        assertThrows(.invalidMetadata(.categories, "")) {
             try scaffold(
                 kind: .post,
                 ContentScaffoldOptions(title: "T", categories: ["news\u{0001}"])
@@ -351,7 +351,7 @@ final class ContentScaffolderTests: XCTestCase {
 
     /// A line break would end the double-quoted scalar and break the front matter outright.
     func testRejectsATemplateWithANewline() {
-        assertThrows(.invalidMetadata("")) {
+        assertThrows(.invalidMetadata(.template, "")) {
             try scaffold(
                 kind: .page,
                 ContentScaffoldOptions(title: "T", template: "post.html\nevil: true")
@@ -362,7 +362,7 @@ final class ContentScaffolderTests: XCTestCase {
 
     /// The same line separators the title rule adds on top of `controlCharacters`.
     func testRejectsATagWithALineSeparator() {
-        assertThrows(.invalidMetadata("")) {
+        assertThrows(.invalidMetadata(.tags, "")) {
             try scaffold(kind: .post, ContentScaffoldOptions(title: "T", tags: ["a\u{2028}b"]))
         }
         assertNothingWasCreated()
@@ -398,6 +398,37 @@ final class ContentScaffolderTests: XCTestCase {
         } catch {
             XCTFail("Expected a ContentScaffoldError, got \(error)")
         }
+    }
+
+    /// `ContentScaffoldOptions.path` is public and bypasses `resolveSlug` (and therefore
+    /// `validatePostSlug`) entirely, so the reserved-name guard must be reapplied to the
+    /// resolved path's final component too. Unreachable from the CLI today — `NewPostCommand`
+    /// has no `--path` — but `path` is public API, so a direct library caller must still
+    /// be refused.
+    func testPost_rejectsAPathEndingInIndex() {
+        assertThrows(.invalidPath("")) {
+            try scaffold(kind: .post, ContentScaffoldOptions(title: "T", path: "posts/index"))
+        }
+        assertNothingWasCreated()
+    }
+
+    /// `SiteGenerator` derives the RSS item slug from the file's last path component
+    /// regardless of how deeply the file sits, so a nested `index` breaks the same way a
+    /// top-level one does.
+    func testPost_rejectsANestedPathEndingInIndex() {
+        assertThrows(.invalidPath("")) {
+            try scaffold(kind: .post, ContentScaffoldOptions(title: "T", path: "posts/sub/index"))
+        }
+        assertNothingWasCreated()
+    }
+
+    /// `sanitizedPath` appends `.md` when the caller's path omits it, so the reserved-name
+    /// check must see the same stem whether or not the caller already typed the extension.
+    func testPost_rejectsAPathEndingInIndexWithExplicitExtension() {
+        assertThrows(.invalidPath("")) {
+            try scaffold(kind: .post, ContentScaffoldOptions(title: "T", path: "posts/index.md"))
+        }
+        assertNothingWasCreated()
     }
 
     /// Pages must keep working: `content/index.md` is the home page `hirundo init` writes,

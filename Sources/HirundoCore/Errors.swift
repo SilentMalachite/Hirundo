@@ -190,14 +190,36 @@ extension ScaffoldError {
     }
 }
 
+/// Identifies which front-matter option failed the metadata scalar check.
+///
+/// Carried alongside the message on `ContentScaffoldError.invalidMetadata` so
+/// `toHirundoError()` can name the failing option in its suggestion by switching on this
+/// value, rather than recovering it by parsing the message text — which would silently
+/// degrade to a generic fallback if that text ever changed independently.
+public enum ContentScaffoldMetadataOption: Equatable, Sendable {
+    case categories
+    case tags
+    case template
+
+    /// The command-line flag this option corresponds to, e.g. `"--tags"`.
+    var flagName: String {
+        switch self {
+        case .categories: return "--categories"
+        case .tags: return "--tags"
+        case .template: return "--template"
+        }
+    }
+}
+
 /// Errors raised while scaffolding a single Markdown content file.
 public enum ContentScaffoldError: Error, LocalizedError, Equatable, Sendable {
     case invalidTitle(String)
     case invalidSlug(String)
     case invalidPath(String)
     /// A front-matter value other than the title — a category, a tag, or the template —
-    /// that cannot be written safely. The payload names the option it came from.
-    case invalidMetadata(String)
+    /// that cannot be written safely. The first payload names the option it came from; the
+    /// second is the message describing why.
+    case invalidMetadata(ContentScaffoldMetadataOption, String)
     case fileExists(String)
     case cannotCreateDirectory(String)
     case cannotWriteFile(String)
@@ -210,7 +232,7 @@ public enum ContentScaffoldError: Error, LocalizedError, Equatable, Sendable {
             return "Invalid slug: \(details)"
         case .invalidPath(let details):
             return "Invalid path: \(details)"
-        case .invalidMetadata(let details):
+        case .invalidMetadata(_, let details):
             return "Invalid metadata: \(details)"
         case .fileExists(let path):
             return "File already exists: \(path)"
@@ -255,16 +277,10 @@ extension ContentScaffoldError {
             category = .configuration
             suggestion = "Pass a --path relative to the content directory, "
                 + "for example --path about/team"
-        case .invalidMetadata(let details):
+        case .invalidMetadata(let option, _):
             code = "INVALID_METADATA"
             category = .configuration
-            // The details open with the option that was refused ("--tags entries …"), so
-            // the suggestion can point at that one option instead of listing all three.
-            let option = details.split(separator: " ").first.map(String.init) ?? ""
-            suggestion = option.hasPrefix("--")
-                ? "Pass a \(option) value without control characters or line breaks"
-                : "Pass --categories, --tags and --template values without control "
-                    + "characters or line breaks"
+            suggestion = "Pass a \(option.flagName) value without control characters or line breaks"
         case .fileExists:
             code = "FILE_EXISTS"
             category = .filesystem

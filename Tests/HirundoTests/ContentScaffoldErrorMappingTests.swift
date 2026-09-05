@@ -12,7 +12,7 @@ final class ContentScaffoldErrorMappingTests: XCTestCase {
         XCTAssertEqual(ContentScaffoldError.invalidSlug("bad").toHirundoError().category, .configuration)
         XCTAssertEqual(ContentScaffoldError.invalidPath("bad").toHirundoError().category, .configuration)
         XCTAssertEqual(
-            ContentScaffoldError.invalidMetadata("--tags bad").toHirundoError().category,
+            ContentScaffoldError.invalidMetadata(.tags, "--tags bad").toHirundoError().category,
             .configuration
         )
     }
@@ -71,7 +71,7 @@ final class ContentScaffoldErrorMappingTests: XCTestCase {
 
     func testToHirundoError_whenMetadataInvalid_namesTheOptionThatWasRejected() {
         let info = ContentScaffoldError
-            .invalidMetadata("--tags entries cannot contain control characters or line breaks")
+            .invalidMetadata(.tags, "--tags entries cannot contain control characters or line breaks")
             .toHirundoError()
 
         XCTAssertEqual(info.code, "INVALID_METADATA")
@@ -87,15 +87,29 @@ final class ContentScaffoldErrorMappingTests: XCTestCase {
         )
     }
 
-    /// The option name is read off the details, so a payload that does not start with one
-    /// still has to produce usable advice rather than a mangled sentence.
-    func testToHirundoError_whenMetadataDetailsNameNoOption_listsThemAll() {
-        let info = ContentScaffoldError.invalidMetadata("something went wrong").toHirundoError()
+    /// The suggestion is built by switching on the carried `ContentScaffoldMetadataOption`,
+    /// not by parsing `details` — so each option keeps producing its own advice regardless
+    /// of how the message text reads, unlike the old string-splitting approach this
+    /// replaces.
+    func testToHirundoError_whenMetadataInvalid_namesEachOptionRegardlessOfMessageWording() {
+        let cases: [(option: ContentScaffoldMetadataOption, flag: String)] = [
+            (.categories, "--categories"),
+            (.tags, "--tags"),
+            (.template, "--template"),
+        ]
+        for (option, flag) in cases {
+            let info = ContentScaffoldError
+                .invalidMetadata(option, "a message that does not start with the flag")
+                .toHirundoError()
 
-        XCTAssertNotNil(info.suggestion)
-        XCTAssertTrue(info.suggestedAction.contains("--categories"))
-        XCTAssertTrue(info.suggestedAction.contains("--tags"))
-        XCTAssertTrue(info.suggestedAction.contains("--template"))
+            XCTAssertEqual(info.code, "INVALID_METADATA")
+            XCTAssertNotNil(info.suggestion)
+            XCTAssertTrue(
+                info.suggestedAction.contains(flag),
+                "Expected \(flag) named for .\(option), got: \(info.suggestedAction)"
+            )
+            XCTAssertNotEqual(info.suggestedAction, ErrorCategory.configuration.defaultSuggestedAction)
+        }
     }
 
     func testToHirundoError_whenIOFails_keepsTheGenericSuggestion() {
@@ -114,7 +128,7 @@ final class ContentScaffoldErrorMappingTests: XCTestCase {
 
     func testErrorDescription_labelsAnInvalidMetadataValue() {
         XCTAssertEqual(
-            ContentScaffoldError.invalidMetadata("--template cannot contain control characters")
+            ContentScaffoldError.invalidMetadata(.template, "--template cannot contain control characters")
                 .errorDescription,
             "Invalid metadata: --template cannot contain control characters"
         )
@@ -125,8 +139,12 @@ final class ContentScaffoldErrorMappingTests: XCTestCase {
         XCTAssertNotEqual(ContentScaffoldError.fileExists("/a"), ContentScaffoldError.fileExists("/b"))
         XCTAssertNotEqual(ContentScaffoldError.invalidSlug("x"), ContentScaffoldError.invalidPath("x"))
         XCTAssertNotEqual(
-            ContentScaffoldError.invalidMetadata("x"),
+            ContentScaffoldError.invalidMetadata(.tags, "x"),
             ContentScaffoldError.invalidTitle("x")
+        )
+        XCTAssertNotEqual(
+            ContentScaffoldError.invalidMetadata(.tags, "x"),
+            ContentScaffoldError.invalidMetadata(.categories, "x")
         )
     }
 }

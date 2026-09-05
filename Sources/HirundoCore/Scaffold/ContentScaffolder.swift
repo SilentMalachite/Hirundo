@@ -189,16 +189,19 @@ public struct ContentScaffolder {
     private func validateMetadata(_ options: ContentScaffoldOptions) throws {
         if options.categories.contains(where: Self.containsForbiddenScalar) {
             throw ContentScaffoldError.invalidMetadata(
+                .categories,
                 "--categories entries cannot contain control characters or line breaks"
             )
         }
         if options.tags.contains(where: Self.containsForbiddenScalar) {
             throw ContentScaffoldError.invalidMetadata(
+                .tags,
                 "--tags entries cannot contain control characters or line breaks"
             )
         }
         if let template = options.template, Self.containsForbiddenScalar(template) {
             throw ContentScaffoldError.invalidMetadata(
+                .template,
                 "--template cannot contain control characters or line breaks"
             )
         }
@@ -209,6 +212,12 @@ public struct ContentScaffolder {
     }
 
     /// Resolves the destination path relative to the content directory, extension included.
+    ///
+    /// `.path` is checked for the reserved post name here too: it bypasses `resolveSlug`
+    /// (and the `slug`-derived branch below) entirely, so without this a direct
+    /// `ContentScaffoldOptions(path:)` caller — unreachable from the CLI today, since
+    /// `NewPostCommand` has no `--path` option, but public API nonetheless — could still
+    /// reproduce the divergence ``validatePostSlug(_:)`` exists to prevent.
     private func resolveRelativePath(
         kind: ContentKind,
         options: ContentScaffoldOptions,
@@ -216,7 +225,14 @@ public struct ContentScaffolder {
         limits: Limits
     ) throws -> String {
         if let path = options.path {
-            return try sanitizedPath(path, limits: limits)
+            let resolved = try sanitizedPath(path, limits: limits)
+            switch kind {
+            case .post:
+                try validatePostPathStem(finalPathComponentStem(of: resolved))
+            case .page:
+                break
+            }
+            return resolved
         }
 
         let slug = try resolveSlug(options.slug, title: title, limits: limits)
@@ -227,6 +243,15 @@ public struct ContentScaffolder {
         case .page:
             return "\(slug).md"
         }
+    }
+
+    /// The last path component of an already-`.md`-suffixed relative path, extension
+    /// stripped — e.g. `"posts/sub/index.md"` -> `"index"`. `sanitizedPath` guarantees the
+    /// `.md` suffix regardless of whether the caller's `path` already had one, so this sees
+    /// the same stem either way.
+    private func finalPathComponentStem(of relativePath: String) -> String {
+        let lastComponent = relativePath.split(separator: "/").last.map(String.init) ?? relativePath
+        return lastComponent.hasSuffix(".md") ? String(lastComponent.dropLast(3)) : lastComponent
     }
 
     /// Rejects the one slug a post cannot have.
@@ -242,11 +267,30 @@ public struct ContentScaffolder {
     /// init` itself writes, `content/about/index.md` legitimately publishes at `/about/`,
     /// and pages are not in the feed, so nothing can disagree.
     private func validatePostSlug(_ slug: String) throws {
-        guard slug == Self.reservedPostSlug else { return }
-        throw ContentScaffoldError.invalidSlug(
+        try rejectReservedPostName(slug, optionName: "--slug", makeError: ContentScaffoldError.invalidSlug)
+    }
+
+    /// Applies the same rule as ``validatePostSlug(_:)`` to a `--path`'s final component,
+    /// reached only through ``ContentScaffoldOptions/path``. RSS always derives the item
+    /// slug from the file's last path component (see `SiteGenerator.swift`), regardless of
+    /// how deep the file sits — so `posts/sub/index.md` divides the same way a bare
+    /// `posts/index.md` does, and is refused too.
+    private func validatePostPathStem(_ stem: String) throws {
+        try rejectReservedPostName(stem, optionName: "--path", makeError: ContentScaffoldError.invalidPath)
+    }
+
+    /// Shared rule behind ``validatePostSlug(_:)`` and ``validatePostPathStem(_:)``: a post
+    /// may not resolve to the reserved base name, whichever option produced it.
+    private func rejectReservedPostName(
+        _ value: String,
+        optionName: String,
+        makeError: (String) -> ContentScaffoldError
+    ) throws {
+        guard value == Self.reservedPostSlug else { return }
+        throw makeError(
             "\"\(Self.reservedPostSlug)\" is reserved for posts: posts/index.md publishes "
                 + "at /posts/, but its RSS link would point at /posts/index/. Pass a "
-                + "different --slug."
+                + "different \(optionName)."
         )
     }
 
