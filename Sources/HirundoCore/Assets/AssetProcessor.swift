@@ -107,15 +107,11 @@ public class AssetProcessor {
     /// Processes JavaScript content
     public func processJS(_ content: String, options: JSProcessingOptions = JSProcessingOptions()) -> String {
         var processed = content
-        
-        if options.transpile {
-            processed = transpileJS(processed, target: options.target)
-        }
-        
+
         if options.minify {
             processed = minifyJS(processed)
         }
-        
+
         return processed
     }
     
@@ -348,16 +344,5 @@ public class AssetProcessor {
         let bracketCount = js.filter { $0 == "[" }.count - js.filter { $0 == "]" }.count
         
         return braceCount == 0 && parenCount == 0 && bracketCount == 0
-    }
-    
-    /// JavaScript transpilation (disabled for safety)
-    private func transpileJS(_ js: String, target: String) -> String {
-        print("⚠️ JavaScript transpilation is disabled for safety reasons.")
-        print("   Use a dedicated build tool like Babel or esbuild for ES6+ transpilation.")
-        print("   Returning original JavaScript unchanged.")
-        
-        // Return original JavaScript unchanged
-        // Transpilation with regex is unreliable and can break code
-        return js
     }
 }

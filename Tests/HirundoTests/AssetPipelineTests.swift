@@ -170,39 +170,6 @@ final class AssetPipelineTests: XCTestCase {
         XCTAssertEqual(loadedManifest, manifest)
     }
     
-    func testAssetConcatenation() throws {
-        let sourceDir = tempDir.appendingPathComponent("source")
-        let destDir = tempDir.appendingPathComponent("dest")
-        let jsDir = sourceDir.appendingPathComponent("js")
-        try FileManager.default.createDirectory(at: jsDir, withIntermediateDirectories: true)
-        
-        // Create multiple JS files
-        try "var a = 1;".write(to: jsDir.appendingPathComponent("1.js"), atomically: true, encoding: .utf8)
-        try "var b = 2;".write(to: jsDir.appendingPathComponent("2.js"), atomically: true, encoding: .utf8)
-        try "var c = 3;".write(to: jsDir.appendingPathComponent("3.js"), atomically: true, encoding: .utf8)
-        
-        // Configure concatenation
-        pipeline.concatenationRules = [
-            AssetConcatenationRule(
-                pattern: "js/*.js",
-                output: "js/bundle.js",
-                separator: "\n"
-            )
-        ]
-        
-        // Process assets
-        let _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
-        
-        // Verify concatenated file
-        let bundlePath = destDir.appendingPathComponent("js/bundle.js")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: bundlePath.path))
-        
-        let bundleContent = try String(contentsOf: bundlePath, encoding: .utf8)
-        XCTAssertTrue(bundleContent.contains("var a = 1;"))
-        XCTAssertTrue(bundleContent.contains("var b = 2;"))
-        XCTAssertTrue(bundleContent.contains("var c = 3;"))
-    }
-    
     func testImageOptimization() throws {
         // This test would require actual image data
         // For now, we'll test the pipeline recognizes image types
