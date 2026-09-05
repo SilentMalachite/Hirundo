@@ -125,7 +125,11 @@ final class AssetFingerprintIntegrationTests: XCTestCase {
         }
     }
 
-    func testCleanBuildLeavesNoUnfingerprintedAssetBehind() async throws {
+    /// フィンガープリント有効時、`clean: true` のビルドがハッシュ無しの名前を一切書き出さない
+    /// ことを確かめる。世代をまたいだ古いハッシュ付き出力の掃除（`AssetPruner`）は別の性質で、
+    /// こちらは `BuildWithRecoveryCompletenessTests.testRepeatedRebuildKeepsOnlyOneGenerationOfEachAsset`
+    /// が担保している。
+    func testCleanBuildNeverWritesTheUnhashedFilename() async throws {
         let generator = try SiteGenerator(projectPath: projectPath)
         try await generator.build(clean: true)
 
