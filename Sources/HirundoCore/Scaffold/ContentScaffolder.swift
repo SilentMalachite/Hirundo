@@ -79,11 +79,40 @@ public struct ContentScaffoldResult: Sendable {
 /// Not marked `Sendable` because it stores `FileManager`, which is not `Sendable`.
 public struct ContentScaffolder {
     private let fileManager: FileManager
+    private let finalisers: ExclusiveFinalisers
 
     /// Creates a scaffolder.
     /// - Parameter fileManager: File manager used for filesystem operations.
     public init(fileManager: FileManager = .default) {
+        self.init(fileManager: fileManager, finalisers: ExclusiveFinalisers())
+    }
+
+    /// Creates a scaffolder with the finishing syscalls injected.
+    ///
+    /// Internal, for tests: the filesystems the fallbacks exist for — exFAT, FAT32, some VM
+    /// shared folders — are not ones a test run has, so the only honest way to reach those
+    /// paths is to make the calls report what those filesystems report.
+    init(fileManager: FileManager = .default, finalisers: ExclusiveFinalisers) {
         self.fileManager = fileManager
+        self.finalisers = finalisers
+    }
+
+    /// The two syscalls that can give a finished temporary file its final name without ever
+    /// replacing something already there.
+    ///
+    /// Each returns `0`, or the `errno` it failed with.
+    struct ExclusiveFinalisers {
+        /// `link(2)`: exclusive *and* atomic, and available on every filesystem that has hard
+        /// links at all.
+        var hardLink: (UnsafePointer<CChar>, UnsafePointer<CChar>) -> Int32 = { source, destination in
+            return link(source, destination) == 0 ? 0 : errno
+        }
+        /// `renameatx_np(2)` with `RENAME_EXCL`: also exclusive and atomic, and the first
+        /// thing to try where hard links are unavailable.
+        var exclusiveRename: (UnsafePointer<CChar>, UnsafePointer<CChar>) -> Int32 = { source, destination in
+            let renamed = renameatx_np(AT_FDCWD, source, AT_FDCWD, destination, UInt32(RENAME_EXCL))
+            return renamed == 0 ? 0 : errno
+        }
     }
 
     /// Scalars rejected in a title, and in every other value written into the front matter.
@@ -425,6 +454,12 @@ public struct ContentScaffolder {
     /// first one's finished file. `EEXIST` is reported as ``ContentScaffoldError/fileExists``
     /// so the losing process is indistinguishable from one that lost the check itself.
     ///
+    /// Not every filesystem has hard links: exFAT and FAT32 volumes, and some VM shared
+    /// folders, answer `EPERM` or `ENOTSUP`. Those users worked before this write became
+    /// exclusive, so failing there would be a regression — see
+    /// ``finaliseWithoutHardLinks(_:temporaryPath:destinationPath:destination:)`` for what
+    /// happens instead. Every route refuses to overwrite.
+    ///
     /// The temporary file is unlinked on every path out of this method, taken or not, so a
     /// failure never leaves one behind in the user's content directory.
     private func createExclusively(_ data: Data, at destination: URL, in parent: URL) throws {
@@ -452,11 +487,79 @@ public struct ContentScaffolder {
             throw ContentScaffoldError.cannotWriteFile(destination.path)
         }
 
-        guard link(temporaryPath, destinationPath) == 0 else {
-            let failure = errno
-            throw failure == EEXIST
+        let linkFailure = finalisers.hardLink(temporaryPath, destinationPath)
+        if linkFailure == 0 {
+            return
+        }
+        if linkFailure == EEXIST {
+            throw ContentScaffoldError.fileExists(destination.path)
+        }
+        guard Self.meansNoHardLinks(linkFailure) else {
+            throw ContentScaffoldError.cannotWriteFile(destination.path)
+        }
+        try finaliseWithoutHardLinks(
+            data,
+            temporaryPath: temporaryPath,
+            destinationPath: destinationPath,
+            destination: destination
+        )
+    }
+
+    /// Whether an `errno` from `link` means the filesystem has no hard links, rather than that
+    /// this particular link could not be made.
+    ///
+    /// exFAT and FAT32 volumes, and some VM shared folders, have no concept of a second name
+    /// for one file and answer `EPERM` or `ENOTSUP`. Before this write became exclusive, those
+    /// users were served by `Data.write(options: .atomic)` and `hirundo new` worked; failing
+    /// outright there would be a regression, so the call falls back instead. `EINVAL` and
+    /// `EXDEV` are in the list for the same reason: from a driver that does not implement
+    /// linking they mean the same thing, and every fallback still refuses to overwrite.
+    private static func meansNoHardLinks(_ failure: Int32) -> Bool {
+        return [EPERM, ENOTSUP, EOPNOTSUPP, ENOSYS, EINVAL, EXDEV].contains(failure)
+    }
+
+    /// Gives the temporary file its final name on a filesystem without hard links, still
+    /// refusing to replace anything already there.
+    ///
+    /// Two attempts, in the order that keeps the most:
+    ///
+    /// 1. `renameatx_np` with `RENAME_EXCL` — atomic *and* exclusive, exactly like the `link`
+    ///    it stands in for. Where the driver implements it, nothing is lost.
+    /// 2. Creating the destination directly with `O_CREAT | O_EXCL` and writing into it. Still
+    ///    exclusive — the kernel refuses an existing name — but **not atomic**: a crash partway
+    ///    through leaves a short file under the final name. That is the trade a filesystem
+    ///    offering neither primitive forces, and it is the behaviour `hirundo new` had before
+    ///    the write became exclusive at all.
+    ///
+    /// The temporary file is left for the caller's `defer` to unlink on every path, including
+    /// the one where `renameatx_np` has already consumed it.
+    private func finaliseWithoutHardLinks(
+        _ data: Data,
+        temporaryPath: [CChar],
+        destinationPath: [CChar],
+        destination: URL
+    ) throws {
+        let renameFailure = finalisers.exclusiveRename(temporaryPath, destinationPath)
+        if renameFailure == 0 {
+            return
+        }
+        if renameFailure == EEXIST {
+            throw ContentScaffoldError.fileExists(destination.path)
+        }
+
+        let descriptor = open(destinationPath, O_WRONLY | O_CREAT | O_EXCL, 0o644)
+        guard descriptor >= 0 else {
+            throw errno == EEXIST
                 ? ContentScaffoldError.fileExists(destination.path)
                 : ContentScaffoldError.cannotWriteFile(destination.path)
+        }
+        let wrote = Self.writeAll(data, to: descriptor)
+        let closed = close(descriptor) == 0
+        guard wrote, closed else {
+            // A half-written file under the name the user asked for is worse than none, and
+            // this is the one path that can produce one. Take it back out.
+            unlink(destinationPath)
+            throw ContentScaffoldError.cannotWriteFile(destination.path)
         }
     }
 
