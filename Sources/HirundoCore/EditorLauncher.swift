@@ -137,8 +137,9 @@ public enum EditorLauncher {
             return false
         }
 
-        let process = Process()
         // Arguments are passed as a list, never joined into a shell command line.
+        let executable: String
+        let arguments: [String]
         switch editor.invocation {
         case .executable(let path):
             // The user named one specific executable, and that exact file is what
@@ -146,13 +147,13 @@ public enum EditorLauncher {
             // away and re-resolve the bare name on `PATH`, where a writable directory
             // earlier in the search order would win — executing something other than the
             // file that was approved.
-            process.executableURL = URL(fileURLWithPath: path)
-            process.arguments = [fileURL.path]
+            executable = path
+            arguments = [path, fileURL.path]
         case .pathLookup(let command):
             // A bare command name *is* a request for `PATH` resolution, so `env` does
             // exactly what the user asked for.
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = [command, fileURL.path]
+            executable = "/usr/bin/env"
+            arguments = [executable, command, fileURL.path]
         case .inconsistent:
             warn("$VISUAL/$EDITOR is set to '\(displayable(editor.rawValue))', which does "
                 + "not name the validated command '\(editor.command)'. Refusing to run it.")
@@ -160,10 +161,12 @@ public enum EditorLauncher {
         }
         // Terminal editors need the real terminal, so the standard streams are inherited.
 
-        do {
-            try process.run()
-        } catch {
-            warn("Could not start '\(displayable(editor.rawValue))': \(error.localizedDescription)")
+        let pid: pid_t
+        switch spawn(executable: executable, arguments: arguments) {
+        case .spawned(let spawned):
+            pid = spawned
+        case .failed(let code):
+            warn("Could not start '\(displayable(editor.rawValue))': \(String(cString: strerror(code)))")
             return false
         }
 
@@ -173,11 +176,133 @@ public enum EditorLauncher {
         // command appears to hang. Lend it the foreground for the duration; the terminal is
         // handed back on every exit path, including a throw. When there is no controlling
         // terminal — a pipe, a file, CI — this does nothing and the launch is as it was.
-        let plan = TerminalForeground.plan(forChild: process.processIdentifier)
+        let plan = TerminalForeground.plan(forChild: pid)
         return TerminalForeground.withForeground(givenTo: plan) {
-            process.waitUntilExit()
-            return process.terminationStatus == 0
+            wait(for: pid, holding: plan)
         }
+    }
+
+    /// Spawns `executable` with `arguments`, in a process group of its own.
+    ///
+    /// `posix_spawn` rather than `Process`, because Foundation reaps its own children: the
+    /// only supported way to wait for one is `waitUntilExit()`, which waits without
+    /// `WUNTRACED`, and calling `waitpid` alongside it races with Foundation's reaper. Waiting
+    /// without `WUNTRACED` is what made Ctrl-Z an unrecoverable hang — the editor stops, the
+    /// wait never returns, the hand-back never runs, and the terminal is left owned by a
+    /// stopped process group with nothing reading it. Owning the wait is what makes job
+    /// control possible.
+    ///
+    /// It also closes a race: `Process.processIdentifier` is only readable after `run()` has
+    /// returned, by which time the child may already have stopped itself. `POSIX_SPAWN_SETPGROUP`
+    /// with a group of 0 puts the child in a group of its own id before it execs, so the pid
+    /// and the group are both known the instant the call returns.
+    ///
+    /// - Parameters:
+    ///   - executable: Absolute path of the file to execute. Never a shell.
+    ///   - arguments: Full argument vector, `argv[0]` included.
+    /// - Returns: The child's process id, or the error number the spawn failed with.
+    private static func spawn(executable: String, arguments: [String]) -> SpawnOutcome {
+        var attributes: posix_spawnattr_t?
+        guard posix_spawnattr_init(&attributes) == 0 else { return .failed(errno) }
+        defer { posix_spawnattr_destroy(&attributes) }
+
+        // A group of its own, so the terminal can be lent to the editor alone and a Ctrl-Z
+        // stops the editor rather than us.
+        posix_spawnattr_setpgroup(&attributes, 0)
+        // An inherited mask that blocks SIGTTOU would turn the editor's first `tcsetattr`
+        // into an `EIO` failure instead of the stop the hand-over is there to prevent, so
+        // the child starts with an empty one whatever this process happens to be blocking.
+        var emptyMask = sigset_t()
+        sigemptyset(&emptyMask)
+        posix_spawnattr_setsigmask(&attributes, &emptyMask)
+        posix_spawnattr_setflags(
+            &attributes,
+            Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK)
+        )
+
+        var argv: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) }
+        argv.append(nil)
+        defer { for pointer in argv { free(pointer) } }
+
+        var pid: pid_t = 0
+        // No file actions: the standard streams are inherited exactly as they are, which is
+        // what a full-screen terminal editor needs.
+        let code = posix_spawn(&pid, executable, nil, &attributes, argv, environ)
+        guard code == 0 else { return .failed(code) }
+        return .spawned(pid)
+    }
+
+    /// What ``spawn(executable:arguments:)`` came back with.
+    private enum SpawnOutcome {
+        case spawned(pid_t)
+        /// The `errno` value `posix_spawn` reported. It returns the number directly rather
+        /// than through the global.
+        case failed(Int32)
+    }
+
+    /// Waits for the editor, handling a Ctrl-Z the way a shell does.
+    ///
+    /// `WUNTRACED` is the whole point: without it the wait blocks forever on a stopped child.
+    /// When the editor stops, the terminal it owns has nothing reading it, so we take it back,
+    /// stop ourselves — which is what makes the user's shell report the job as stopped and
+    /// hand back the prompt — and, when the shell continues us with `fg`, lend the terminal
+    /// out again, continue the editor, and go back to waiting.
+    ///
+    /// - Parameters:
+    ///   - pid: The child to wait for.
+    ///   - plan: The hand-over in force, which names the group to give the terminal back to.
+    ///   - descriptor: The terminal. Defaults to stdin, as the hand-over does.
+    /// - Returns: `true` when the editor exited with status 0.
+    private static func wait(
+        for pid: pid_t,
+        holding plan: ForegroundPlan,
+        on descriptor: Int32 = STDIN_FILENO
+    ) -> Bool {
+        while true {
+            var status: Int32 = 0
+            guard waitpid(pid, &status, WUNTRACED) >= 0 else {
+                if errno == EINTR { continue }
+                // Nothing left to wait for, and nothing sensible to report.
+                return false
+            }
+            guard isStopped(status) else {
+                return exitedCleanly(status)
+            }
+
+            guard case .handOver(let childGroup, let previousGroup) = plan else {
+                // We never lent the terminal out, so the editor cannot be the foreground
+                // group and a keyboard stop cannot have reached it. Something else stopped
+                // it; continue it rather than wait on a process nothing will resume.
+                kill(pid, SIGCONT)
+                continue
+            }
+
+            // Take the terminal back before stopping, so the shell finds it where it left it
+            // rather than owned by a stopped process group.
+            TerminalForeground.setForegroundGroup(previousGroup, on: descriptor)
+            // `SIGSTOP` rather than `SIGTSTP`: it cannot be caught, blocked, or — in an
+            // orphaned process group — discarded, so the stop the user asked for always
+            // happens.
+            raise(SIGSTOP)
+            // Resumed by `fg`: the shell has given us the terminal back. Pass it on to the
+            // editor, continue it, and carry on waiting.
+            TerminalForeground.setForegroundGroup(childGroup, on: descriptor)
+            kill(-childGroup, SIGCONT)
+        }
+    }
+
+    /// Whether a wait status describes a process that has stopped rather than ended.
+    ///
+    /// `WIFSTOPPED` and friends are C macros, so they are not imported into Swift. Darwin
+    /// spells a stop as the low byte being `0177`.
+    private static func isStopped(_ status: Int32) -> Bool {
+        return (status & 0xFF) == 0x7F
+    }
+
+    /// Whether a wait status describes a normal exit with code 0. A process killed by a
+    /// signal has not edited anything successfully either.
+    private static func exitedCleanly(_ status: Int32) -> Bool {
+        return (status & 0x7F) == 0 && ((status >> 8) & 0xFF) == 0
     }
 
     private static func warn(_ message: String) {

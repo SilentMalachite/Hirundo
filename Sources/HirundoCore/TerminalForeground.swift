@@ -76,6 +76,31 @@ enum TerminalForeground {
         )
     }
 
+    /// Makes `group` the terminal's foreground process group.
+    ///
+    /// `tcsetpgrp` from a process that is not currently the foreground group raises SIGTTOU
+    /// on the caller — which is precisely what handing the terminal back does, since by then
+    /// the child owns it. The job-control signals are blocked across the call so it cannot
+    /// stop us. The mask is per-thread, and this is the only thread that touches it.
+    ///
+    /// Separate from ``withForeground(givenTo:on:do:)`` because the body needs it too: when
+    /// the editor is stopped by a Ctrl-Z, the terminal has to be reclaimed before we stop as
+    /// well, and handed back again when the user resumes the job.
+    /// - Returns: `false` when the terminal would not take the change — the child has gone,
+    ///   or the terminal has.
+    @discardableResult
+    static func setForegroundGroup(_ group: pid_t, on descriptor: Int32 = STDIN_FILENO) -> Bool {
+        var jobControlSignals = sigset_t()
+        sigemptyset(&jobControlSignals)
+        sigaddset(&jobControlSignals, SIGTTOU)
+        sigaddset(&jobControlSignals, SIGTTIN)
+        var previousMask = sigset_t()
+        let masked = pthread_sigmask(SIG_BLOCK, &jobControlSignals, &previousMask) == 0
+        defer { if masked { pthread_sigmask(SIG_SETMASK, &previousMask, nil) } }
+
+        return tcsetpgrp(descriptor, group) == 0
+    }
+
     /// Runs `body` with `plan` in force, restoring the terminal afterwards.
     ///
     /// The restore is in a `defer`, so it happens on every exit path out of `body`,
@@ -90,11 +115,9 @@ enum TerminalForeground {
             return try body()
         }
 
-        // `tcsetpgrp` from a process that is not currently the foreground group raises
-        // SIGTTOU on the caller — which is precisely what the hand-back does, since by
-        // then the child owns the terminal. Blocking the job-control signals across the
-        // whole span keeps both calls from stopping us. The mask is per-thread, and both
-        // calls happen on this thread.
+        // Blocked across the whole span, not just around each `tcsetpgrp`: `body` reclaims
+        // and re-lends the terminal itself while the editor is stopped, and none of those
+        // calls may stop us either.
         var jobControlSignals = sigset_t()
         sigemptyset(&jobControlSignals)
         sigaddset(&jobControlSignals, SIGTTOU)

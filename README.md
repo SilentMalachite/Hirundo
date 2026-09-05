@@ -256,6 +256,9 @@ starter pages `hirundo init` writes.
   If `$EDITOR` is unset, refused, or fails to start, the command prints a warning and
   still exits 0 — the file has already been written. The warning distinguishes "nothing
   set" from "set but refused", and names the refused value.
+  While the editor runs it owns the terminal, so a full-screen editor draws normally and
+  Ctrl-Z suspends the job as it would for any other command: `hirundo` stops alongside the
+  editor, the shell gets the terminal back and prints its prompt, and `fg` resumes both.
 
 ### `hirundo clean`
 Clean output directory and caches.
