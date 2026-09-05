@@ -1,6 +1,14 @@
 import Foundation
 
-/// Asset pipeline for processing static assets.
+/// static ディレクトリのアセットを処理して出力ディレクトリへ書き出す。
+///
+/// `config.yaml` から届く設定は `features.minify` と `features.fingerprint` の2つ。
+/// `excludePatterns` はライブラリ利用者向けの面で、パターンは**ファイル名**にのみ照合される。
+///
+/// フィンガープリントを有効にすると、出力名は `<name>-<16桁のハッシュ>.<ext>` になり、
+/// ハッシュはそのファイルの**最終的な出力バイト列**に対して取られる。CSS の最終バイト列は
+/// `url(...)` を書き換えた後にしか確定しないため、処理は「CSS 以外 → CSS」の2パスに分かれる。
+/// 生成された HTML の書き換えは `SiteGenerator` の `asset references` ステップが行う。
 public class AssetPipeline {
     private let fileManager = FileManager.default
 

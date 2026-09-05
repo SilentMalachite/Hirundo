@@ -384,12 +384,13 @@ blog:
   generateTags: true
 
 # 組み込み機能のフラグ。リストではなくマッピング形式です。
-# ブロックごと省略した場合は4つとも false になります。
+# ブロックごと省略した場合は5つとも false になります。
 features:
   sitemap: true
   rss: true
   searchIndex: true
   minify: true
+  fingerprint: true
 
 # セキュリティとパフォーマンスの制限。各キーは省略可能で、以下の値はいずれも省略時のデフォルトです。
 limits:
@@ -441,7 +442,7 @@ site:
 | `build` | `content` / `_site` / `static` / `templates` |
 | `server` | `port: 8080`、`liveReload: true` |
 | `blog` | `postsPerPage: 10`、`generate*` はすべて `true` |
-| `features` | 4つともfalse |
+| `features` | 5つともfalse |
 | `limits` | 上記の例に記載した値 |
 
 `hirundo init` は `features` までを書き出し、`limits` は出力しません。したがって `limits` は
@@ -534,7 +535,7 @@ Hirundoは[Stencil](https://github.com/stencilproject/Stencil)テンプレート
 
 ## 組み込み機能
 
-Hirundoには4つの組み込み機能があり、`features` ブロックで切り替えます。セキュリティと
+Hirundoには5つの組み込み機能があり、`features` ブロックで切り替えます。セキュリティと
 単純さのため、外部コードの動的読み込みはサポートしていません。
 
 | フラグ | 効果 |
@@ -543,8 +544,23 @@ Hirundoには4つの組み込み機能があり、`features` ブロックで切�
 | `rss` | 記事から `rss.xml` を書き出します |
 | `searchIndex` | クライアントサイド検索用に `search-index.json` を書き出します |
 | `minify` | アセットパイプラインでCSSとJSの最小化を有効にします |
+| `fingerprint` | アセット名に内容ハッシュを付け、HTMLとCSSの参照を書き換えます |
 
 `minify` が対象とするのは**CSSとJSのアセットのみ**です。生成されるHTMLは最小化されません。
+
+`fingerprint` を有効にすると、`static/` のアセットは `style-9f2a1c04b7e3d5a1.css` のような
+内容ハッシュ付きの名前で出力され、生成されたHTMLの `href` / `src` / `srcset`、CSSの `url(...)`、
+`<style>` の本文と `style` 属性がその名前を指すように書き換えられます。対応表は
+`_site/asset-manifest.json` に書き出されます。古い世代のハッシュ名のファイルはビルドのたびに
+削除されるため、`hirundo serve` を回し続けても出力が膨れません。
+
+制限が2つあります。
+
+- **JavaScript内の参照は書き換えません。** `fetch("/images/logo.png")` のような文字列が参照
+  かどうかは静的には判定できないためです。JSからアセットを参照する場合は
+  `asset-manifest.json` を読んでください。
+- **CSSからCSSへの `@import url(...)` は書き換えません。** 参照先のハッシュがまだ確定していない
+  ためです。この形の参照を見つけると警告を出します。
 
 アーカイブ、カテゴリー、タグの各ページは、これとは別に `blog` ブロックで制御します。
 
@@ -558,7 +574,7 @@ Hirundoには4つの組み込み機能があり、`features` ブロックで切�
 - **タイムアウト設定**。`timeouts` ブロックは存在せず、ファイル操作、ディレクトリ操作、
   HTTPリクエスト、ファイル監視、サーバー起動のいずれについても設定可能なタイムアウトは
   ありません。
-- **プラグインアーキテクチャ**。プラグインシステムは削除され、`features` の4つのフラグが
+- **プラグインアーキテクチャ**。プラグインシステムは削除され、`features` の5つのフラグが
   その役割を担っています。カスタムプラグイン開発のサポートはなく、`imageOptimization` や
   `syntaxHighlight` という機能も存在しません。
 - **ライブリロードのWebSocket認証**。`/auth-token` エンドポイントもトークンによるハンド
@@ -567,14 +583,10 @@ Hirundoには4つの組み込み機能があり、`features` ブロックで切�
   締め出すだけで、接続してきた相手が誰であるかを確かめるものではありません。ポートに到達でき
   る相手はサイトを閲覧でき、IPアドレスでサイトを開けばライブリロードにも接続できます。開発
   サーバーを信頼できないネットワークに公開しないでください。
-- **アセットのフィンガープリント、ソースマップ、JS/CSSの結合**。
-  `build.enableAssetFingerprinting` / `enableSourceMaps` / `concatenateJS` / `concatenateCSS`
-  というキーはもう存在しません。以前のバージョンはこれらをパースしていましたが、どれも
-  何もしていなかったため削除しました。フィンガープリントと結合は `AssetPipeline` の
-  ライブラリレベルの機能としては残っていますが、生成されたHTMLの `href` / `src` を
-  書き換える処理がどこにも無いため、有効にすると存在しないファイルを指すサイトができます。
-  ソースマップはどの経路でも生成されません。`config.yaml` から届くアセット関連の設定は
-  `features.minify` だけです。
+- **アセットの結合とソースマップ**。JS/CSSの結合とソースマップ生成は削除されました。
+  結合は `AssetConcatenator` ごと、ソースマップは `sourceMap` オプションごと消えています。
+  JSのトランスパイル（`transpile` / `target`）も同様です。ES6+の変換には Babel や esbuild を
+  使ってください。
 - **フロントマターの `layout:`**。`template:` を使用してください。
 
 `config.yaml` にこの一覧のキーを書いている場合、`hirundo validate` がすべて報告します。

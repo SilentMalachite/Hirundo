@@ -119,7 +119,7 @@ Sources/
 │   ├── Sanitizers/         # HTML sanitization
 │   ├── Scaffold/           # `hirundo init` site scaffolding
 │   ├── Templates/          # Stencil cache, filters, context building
-│   ├── Assets/             # Asset processing and concatenation
+│   ├── Assets/             # Asset processing, fingerprinting, and reference rewriting
 │   ├── Validators/         # Markdown validation
 │   ├── Utils/, Utilities/  # Helper utilities
 │   └── *.swift             # Core functionality
