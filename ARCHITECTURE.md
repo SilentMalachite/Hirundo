@@ -87,16 +87,22 @@ rewritten, which is why asset processing runs in two passes (non-CSS, then CSS).
 generated HTML's `href` / `src` / `srcset`, CSS `url(...)`, `<style>` bodies, and `style`
 attributes are rewritten to the hashed names; the mapping is written to
 `_site/asset-manifest.json`, and output from a previous build's hashed names is pruned on
-every build. Two references are not rewritten: a string inside JavaScript (not statically
-distinguishable from a reference) and a CSS-to-CSS `@import url(...)` (its target's hash is
-not yet known when the importing stylesheet is processed; this prints a warning). Asset
-concatenation and source map generation have been removed entirely — `AssetConcatenator`,
+every build — using both the current `static/` tree and the previous build's manifest, so
+an asset whose whole directory was deleted from `static/` stops being served. Within the
+CSS pass, stylesheets are ordered by their `@import` / `url(...)` dependencies so a
+referenced stylesheet's hash is settled first; stylesheets in an import cycle keep their
+original names instead. Two things are never rewritten: a string inside JavaScript (not
+statically distinguishable from a reference) and a reference to an asset that must keep a
+fixed URL (`AssetNamePolicy` — `robots.txt` and friends at the output root, plus
+`.well-known/**`), which is not renamed in the first place. Asset concatenation and source
+map generation have been removed entirely — `AssetConcatenator`,
 `AssetPipeline.enableSourceMaps`, and the `sourceMap` option no longer exist.
 
 **Security Measures:**
 - Path traversal prevention
 - Safe processing validation
-- Symlink resolution
+- Symlink containment — a link under `static/` is followed only while it resolves inside
+  `static/`; one pointing outside is skipped with a warning, so it cannot publish its target
 - Content verification
 
 ### 5. Development Server (`DevelopmentServer.swift`)

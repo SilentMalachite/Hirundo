@@ -147,6 +147,13 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 - **searchIndex**: 検索インデックス（JSON）の生成
 - **minify**: アセットパイプラインでのCSS/JS最小化（**HTML出力は対象外**）
 - **fingerprint**: アセット名への内容ハッシュ付与と、HTML/CSSの参照書き換え
+  - 元の名前のまま出力されるのは2種類だけです。固定URLで取得されるアセット
+    （ルート直下の `robots.txt` / `sitemap.xml` / `favicon.ico` / `CNAME` / `_headers` /
+    `_redirects` / `ads.txt` / `app-ads.txt` / `sw.js` / `service-worker.js` と、
+    `.well-known/` 配下すべて）と、互いに `@import` しあうスタイルシートです。
+  - CSSは依存順（参照される側が先）に処理するため、CSSからCSSへの `@import` も書き換わります。
+- `static/` 配下のシンボリックリンクは、解決先が `static/` の中に収まる場合にのみたどります。
+  外を指すリンクは警告を出して飛ばすので、リンク先の中身が公開されることはありません。
 
 各フラグは独立して省略できます（`features: {sitemap: true}` のように1つだけ書けます）。
 `limits` も同様に、指定したキーだけが上書きされ、残りはデフォルト値になります。

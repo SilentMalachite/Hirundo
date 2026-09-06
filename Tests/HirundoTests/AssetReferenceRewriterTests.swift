@@ -122,6 +122,47 @@ final class AssetReferenceRewriterTests: XCTestCase {
         XCTAssertTrue(result.unresolvedStylesheetReferences.isEmpty)
     }
 
+    func testLeavesURLLikeTextInsideACSSStringAlone() {
+        // 文字列リテラルの中の `url(...)` は URL トークンではなく表示される文字列。
+        let css = "p::before { content: \"url(/images/logo.png)\"; }"
+        let result = AssetReferenceRewriter.rewriteCSS(css, manifest: manifest, inDirectory: "css")
+        XCTAssertEqual(result.content, css)
+    }
+
+    func testLeavesURLInsideACSSCommentAlone() {
+        let css = "/* url(/images/logo.png) */ body { color: red; }"
+        let result = AssetReferenceRewriter.rewriteCSS(css, manifest: manifest, inDirectory: "css")
+        XCTAssertEqual(result.content, css)
+    }
+
+    func testRewritesABareImportString() {
+        // `@import` は `url(...)` を伴わない文字列形式でも書ける。
+        let result = AssetReferenceRewriter.rewriteCSS(
+            "@import \"style.css\";",
+            manifest: manifest,
+            inDirectory: "css"
+        )
+        XCTAssertEqual(result.content, "@import \"style-9f2a1c04b7e3d5a1.css\";")
+    }
+
+    func testRewritesABareImportStringWithALayerDescriptor() {
+        let result = AssetReferenceRewriter.rewriteCSS(
+            "@import 'style.css' layer(base);",
+            manifest: manifest,
+            inDirectory: "css"
+        )
+        XCTAssertEqual(result.content, "@import 'style-9f2a1c04b7e3d5a1.css' layer(base);")
+    }
+
+    func testReportsABareImportItCannotResolve() {
+        let result = AssetReferenceRewriter.rewriteCSS(
+            "@import \"missing.css\";",
+            manifest: manifest,
+            inDirectory: "css"
+        )
+        XCTAssertEqual(result.unresolvedStylesheetReferences, ["missing.css"])
+    }
+
     // MARK: - HTML
 
     func testRewritesLinkHref() {
@@ -150,6 +191,40 @@ final class AssetReferenceRewriterTests: XCTestCase {
         XCTAssertEqual(
             AssetReferenceRewriter.rewriteHTML("<img src=/images/logo.png>", manifest: manifest, inDirectory: ""),
             "<img src=/images/logo-1b4d0f77c2ae8e93.png>"
+        )
+    }
+
+    func testRewritesAnAttributeWithSpacesAroundTheEqualsSign() {
+        // 属性名と `=` の間、`=` と値の間の空白はどちらも合法な HTML。
+        XCTAssertEqual(
+            AssetReferenceRewriter.rewriteHTML(
+                "<link href = \"/css/style.css\">",
+                manifest: manifest,
+                inDirectory: ""
+            ),
+            "<link href = \"/css/style-9f2a1c04b7e3d5a1.css\">"
+        )
+    }
+
+    func testRewritesAnAttributeWithASpaceOnlyAfterTheEqualsSign() {
+        XCTAssertEqual(
+            AssetReferenceRewriter.rewriteHTML(
+                "<img src= \"/images/logo.png\">",
+                manifest: manifest,
+                inDirectory: ""
+            ),
+            "<img src= \"/images/logo-1b4d0f77c2ae8e93.png\">"
+        )
+    }
+
+    func testKeepsAValuelessAttributeThatPrecedesAReference() {
+        XCTAssertEqual(
+            AssetReferenceRewriter.rewriteHTML(
+                "<img alt src=\"/images/logo.png\">",
+                manifest: manifest,
+                inDirectory: ""
+            ),
+            "<img alt src=\"/images/logo-1b4d0f77c2ae8e93.png\">"
         )
     }
 
@@ -196,6 +271,24 @@ final class AssetReferenceRewriterTests: XCTestCase {
         )
     }
 
+    func testDoesNotSplitADataURLInSrcset() {
+        // data URL はカンマを含むが、候補の区切りではない。候補の切れ目は空白の後の
+        // カンマであって、URL トークンの中のカンマではない。
+        let html = "<img srcset=\"data:image/png,images/logo.png 1x\">"
+        XCTAssertEqual(AssetReferenceRewriter.rewriteHTML(html, manifest: manifest, inDirectory: ""), html)
+    }
+
+    func testRewritesSrcsetCandidatesWrittenWithoutDescriptors() {
+        XCTAssertEqual(
+            AssetReferenceRewriter.rewriteHTML(
+                "<img srcset=\"/images/logo.png, /images/bg.png\">",
+                manifest: manifest,
+                inDirectory: ""
+            ),
+            "<img srcset=\"/images/logo-1b4d0f77c2ae8e93.png, /images/bg-5c3e9a21d0f4b678.png\">"
+        )
+    }
+
     func testRewritesURLInStyleAttribute() {
         XCTAssertEqual(
             AssetReferenceRewriter.rewriteHTML(
@@ -220,6 +313,22 @@ final class AssetReferenceRewriterTests: XCTestCase {
 
     func testLeavesScriptBodyAlone() {
         let html = "<script>var a = \"/images/logo.png\"; if (a<b) {}</script>"
+        XCTAssertEqual(AssetReferenceRewriter.rewriteHTML(html, manifest: manifest, inDirectory: ""), html)
+    }
+
+    func testDoesNotEndTheScriptBodyAtATagWhoseNameMerelyStartsWithScript() {
+        // JavaScript の文字列の中の `</scripture>` は script 本文の終わりではない。
+        let html = "<script>var s = \"</scripture><img src='/images/logo.png'>\";</script>"
+        XCTAssertEqual(AssetReferenceRewriter.rewriteHTML(html, manifest: manifest, inDirectory: ""), html)
+    }
+
+    func testLeavesTextareaContentAlone() {
+        let html = "<textarea><img src=\"/images/logo.png\"></textarea>"
+        XCTAssertEqual(AssetReferenceRewriter.rewriteHTML(html, manifest: manifest, inDirectory: ""), html)
+    }
+
+    func testLeavesTitleContentAlone() {
+        let html = "<title><img src=\"/images/logo.png\"></title>"
         XCTAssertEqual(AssetReferenceRewriter.rewriteHTML(html, manifest: manifest, inDirectory: ""), html)
     }
 

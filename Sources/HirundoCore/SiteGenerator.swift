@@ -389,8 +389,15 @@ public class SiteGenerator {
         let staticURL = URL(fileURLWithPath: projectPath)
             .appendingPathComponent(config.build.staticDirectory)
 
+        // 前の世代の目録。`static/images/` ごと、あるいは `static/` ごと消されたアセットは、
+        // 今回の走査からは届かないので、これだけが古い出力の在り処を知っている。
+        let manifestPath = outputURL.appendingPathComponent("asset-manifest.json").path
+        let previous = (try? assetPipeline.loadManifest(from: manifestPath)) ?? AssetManifest()
+
         guard siteFileManager.fileExists(at: staticURL.path) else {
             assetManifest = AssetManifest()
+            guard config.features.fingerprint else { return }
+            try pruneAndRecord(AssetManifest(), previous: previous, outputURL: outputURL, staticURL: staticURL)
             return
         }
 
@@ -407,12 +414,22 @@ public class SiteGenerator {
         assetManifest = manifest
 
         guard config.features.fingerprint else { return }
+        try pruneAndRecord(manifest, previous: previous, outputURL: outputURL, staticURL: staticURL)
+    }
 
-        // 前の世代のハッシュ名の出力を落とす。serve は clean せずに再ビルドする。
+    /// 前の世代のハッシュ名の出力を落として、今回の目録を書き出す。serve は clean せずに
+    /// 再ビルドするため、掃除が無いと世代ごとに出力が積み上がる。
+    private func pruneAndRecord(
+        _ manifest: AssetManifest,
+        previous: AssetManifest,
+        outputURL: URL,
+        staticURL: URL
+    ) throws {
         try AssetPruner.prune(
             outputDirectory: outputURL,
             staticDirectory: staticURL,
-            keeping: manifest
+            keeping: manifest,
+            previous: previous
         )
 
         try assetPipeline.saveManifest(

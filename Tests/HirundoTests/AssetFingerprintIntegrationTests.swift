@@ -125,6 +125,43 @@ final class AssetFingerprintIntegrationTests: XCTestCase {
         }
     }
 
+    func testRebuildRemovesAnAssetWhoseDirectoryWasDeletedFromStatic() async throws {
+        let generator = try SiteGenerator(projectPath: projectPath)
+        try await generator.build()
+
+        let stale = try XCTUnwrap(manifest()["images/logo.png"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outputURL.appendingPathComponent(stale).path))
+
+        try FileManager.default.removeItem(at: tempDirectory.appendingPathComponent("static/images"))
+        try write("body{background:none}", to: "static/css/style.css")
+
+        try await SiteGenerator(projectPath: projectPath).build()
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: outputURL.appendingPathComponent(stale).path),
+            "static から消えたアセットの公開済み出力が既知の URL で残っている"
+        )
+    }
+
+    func testRebuildRemovesEverythingWhenTheStaticDirectoryIsDeleted() async throws {
+        let generator = try SiteGenerator(projectPath: projectPath)
+        try await generator.build()
+
+        let stale = try manifest().values.sorted()
+        XCTAssertFalse(stale.isEmpty, "前提: 1回目のビルドがアセットを出している")
+
+        try FileManager.default.removeItem(at: tempDirectory.appendingPathComponent("static"))
+
+        try await SiteGenerator(projectPath: projectPath).build()
+
+        for path in stale {
+            XCTAssertFalse(
+                FileManager.default.fileExists(atPath: outputURL.appendingPathComponent(path).path),
+                "\(path) が残っている"
+            )
+        }
+    }
+
     /// フィンガープリント有効時、`clean: true` のビルドがハッシュ無しの名前を一切書き出さない
     /// ことを確かめる。世代をまたいだ古いハッシュ付き出力の掃除（`AssetPruner`）は別の性質で、
     /// こちらは `BuildWithRecoveryCompletenessTests.testRepeatedRebuildKeepsOnlyOneGenerationOfEachAsset`

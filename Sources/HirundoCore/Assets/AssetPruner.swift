@@ -7,12 +7,16 @@ import Foundation
 ///
 /// 削除するのは次の3つを**すべて**満たすファイルだけ。
 ///
-/// 1. `static/` のトップレベル要素に対応する出力の範囲にあること
+/// 1. 出力ルートの中で、次のどちらかの範囲にあること
+///    - `static/` のトップレベル要素に対応する出力の範囲
+///    - 前回のマニフェストが記録している出力（`static/images/` ごと消したときのように、
+///      今回のトップレベル一覧からは届かない範囲は、これだけが知っている）
 /// 2. 名前がフィンガープリント形（`<name>-<16桁の小文字16進数>.<ext>`）であること
 /// 3. 現在のマニフェストの値に含まれないこと
 ///
 /// 条件2があるため、`content/css/foo.md` が `_site/css/foo/index.html` を生むようなパスの
-/// 衝突があってもページ出力を消すことは構造上あり得ない。
+/// 衝突があってもページ出力を消すことは構造上あり得ない。固定 URL のアセット（`robots.txt`
+/// など、`AssetNamePolicy` を参照）もハッシュ名にならないので、同じ条件で守られる。
 public enum AssetPruner {
 
     /// `<name>-<16桁の小文字16進数>.<ext>` か、拡張子の無いアセット（`CNAME` など）由来の
@@ -31,6 +35,7 @@ public enum AssetPruner {
         outputDirectory: URL,
         staticDirectory: URL,
         keeping manifest: AssetManifest,
+        previous: AssetManifest = AssetManifest(),
         fileManager: FileManager = .default
     ) throws {
         let keep = manifest.outputPaths
@@ -71,6 +76,15 @@ public enum AssetPruner {
                     )
                 }
             }
+        }
+
+        // 前回のマニフェストにしか無い出力。`static/images/` ごと消したときのように、今回の
+        // トップレベル一覧からは届かない範囲は、前回のマニフェストだけが知っている。
+        for outputPath in previous.outputPaths.subtracting(keep) {
+            let fileURL = outputDirectory.appendingPathComponent(outputPath)
+            guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+            else { continue }
+            try pruneIfStale(fileURL, outputDirectory: outputDirectory, keep: keep, fileManager: fileManager)
         }
     }
 
