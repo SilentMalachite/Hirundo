@@ -89,8 +89,11 @@ jobs:
       - name: Build (release)
         id: build
         run: |
-          BIN_DIR=$(swift build -c release --show-bin-path)
-          echo "bin_dir=$BIN_DIR" >> $GITHUB_OUTPUT
+          # --show-bin-path only prints the path, it does not build. Without
+          # this first line nothing is ever compiled and the packaging step
+          # fails on a missing binary.
+          swift build -c release
+          echo "bin_dir=$(swift build -c release --show-bin-path)" >> "$GITHUB_OUTPUT"
 
       - name: Package artifact
         run: |
@@ -133,8 +136,11 @@ jobs:
       - name: Build (release)
         id: build
         run: |
-          BIN_DIR=$(swift build -c release --show-bin-path)
-          echo "bin_dir=$BIN_DIR" >> $GITHUB_OUTPUT
+          # --show-bin-path only prints the path, it does not build. Without
+          # this first line nothing is ever compiled and the packaging step
+          # fails on a missing binary.
+          swift build -c release
+          echo "bin_dir=$(swift build -c release --show-bin-path)" >> "$GITHUB_OUTPUT"
 
       - name: Package artifact
         run: |
