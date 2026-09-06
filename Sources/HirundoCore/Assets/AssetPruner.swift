@@ -15,12 +15,11 @@ import Foundation
 /// 衝突があってもページ出力を消すことは構造上あり得ない。
 public enum AssetPruner {
 
-    /// `<name>-<16桁の小文字16進数>.<ext>` か。
+    /// `<name>-<16桁の小文字16進数>.<ext>` か、拡張子の無いアセット（`CNAME` など）由来の
+    /// `<name>-<16桁の小文字16進数>` か。
     public static func isFingerprintedName(_ name: String) -> Bool {
         let url = URL(fileURLWithPath: name)
-        guard !url.pathExtension.isEmpty else { return false }
-
-        let stem = url.deletingPathExtension().lastPathComponent
+        let stem = url.pathExtension.isEmpty ? name : url.deletingPathExtension().lastPathComponent
         guard let dash = stem.lastIndex(of: "-") else { return false }
 
         let hash = stem[stem.index(after: dash)...]
@@ -87,7 +86,15 @@ public enum AssetPruner {
         try fileManager.removeItem(at: fileURL)
     }
 
-    private static func relativePath(of fileURL: URL, under root: URL) -> String? {
+    /// 出力ディレクトリからの相対パス。出力の外なら `nil`。
+    ///
+    /// シンボリックリンクは両辺とも解決してから前方一致を取る。これにより macOS の
+    /// `/var` → `/private/var` のようなテンポラリディレクトリの下でも正しく判定でき、
+    /// 出力ルートの外を指すシンボリックリンクは前方一致に失敗してスキップされる。
+    ///
+    /// `SiteGenerator`（書き込みの許可判定）と `AssetPruner`（削除の対象判定）の両方が
+    /// この関数に依存している。どちらか一方だけを直すことがないよう、実装は1箇所に保つ。
+    internal static func relativePath(of fileURL: URL, under root: URL) -> String? {
         let filePath = fileURL.standardizedFileURL.resolvingSymlinksInPath().path
         let rootPath = root.standardizedFileURL.resolvingSymlinksInPath().path
         let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"

@@ -39,14 +39,22 @@ final class AssetPrunerTests: XCTestCase {
         XCTAssertTrue(AssetPruner.isFingerprintedName("my-logo-1b4d0f77c2ae8e93.png"))
     }
 
+    func testRecognizesExtensionlessFingerprintedNames() {
+        // CNAME・_headers・_redirects のような拡張子の無いアセットのフィンガープリント名。
+        XCTAssertTrue(AssetPruner.isFingerprintedName("CNAME-0123456789abcdef"))
+        XCTAssertTrue(AssetPruner.isFingerprintedName("_headers-1b4d0f77c2ae8e93"))
+    }
+
     func testRejectsNonFingerprintedNames() {
         XCTAssertFalse(AssetPruner.isFingerprintedName("style.css"))
         XCTAssertFalse(AssetPruner.isFingerprintedName("index.html"))
         XCTAssertFalse(AssetPruner.isFingerprintedName("sitemap.xml"))
         XCTAssertFalse(AssetPruner.isFingerprintedName("my-logo.png"), "ハッシュが16桁でない")
         XCTAssertFalse(AssetPruner.isFingerprintedName("style-9F2A1C04B7E3D5A1.css"), "大文字は使わない")
-        XCTAssertFalse(AssetPruner.isFingerprintedName("style-9f2a1c04b7e3d5a1"), "拡張子が無い")
         XCTAssertFalse(AssetPruner.isFingerprintedName("style-zzzzzzzzzzzzzzzz.css"), "16進数でない")
+        XCTAssertFalse(AssetPruner.isFingerprintedName("CNAME"), "ハッシュ接尾辞が無い（拡張子も無い）")
+        XCTAssertFalse(AssetPruner.isFingerprintedName("CNAME-0123456789ABCDEF"), "拡張子が無くても大文字は使わない")
+        XCTAssertFalse(AssetPruner.isFingerprintedName("CNAME-0123456789abcde"), "拡張子が無くてもハッシュは16桁必要")
     }
 
     // MARK: - 削除
@@ -147,6 +155,34 @@ final class AssetPrunerTests: XCTestCase {
         )
 
         XCTAssertTrue(exists("robots-notes.txt"))
+    }
+
+    func testPrunesAStaleExtensionlessFingerprintedAsset() throws {
+        // CNAME のような拡張子の無いアセットも、フィンガープリント済みの古い出力は掃除される。
+        try "example.com".write(to: staticDir.appendingPathComponent("CNAME"), atomically: true, encoding: .utf8)
+        try write("stale", to: "CNAME-0000000000000000", under: outputDir)
+
+        try AssetPruner.prune(
+            outputDirectory: outputDir,
+            staticDirectory: staticDir,
+            keeping: AssetManifest(["CNAME": "CNAME-9f2a1c04b7e3d5a1"])
+        )
+
+        XCTAssertFalse(exists("CNAME-0000000000000000"))
+    }
+
+    func testKeepsAPlainExtensionlessFileWithNoHashSuffix() throws {
+        // 拡張子が無いというだけでハッシュ接尾辞の無いファイルまで食われないことを確認する。
+        try "example.com".write(to: staticDir.appendingPathComponent("CNAME"), atomically: true, encoding: .utf8)
+        try write("current", to: "CNAME", under: outputDir)
+
+        try AssetPruner.prune(
+            outputDirectory: outputDir,
+            staticDirectory: staticDir,
+            keeping: AssetManifest()
+        )
+
+        XCTAssertTrue(exists("CNAME"))
     }
 
     func testKeepsADirectoryWhoseNameLooksLikeAFingerprintedFile() throws {

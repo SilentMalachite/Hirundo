@@ -265,7 +265,7 @@ public enum AssetReferenceRewriter {
                 result += rewritten + trailingWhitespace
             } else {
                 result += rawValue
-                if isUnresolvedStylesheet(reference, manifest: manifest, inDirectory: directory) {
+                if isUnresolvedStylesheet(reference) {
                     unresolved.append(reference)
                 }
             }
@@ -277,11 +277,7 @@ public enum AssetReferenceRewriter {
     }
 
     /// 書き換えられなかった参照が、ローカルの `.css` を指しているか。
-    private static func isUnresolvedStylesheet(
-        _ reference: String,
-        manifest: AssetManifest,
-        inDirectory directory: String
-    ) -> Bool {
+    private static func isUnresolvedStylesheet(_ reference: String) -> Bool {
         let path = reference.split(separator: "?").first.map(String.init) ?? reference
         let withoutFragment = path.split(separator: "#").first.map(String.init) ?? path
         guard withoutFragment.lowercased().hasSuffix(".css") else { return false }

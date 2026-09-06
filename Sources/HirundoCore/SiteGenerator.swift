@@ -454,7 +454,7 @@ public class SiteGenerator {
             let ext = fileURL.pathExtension.lowercased()
             guard ext == "html" || ext == "htm" || ext == "css" else { continue }
 
-            guard let relativePath = Self.outputRelativePath(of: fileURL, under: outputURL),
+            guard let relativePath = AssetPruner.relativePath(of: fileURL, under: outputURL),
                   !generated.contains(relativePath) else { continue }
 
             guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else { continue }
@@ -467,15 +467,6 @@ public class SiteGenerator {
             guard rewritten != content else { continue }
             try siteFileManager.writeFile(content: rewritten, to: fileURL)
         }
-    }
-
-    /// 出力ディレクトリからの相対パス。出力の外なら `nil`。
-    private static func outputRelativePath(of fileURL: URL, under root: URL) -> String? {
-        let filePath = fileURL.standardizedFileURL.resolvingSymlinksInPath().path
-        let rootPath = root.standardizedFileURL.resolvingSymlinksInPath().path
-        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
-        guard filePath.hasPrefix(prefix) else { return nil }
-        return String(filePath.dropFirst(prefix.count))
     }
 
     // MARK: - Built-in feature generators (sitemap, RSS, search index)
