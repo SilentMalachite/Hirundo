@@ -134,10 +134,12 @@ HTML/CSS の依存順・参照書き換えについては、この差分で新�
 | 指摘 | 確認方法 | 結果 |
 |------|----------|------|
 | L-1: `ads.txt` が組み込み除外に含まれる | `AssetFingerprintExclusions.swift:29` を確認 | 確認済み |
+| L-1: 配線の回帰を捉えるテストへ差し替え | 組み込みパターンに一致しない `keep-stable.custom` をフィクスチャと設定値に使うよう変更し、設定なしでは同名ファイルがハッシュされることを示す対照テストを追加（`AssetFingerprintIntegrationTests`） | 対応済み（本計画タスク 2） |
 | M-2: `AssetItem` が変更前は `public` だった | `git show 7e22c07^1:Sources/HirundoCore/ContentModels.swift` で `public struct AssetItem: Sendable` を確認 | 確認済み |
 | M-2: レビュー対象コミット時点で Sources から消えていた | `grep -rn "AssetItem" Sources/` がヒット0（レビュー対象コミット時点） | 確認済み |
 | M-2: 互換シムとして復元 | `AssetItem` を `@available(*, deprecated)` 付きで再追加し、ネストした `AssetType` を `typealias` で `HirundoCore.AssetType` へ橋渡し（`ContentModels.swift`） | 対応済み（本計画タスク 4） |
-| L-2: リンク先が `source` の外 | `AssetPipelineTests.swift:286` 付近を確認 | 確認済み |
+| L-2: リンク先が `source` の外 | `7e22c07:Tests/HirundoTests/AssetPipelineTests.swift:286` 付近を確認 | 確認済み |
+| L-2: 対象ファイルを実際に処理するテストへ差し替え | リンク先を `source/shared` 配下へ移し、両ビルドとも列挙でスキップされないようにしたうえで、マニフェストのエントリと出力内容を検証（`AssetPipelineTests`） | 対応済み（本計画タスク 1） |
 | H-1: TOCTOU | `HookedAssetPipeline` で列挙後のリンク差し替え・判定後の書き換えを決定的に再現するテストを追加（`AssetPipelineTests`）。ステージングファイルをハッシュする構造に変更 | 対応済み（本計画タスク 5〜7） |
 
 Codex は read-only 制約を維持するため `swift test` を実行していません（テンポラリファイルと `.build` を書き換えるため）。作業ツリーへの変更・コミットも行っていません。
