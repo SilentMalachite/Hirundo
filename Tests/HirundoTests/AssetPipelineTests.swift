@@ -274,7 +274,11 @@ final class AssetPipelineTests: XCTestCase {
     /// `write` 冒頭の閉じ込め判定は候補パスを `resolvingSymlinksInPath()` で解決するため、
     /// 次の非クリーンビルド（`hirundo serve` の再ビルド相当）でそのリンクの解決先が出力先の
     /// 外だと判定され、ビルドが `Output path escapes destination directory` で落ちる。
-    /// このテストは2回目の `processAssets` が例外を投げないことでその回帰を固定する。
+    ///
+    /// リンク先は **static の中** に置く。外を指すリンクは `AssetFileManager` が列挙の時点で
+    /// 飛ばすので、外に置くと両方のビルドで `write` に届かず、このテストは何も検証しない
+    /// （以前はそうなっていた）。`XCTUnwrap(first["img/logo.png"])` が、リンクが実際に処理
+    /// されたことの証拠になる。
     func testSecondBuildAfterASymlinkedAssetDoesNotThrow() throws {
         let sourceDir = tempDir.appendingPathComponent("source")
         let destDir = tempDir.appendingPathComponent("dest")
@@ -283,20 +287,34 @@ final class AssetPipelineTests: XCTestCase {
             withIntermediateDirectories: true
         )
 
-        let sharedDir = tempDir.appendingPathComponent("shared")
+        let sharedDir = sourceDir.appendingPathComponent("shared")
         try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
+        let targetContent = Data("this is the real image bytes".utf8)
         let targetFile = sharedDir.appendingPathComponent("logo-real.png")
-        try Data("this is the real image bytes".utf8).write(to: targetFile)
+        try targetContent.write(to: targetFile)
 
         let logoLink = sourceDir.appendingPathComponent("img/logo.png")
         try FileManager.default.createSymbolicLink(at: logoLink, withDestinationURL: targetFile)
 
-        // `hirundo serve` はクリーンせずに同じ出力先へ再ビルドする。フィンガープリント無効でも
-        // 壊れる（ブリーフ item 1 の主張どおり）ことを確かめるため、ここでは無効のままにする。
-        _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+        // 1回目: リンクが実体として書き出されていること。リンクのまま出ると、2回目の閉じ込め
+        // 判定がその解決先を見て落ちる。フィンガープリント無効でも壊れる経路なので無効のまま。
+        let first = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+        let firstOutput = destDir.appendingPathComponent(try XCTUnwrap(first["img/logo.png"]))
+        XCTAssertNotEqual(
+            try firstOutput.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink, true,
+            "1回目のビルドがシンボリックリンクのまま書き出している: \(firstOutput.path)"
+        )
+
+        // 2回目: `hirundo serve` はクリーンせずに同じ出力先へ再ビルドする。
+        var second = AssetManifest()
         XCTAssertNoThrow(
-            try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
-            "1回目のビルドが残したシンボリックリンクにより、2回目のビルドが閉じ込め判定で落ちてはいけない"
+            second = try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
+            "1回目のビルドが残した出力の上に2回目のビルドが書けない"
+        )
+        XCTAssertEqual(second["img/logo.png"], "img/logo.png")
+        XCTAssertEqual(
+            try Data(contentsOf: firstOutput), targetContent,
+            "2回目のビルド後の出力がリンク先の実体と一致しない"
         )
     }
 
