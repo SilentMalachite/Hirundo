@@ -135,17 +135,18 @@ HTML/CSS の依存順・参照書き換えについては、この差分で新�
 |------|----------|------|
 | L-1: `ads.txt` が組み込み除外に含まれる | `AssetFingerprintExclusions.swift:29` を確認 | 確認済み |
 | M-2: `AssetItem` が変更前は `public` だった | `git show 7e22c07^1:Sources/HirundoCore/ContentModels.swift` で `public struct AssetItem: Sendable` を確認 | 確認済み |
-| M-2: 現在 Sources から消えている | `grep -rn "AssetItem" Sources/` がヒット0 | 確認済み |
+| M-2: レビュー対象コミット時点で Sources から消えていた | `grep -rn "AssetItem" Sources/` がヒット0（レビュー対象コミット時点） | 確認済み |
+| M-2: 互換シムとして復元 | `AssetItem` を `@available(*, deprecated)` 付きで再追加し、ネストした `AssetType` を `typealias` で `HirundoCore.AssetType` へ橋渡し（`ContentModels.swift`） | 対応済み（本計画タスク 4） |
 | L-2: リンク先が `source` の外 | `AssetPipelineTests.swift:286` 付近を確認 | 確認済み |
-| H-1: TOCTOU | 静的レビューのみ。再現テストは未実施 | **未検証** |
+| H-1: TOCTOU | `HookedAssetPipeline` で列挙後のリンク差し替え・判定後の書き換えを決定的に再現するテストを追加（`AssetPipelineTests`）。ステージングファイルをハッシュする構造に変更 | 対応済み（本計画タスク 5〜7） |
 
 Codex は read-only 制約を維持するため `swift test` を実行していません（テンポラリファイルと `.build` を書き換えるため）。作業ツリーへの変更・コミットも行っていません。
 
 ## 不足しているテスト
 
-- ハッシュ計算後にソースファイルを変更し、出力名のハッシュと実データが一致しなくなることを再現するテスト（H-1）
-- 包含判定後に symlink を外部ファイルへ差し替える TOCTOU テスト（H-1）
-- 非連続 `**` パターンに対する照合時間の上限テスト（M-1）
+- ハッシュ計算後にソースファイルを変更し、出力名のハッシュと実データが一致しなくなることを再現するテスト（H-1） → 追加済み
+- 包含判定後に symlink を外部ファイルへ差し替える TOCTOU テスト（H-1） → 追加済み
+- 非連続 `**` パターンに対する照合時間の上限テスト（M-1） → 追加済み
 
 ## 参考
 
