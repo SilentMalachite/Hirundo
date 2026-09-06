@@ -79,19 +79,37 @@ Processes static assets with security focus:
 - File type validation
 - Content fingerprinting with HTML/CSS reference rewriting
 
-`features.minify` and `features.fingerprint` are the only asset-related settings reachable
-from `config.yaml`. Enabling fingerprinting names each asset `<name>-<hash>.<ext>`, where
-`<hash>` is the first 16 lowercase hex digits of a SHA-256 over the asset's *final* output
-bytes — for CSS, that means after minification and after its own `url(...)` references are
-rewritten, which is why asset processing runs in two passes (non-CSS, then CSS). The
-generated HTML's `href` / `src` / `srcset`, CSS `url(...)`, `<style>` bodies, and `style`
-attributes are rewritten to the hashed names; the mapping is written to
-`_site/asset-manifest.json`, and output from a previous build's hashed names is pruned on
-every build. Two references are not rewritten: a string inside JavaScript (not statically
+`features.minify`, `features.fingerprint`, and `assets.fingerprintExclude` are the
+asset-related settings reachable from `config.yaml`. Enabling fingerprinting names each
+non-excluded asset `<name>-<hash>.<ext>`, where `<hash>` is the first 16 lowercase hex
+digits of a SHA-256 over the asset's *final* output bytes — for CSS, that means after
+minification and after its own `url(...)` references are rewritten, which is why asset
+processing runs in two passes (non-CSS, then CSS). The generated HTML's `href` / `src` /
+`srcset`, CSS `url(...)`, `<style>` bodies, and `style` attributes are rewritten to the
+hashed names; the mapping is written to `_site/asset-manifest.json`, and output from a
+previous build's hashed names is pruned on every build (a `static/` subdirectory the pruner
+cannot read is now a build error rather than a silent no-op).
+
+`AssetFingerprintExclusions` (`Assets/AssetFingerprintExclusions.swift`) keeps fingerprinting
+from renaming a file that is fetched under a fixed, well-known name no page ever references —
+`robots.txt`, `favicon.ico`, `CNAME`, `_headers`, `_redirects`, `.htaccess`, and everything
+under `.well-known/` are excluded unconditionally. `assets.fingerprintExclude` adds glob-like
+patterns to that list (a pattern with no `/` matches the file name at any depth; one with `/`
+matches the whole relative path; `*` matches within one path segment; `**` as a whole segment
+matches zero or more segments) and cannot remove a built-in. An excluded asset is written
+under its original name and mapped to itself in the manifest, so it is never treated as stale
+output by the pruner.
+
+Two references are not rewritten: a string inside JavaScript (not statically
 distinguishable from a reference) and a CSS-to-CSS `@import url(...)` (its target's hash is
-not yet known when the importing stylesheet is processed; this prints a warning). Asset
-concatenation and source map generation have been removed entirely — `AssetConcatenator`,
-`AssetPipeline.enableSourceMaps`, and the `sourceMap` option no longer exist.
+not yet known when the importing stylesheet is processed; this prints a warning). A
+pass-through asset (anything not CSS or JS) is copied to its destination with
+`FileManager.copyItem` rather than read fully into memory and rewritten byte-for-byte, so the
+output keeps the source's permissions and extended attributes, and APFS can clone the file
+instead of duplicating its bytes; fingerprinting such a file streams it through SHA-256
+instead of loading it whole. Asset concatenation and source map generation have been removed
+entirely — `AssetConcatenator`, `AssetPipeline.enableSourceMaps`, and the `sourceMap` option
+no longer exist.
 
 **Security Measures:**
 - Path traversal prevention
@@ -219,7 +237,7 @@ abstraction.
 
 ### Type-Safe Configuration
 
-`HirundoConfig` decodes exactly six top-level keys. Unknown keys are silently
+`HirundoConfig` decodes exactly seven top-level keys. Unknown keys are silently
 ignored.
 
 ```swift
@@ -229,7 +247,8 @@ HirundoConfig
 ├── server   (optional, defaults)
 ├── blog     (optional, defaults)
 ├── features (optional, all false)
-└── limits   (optional, defaults)
+├── limits   (optional, defaults)
+└── assets   (optional, fingerprintExclude: [])
 ```
 
 Notable absences, so they are not looked for: there is no `plugins` block (the

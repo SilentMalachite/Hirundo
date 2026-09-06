@@ -18,7 +18,7 @@ A modern, fast, and secure static site generator built with Swift.
 - **🔄 Live Reload**: Development server that rebuilds on change and pushes reloads over WebSocket
 - **🧩 Built-in Features**: Sitemap, RSS, search index, asset minification, and asset fingerprinting as simple on/off flags
 - **📦 Type Safe**: Strongly typed, validated configuration and models
-- **⚡ Simple**: A small configuration surface — six top-level keys, no plugin runtime to manage
+- **⚡ Simple**: A small configuration surface — seven top-level keys, no plugin runtime to manage
 
 ## Table of Contents
 
@@ -350,8 +350,8 @@ is served at `/css/style.css`, not `/static/css/style.css`. `hirundo init` creat
 
 ## Configuration
 
-`config.yaml` has exactly six top-level keys: `site`, `build`, `server`, `blog`, `features`,
-and `limits`. Only `site` is required; every other block falls back to its defaults.
+`config.yaml` has exactly seven top-level keys: `site`, `build`, `server`, `blog`, `features`,
+`limits`, and `assets`. Only `site` is required; every other block falls back to its defaults.
 
 > ⚠️ **Unknown top-level keys are silently ignored.** A misspelled block (`serverr:`) or a
 > block that does not exist (`timeouts:`, `plugins:`) is not an error — it simply has no
@@ -402,6 +402,13 @@ limits:
   maxAuthorNameLength: 100
   maxEmailLength: 254
   maxLanguageCodeLength: 35
+
+# Extra fingerprint exclusions, added to the built-in list (see Built-in Features below).
+# Optional; omit the block entirely if you have none.
+assets:
+  fingerprintExclude:
+    - "apple-touch-icon*.png"
+    - "ads.txt"
 ```
 
 A minimal configuration is just the two required fields:
@@ -414,9 +421,9 @@ site:
 
 ### Gotchas
 
-- **Every optional block takes a subset of its keys.** `features`, `limits`, `build`,
-  `server` and `blog` each default the keys you leave out, so raising one limit means writing
-  one line, not restating the other nine. `hirundo validate` reports keys that are not
+- **Every optional block takes a subset of its keys.** `features`, `limits`, `assets`,
+  `build`, `server` and `blog` each default the keys you leave out, so raising one limit means
+  writing one line, not restating the other nine. `hirundo validate` reports keys that are not
   recognized.
 - **Values are validated, not just decoded.** `site.url` must be a URL with a scheme and a
   host, `site.language` must be a well-formed BCP 47 tag (`en`, `en-US`, `zh-Hans`),
@@ -445,9 +452,11 @@ site:
 | `blog` | `postsPerPage: 10`, all `generate*` true |
 | `features` | all five false |
 | `limits` | the values shown in the example above |
+| `assets` | no extra exclusion patterns — the built-in list still applies |
 
-`hirundo init` writes everything through `features` and omits `limits`, which therefore
-runs on the defaults.
+`hirundo init` writes everything through `features` and omits both `limits` and `assets`,
+which therefore run on their defaults — the built-in fingerprint exclusions apply even with
+no `assets:` block in the file.
 
 ## Frontmatter
 
@@ -549,7 +558,7 @@ external code is not supported, for security and simplicity.
 
 Note that `minify` applies to **CSS and JS assets only** — generated HTML is not minified.
 
-Enabling `fingerprint` writes `static/` assets under content-hashed names, such as
+Enabling `fingerprint` writes most `static/` assets under content-hashed names, such as
 `style-9f2a1c04b7e3d5a1.css`, and rewrites the generated HTML's `href` / `src` / `srcset`,
 CSS `url(...)`, `<style>` bodies, and `style` attributes to point at those names. The mapping
 is written to `_site/asset-manifest.json`. Output from older hashed names is removed on every
@@ -557,6 +566,9 @@ build, so output does not grow without bound even under `hirundo serve`'s non-cl
 That pruning only runs while the flag is on, though: turning `fingerprint` back off does
 **not** remove output already written under a hashed name, since nothing prunes it any more.
 Run `hirundo build --clean` after changing the flag in either direction.
+
+A handful of assets are excluded from fingerprinting — see [Excluding assets from
+fingerprinting](#excluding-assets-from-fingerprinting) below.
 
 There are several limitations:
 
@@ -577,13 +589,43 @@ There are several limitations:
   `asset-manifest.json` if you need to reference an asset from JavaScript.
 - **A CSS-to-CSS `@import url(...)` is not rewritten**, because the referenced file's hash
   is not yet known. Finding one prints a warning.
-- **Fingerprinting renames every file under `static/`, including ones fetched by a fixed,
-  well-known name that no page references** — `robots.txt`, `favicon.ico`, `CNAME`,
-  `_headers`, `_redirects`, and anything under `.well-known/`. Nothing rewrites a reference
-  to one of these because no such reference exists in any page; once the flag is on, each is
-  served only under its hashed name, and a request for the well-known name 404s. Do not
-  enable `features.fingerprint` if your site depends on any of them — a browser's implicit
-  `/favicon.ico` probe is the easiest way to notice this.
+- **Well-known filenames are excluded from fingerprinting automatically.** `robots.txt`,
+  `favicon.ico`, `CNAME`, `_headers`, `_redirects`, `.htaccess`, and everything under
+  `.well-known/` are fetched under a fixed name that no page ever references, so nothing
+  would rewrite a reference to them; fingerprinting them would serve each only under its
+  hashed name and turn every request for the well-known name into a 404. These built-ins
+  need no configuration. Add more patterns under `assets.fingerprintExclude` — see
+  [Excluding assets from fingerprinting](#excluding-assets-from-fingerprinting) below.
+
+### Excluding assets from fingerprinting
+
+The built-in list above — `robots.txt`, `favicon.ico`, `CNAME`, `_headers`, `_redirects`,
+`.htaccess`, and `.well-known/**` — is always applied, whether or not `config.yaml` has an
+`assets:` block. To exclude more files, list patterns under `assets.fingerprintExclude`:
+
+```yaml
+assets:
+  fingerprintExclude:
+    - "apple-touch-icon*.png"
+    - "ads.txt"
+```
+
+Patterns are **added** to the built-in list; they cannot remove one of the built-ins. An
+excluded asset is written under its original name and appears in the manifest mapped to
+itself, so any reference to it keeps working and the pruner does not treat it as stale
+output from a previous build.
+
+Patterns are matched against the asset's path relative to the `static/` directory, with `/`
+as the separator:
+
+- a pattern with no `/` matches the file name at any depth (`ads.txt` matches both `ads.txt`
+  and `vendor/ads.txt`)
+- a pattern with a `/` matches the whole relative path (`css/style.css` does not match
+  `deep/css/style.css`)
+- `*` matches within a single path segment and never crosses a `/`
+- `**` as a whole path segment matches any number of segments, including zero
+- everything else is literal. Matching is case-sensitive, and there is no `?`, no character
+  class, no escaping, and no negation.
 
 Archive, category, and tag pages are controlled separately, by the `blog` block.
 

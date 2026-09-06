@@ -10,6 +10,7 @@ Swiftで構築された、モダンで高速、かつセキュアな静的サイ
 - **🎨 テンプレート**: カスタムフィルター付きの強力なStencilベースのテンプレートエンジン
 - **🔄 ライブリロード**: リアルタイムエラー報告機能付き自動再構築開発サーバー
 - **🧩 機能フラグ**: sitemap / rss / searchIndex / minify / fingerprint を `features` で切り替え
+- **🎯 フィンガープリント除外**: `robots.txt` / `favicon.ico` などは常に除外、`assets.fingerprintExclude` で追加可能
 - **💾 スマートキャッシング**: 超高速再構築のためのインテリジェント無効化キャッシング
 - **📦 型安全**: 包括的検証付きの強く型付けされた設定とモデル
 - **⚡ 設定可能**: カスタマイズ可能なセキュリティ制限（`limits`）
@@ -147,6 +148,10 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 - **searchIndex**: 検索インデックス（JSON）の生成
 - **minify**: アセットパイプラインでのCSS/JS最小化（**HTML出力は対象外**）
 - **fingerprint**: アセット名への内容ハッシュ付与と、HTML/CSSの参照書き換え
+  - `robots.txt` / `favicon.ico` / `CNAME` / `_headers` / `_redirects` / `.htaccess` /
+    `.well-known/` 配下は、設定不要で常にフィンガープリントの対象外になる（固定名で
+    取得され、どのページからも参照されないため）。追加の除外パターンはトップレベルの
+    `assets.fingerprintExclude` で指定する（後述）。
 
 各フラグは独立して省略できます（`features: {sitemap: true}` のように1つだけ書けます）。
 `limits` も同様に、指定したキーだけが上書きされ、残りはデフォルト値になります。
@@ -154,11 +159,11 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 ## 設定ファイル（config.yaml）
 
 `hirundo init` が生成する `config.yaml` が正となる形式です。トップレベルで解釈されるキーは
-`site` / `build` / `server` / `blog` / `features` / `limits` の6つのみで、`site` 以外はすべて
-オプションです（省略時は下記のデフォルト値が使われます）。未知のキーはビルド時には無視される
-ため、綴り間違いはエラーになりません。`hirundo validate` を実行すると報告されますが、
+`site` / `build` / `server` / `blog` / `features` / `limits` / `assets` の7つのみで、`site`
+以外はすべてオプションです（省略時は下記のデフォルト値が使われます）。未知のキーはビルド時には
+無視されるため、綴り間違いはエラーになりません。`hirundo validate` を実行すると報告されますが、
 検査対象はトップレベルとその1階層下までなので、`site.author.emial` のような深い階層の
-綴り間違いは検出されません。
+綴り間違いは検出されません（`assets.fingerprintExclude` は1階層下なので検査対象です）。
 
 ```yaml
 site:
@@ -205,9 +210,17 @@ limits:
   maxAuthorNameLength: 100
   maxEmailLength: 254
   maxLanguageCodeLength: 35
+
+# フィンガープリント除外の追加パターン（オプション。組み込みの一覧に追加されるだけで、
+# 組み込みパターンを取り除くことはできない）
+assets:
+  fingerprintExclude:
+    - "apple-touch-icon*.png"
+    - "ads.txt"
 ```
 
-`hirundo init` は `features` までを書き出し、`limits` は出力しません（デフォルト値で動作します）。
+`hirundo init` は `features` までを書き出し、`limits` と `assets` は出力しません（どちらも
+デフォルト値で動作し、`assets` を省略しても組み込みのフィンガープリント除外は適用されます）。
 `--blog` を付けずに初期化した場合は、`features.rss` と `blog.generateArchive` /
 `generateCategories` / `generateTags` がまとめて `false` になります。
 
@@ -220,6 +233,7 @@ limits:
 | `blog` | `postsPerPage: 10`、`generate*` はすべて `true` |
 | `features` | すべて `false` |
 | `limits` | 上記YAML例に記載した値 |
+| `assets` | `fingerprintExclude: []`（組み込みの除外一覧のみが適用される） |
 
 ## テンプレート変数
 
