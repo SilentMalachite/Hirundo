@@ -50,8 +50,8 @@ public struct Limits: Codable, Sendable {
     
     /// Decodes every limit independently, falling back to the default above.
     ///
-    /// The synthesized decoder required all ten keys, so raising a single limit meant restating
-    /// the other nine. The defaults live in one place: the memberwise initializer.
+    /// The synthesized decoder required all nine keys, so raising a single limit meant restating
+    /// the other eight. The defaults live in one place: the memberwise initializer.
     ///
     /// Values are checked here rather than in that initializer, which is non-throwing and is
     /// what supplies the defaults. Every limit is a size or a length, so zero and negative

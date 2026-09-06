@@ -16,7 +16,7 @@ import Foundation
 ///
 /// 条件2があるため、`content/css/foo.md` が `_site/css/foo/index.html` を生むようなパスの
 /// 衝突があってもページ出力を消すことは構造上あり得ない。固定 URL のアセット（`robots.txt`
-/// など、`AssetNamePolicy` を参照）もハッシュ名にならないので、同じ条件で守られる。
+/// など、`AssetFingerprintExclusions` を参照）もハッシュ名にならないので、同じ条件で守られる。
 public enum AssetPruner {
 
     /// `<name>-<16桁の小文字16進数>.<ext>` か、拡張子の無いアセット（`CNAME` など）由来の
@@ -39,7 +39,19 @@ public enum AssetPruner {
         fileManager: FileManager = .default
     ) throws {
         let keep = manifest.outputPaths
-        let topLevel = (try? fileManager.contentsOfDirectory(atPath: staticDirectory.path)) ?? []
+
+        // 出力が無ければ掃除するものも無い。
+        guard fileManager.fileExists(atPath: outputDirectory.path) else { return }
+
+        // `static/` がまるごと消えている場合は「トップレベルに何も無い」として続ける。その状態で
+        // 古い出力を知っているのは前回のマニフェストだけなので、ここで throw すると掃除そのものが
+        // 走らなくなる。存在するのに読めない（権限エラーなど）は握り潰さず呼び出し元へ伝える。
+        let topLevel = fileManager.fileExists(atPath: staticDirectory.path)
+            ? try fileManager.contentsOfDirectory(atPath: staticDirectory.path)
+            : []
+        // トップレベルの各ファイル用の候補探しは同じ出力ルートを毎回列挙するだけなので、
+        // ループの外で一度だけ読む。
+        let outputDirectoryContents = try fileManager.contentsOfDirectory(atPath: outputDirectory.path)
 
         for entry in topLevel {
             var isDirectory: ObjCBool = false
@@ -63,8 +75,7 @@ public enum AssetPruner {
                 // トップレベルのファイルは出力でハッシュ名になっているので、名前の完全一致では
                 // 見つからない。語幹が一致する出力ルート直下のファイルを候補にする。
                 let stem = URL(fileURLWithPath: entry).deletingPathExtension().lastPathComponent
-                let siblings = (try? fileManager.contentsOfDirectory(atPath: outputDirectory.path)) ?? []
-                for sibling in siblings where sibling.hasPrefix(stem + "-") {
+                for sibling in outputDirectoryContents where sibling.hasPrefix(stem + "-") {
                     let siblingURL = outputDirectory.appendingPathComponent(sibling)
                     guard (try? siblingURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
                     else { continue }

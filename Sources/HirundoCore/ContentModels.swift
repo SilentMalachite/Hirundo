@@ -77,23 +77,9 @@ public struct ContentItem: Sendable {
     }
 }
 
-public struct AssetItem: Sendable {
-    public let sourcePath: String
-    public let outputPath: String
-    public let type: AssetType
-    public var processed: Bool = false
-    public var metadata: [String: AnyCodable] = [:]
-    
-    public enum AssetType: Equatable, Sendable {
-        case css
-        case javascript
-        case image(String)
-        case other(String)
-    }
-    
-    public init(sourcePath: String, outputPath: String, type: AssetType) {
-        self.sourcePath = sourcePath
-        self.outputPath = outputPath
-        self.type = type
-    }
+public enum AssetType: Equatable, Sendable {
+    case css
+    case javascript
+    case image(String)
+    case other(String)
 }

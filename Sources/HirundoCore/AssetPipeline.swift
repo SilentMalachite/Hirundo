@@ -12,7 +12,8 @@ import Foundation
 ///
 /// 例外が2つある。どちらも「参照を書き換えられないので名前を変えると壊れる」ものに限る。
 ///
-/// - `AssetNamePolicy` が挙げる固定 URL のアセット（`robots.txt`、`.well-known/**` など）
+/// - `AssetFingerprintExclusions` に一致するアセット（`robots.txt`、`.well-known/**` など、
+///   固定 URL で取得されるもの。`assets.fingerprintExclude` で追加できる）
 /// - 互いに（あるいは自分自身を）参照しあうスタイルシート
 public class AssetPipeline {
     private let fileManager = FileManager.default
@@ -23,7 +24,27 @@ public class AssetPipeline {
 
     // Configuration
     public var enableFingerprinting: Bool = false
+
+    /// **コピーそのものをしない**ファイルのパターン。一致したファイルは出力ディレクトリに
+    /// 一切現れず、マニフェストにも載らない。
+    ///
+    /// `AssetFileManager.matchesPattern` の五択（`*`、`*x*`、`*x`、`x*`、完全一致）だけを
+    /// 理解する簡易マッチャーで、`shouldExclude` がパターンをファイル名（ディレクトリ部分を
+    /// 落とした最後の要素）にのみ照合する ── ディレクトリを含むパターン（`images/*.png` など）
+    /// は意図どおりに効かない。`/` の有無で挙動を変える `fingerprintExclusions` とは別物なので
+    /// 混同しないこと。「コピーするがハッシュしない」ファイルには代わりに `fingerprintExclusions`
+    /// を使う。
     public var excludePatterns: [String] = []
+
+    /// **コピーはするがフィンガープリントだけ外す**ファイル。`enableFingerprinting` が true
+    /// でも、ここに一致するファイルは元の名前のまま書き出す（`write` 内の唯一のハッシュ判定
+    /// 箇所で参照する）。
+    ///
+    /// `AssetFingerprintExclusions.matches` というセグメント対応のマッチャーを使う。パターンに
+    /// `/` を含むかどうかでファイル名一致とパス全体一致を切り替え、`*` と `**` を理解する ──
+    /// `excludePatterns` の五択マッチャーより表現力が高い。「一切コピーしない」ファイルには
+    /// 代わりに `excludePatterns` を使う。
+    public var fingerprintExclusions: AssetFingerprintExclusions = AssetFingerprintExclusions()
     public var cssOptions: CSSProcessingOptions = CSSProcessingOptions()
     public var jsOptions: JSProcessingOptions = JSProcessingOptions()
 
@@ -41,6 +62,11 @@ public class AssetPipeline {
     /// 2. CSS を依存順（参照される側が先）に処理し、`url(...)` と `@import` を書き換えてから
     ///    ハッシュする
     /// 3. HTML の書き換え。これはこのクラスの外、`SiteGenerator` の finalization ステップ
+    ///
+    /// この処理にロールバックは無い。途中で throw すると、その時点までに処理し終えたアセットは
+    /// 既に（フィンガープリント有効時はハッシュ付きの名前で）出力ディレクトリに書き出されており、
+    /// 呼び出し側はマニフェストを受け取れない。中途半端な出力ツリーが残るということであり、
+    /// 直し方はクリーンビルド（`--clean`）のやり直しになる。
     ///
     /// - Returns: キーが static からの相対パス、値が出力ディレクトリからの相対パスのマニフェスト。
     ///   フィンガープリントが無効なときも全アセットを載せる。
@@ -81,7 +107,7 @@ public class AssetPipeline {
     }
 
     // Detect asset type from filename
-    public func detectAssetType(for filename: String) -> AssetItem.AssetType {
+    public func detectAssetType(for filename: String) -> AssetType {
         return processor.detectAssetType(for: filename)
     }
 
@@ -97,23 +123,35 @@ public class AssetPipeline {
 
     // MARK: - Private
 
-    /// 画像・JS・その他。画像とその他はコピーのみなのでソースバイト = 出力バイト。
-    /// メモリマップで読むので、大きな画像でも常駐メモリを食わない。
+    /// `write` に渡す元データ。インメモリの `Data` か、コピー元を指す `URL` のどちらか。
+    ///
+    /// 2つに分けているのは、画像などのパススルーアセットで `FileManager.copyItem` を使うため。
+    /// `copyItem` はパーミッションや拡張属性を保ったまま、APFS では実体コピーすらせずクローンする。
+    /// バイト列を経由すると両方失うので、この場合は `Data` を作らない。
+    private enum AssetContent {
+        case data(Data)
+        case file(URL)
+    }
+
+    /// 画像・その他。コピーのみなのでソースバイト＝出力バイト。
+    ///
+    /// `FileManager.copyItem` でコピーする（パーミッション・拡張属性を保ち、APFS ではクローンに
+    /// なる）。ハッシュが要る場合も、コピー元をストリーミングで読んで計算するので、まるごと
+    /// メモリに載せることはない。JS だけは中身を書き換える必要があるためテキストとして読む。
     private func processNonStylesheet(
         _ fileURL: URL,
         relativePath: String,
         destinationPath: String,
         manifest: inout AssetManifest
     ) throws {
-        let data: Data
         switch processor.detectAssetType(for: fileURL.lastPathComponent) {
         case .javascript:
             let content = try String(contentsOf: fileURL, encoding: .utf8)
-            data = Data(processor.processJS(content, options: jsOptions).utf8)
+            let data = Data(processor.processJS(content, options: jsOptions).utf8)
+            try write(.data(data), relativePath: relativePath, destinationPath: destinationPath, manifest: &manifest)
         default:
-            data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+            try write(.file(fileURL), relativePath: relativePath, destinationPath: destinationPath, manifest: &manifest)
         }
-        try write(data, relativePath: relativePath, destinationPath: destinationPath, manifest: &manifest)
     }
 
     /// CSS を依存順に処理する。
@@ -244,7 +282,7 @@ public class AssetPipeline {
         }
 
         try write(
-            Data(finalContent.utf8),
+            .data(Data(finalContent.utf8)),
             relativePath: relativePath,
             destinationPath: destinationPath,
             allowFingerprint: allowFingerprint,
@@ -253,46 +291,139 @@ public class AssetPipeline {
     }
 
     /// 出力先の閉じ込め、ハッシュ、書き込み、マニフェストへの登録。
+    ///
+    /// ハッシュ・書き込み・マニフェスト登録が1箇所に集まっているのが不変条件。「書き込んだバイト
+    /// 以外の何か」をハッシュすることが構造的にできないのはこれのおかげなので、`AssetContent`
+    /// で入力の形（メモリ上のデータか、コピー元ファイルか）を分けても、ハッシュ計算・書き込み・
+    /// 登録という処理そのものは分岐させず、ここに置いたままにする。
     private func write(
-        _ data: Data,
+        _ content: AssetContent,
         relativePath: String,
         destinationPath: String,
         allowFingerprint: Bool = true,
         manifest: inout AssetManifest
     ) throws {
         let destinationRootURL = URL(fileURLWithPath: destinationPath).resolvingSymlinksInPath()
-        let candidateURL = destinationRootURL
-            .appendingPathComponent(relativePath)
-            .resolvingSymlinksInPath()
+        let rawCandidateURL = destinationRootURL.appendingPathComponent(relativePath)
 
-        guard AssetPruner.relativePath(of: candidateURL, under: destinationRootURL) != nil else {
+        // 閉じ込めの判定は親ディレクトリまでを解決して行い、最後の要素は解決しない。最後の要素は
+        // これから置き換える対象であって辿る対象ではないためで、辿ってしまうと前回のビルドが
+        // 残したシンボリックリンク（以前のバージョンが書き出した `_site` がまさにそれ）の
+        // 解決先が出力先の外だという理由でビルドが落ち、自己修復できなくなる。
+        // 途中のディレクトリが出力先の外を指すリンクだった場合は、親の解決で弾かれる。
+        let lastComponent = rawCandidateURL.lastPathComponent
+        let parentURL = rawCandidateURL.deletingLastPathComponent().resolvingSymlinksInPath()
+        let candidateURL = parentURL.appendingPathComponent(lastComponent)
+
+        guard lastComponent != "." && lastComponent != "..",
+              let outputDirectory = Self.relativeDirectory(of: parentURL, under: destinationRootURL) else {
             throw AssetPipelineError.processingFailed(
                 "Output path escapes destination directory: \(candidateURL.path)"
             )
         }
 
         var outputURL = candidateURL
-        if enableFingerprinting && allowFingerprint && !AssetNamePolicy.requiresStableName(relativePath) {
-            let fingerprint = processor.generateFingerprint(for: data)
+        if enableFingerprinting && allowFingerprint && !fingerprintExclusions.excludes(relativePath) {
+            let fingerprint: String
+            switch content {
+            case .data(let data):
+                fingerprint = processor.generateFingerprint(for: data)
+            case .file(let fileURL):
+                // ソースをストリーミングで読んでハッシュする。まるごとメモリに載せない。
+                fingerprint = try processor.generateFingerprint(for: fileURL)
+            }
             outputURL = URL(fileURLWithPath: processor.addFingerprint(to: candidateURL.path, fingerprint: fingerprint))
         }
 
-        // マニフェストの値は「実際に書いた場所」でなければならない。出力ツリーの中に
-        // シンボリックリンクがあると書き込み先はソースの相対パスからは導けないので、
-        // 確定した書き込み先から逆算する。
-        guard let outputRelativePath = AssetPruner.relativePath(of: outputURL, under: destinationRootURL) else {
-            throw AssetPipelineError.processingFailed(
-                "Output path escapes destination directory: \(outputURL.path)"
-            )
-        }
+        // マニフェストの値は「実際に書いた場所」でなければならない。途中のディレクトリが
+        // 出力ツリー内のシンボリックリンクなら、値は解決先（実体）の側になる ── 掃除
+        // （`AssetPruner`）も同じく実体側の相対パスで「残すもの」を判定するため、ここで
+        // 食い違うと書いたばかりのファイルが掃除で消える。
+        let outputRelativePath = outputDirectory.isEmpty
+            ? outputURL.lastPathComponent
+            : outputDirectory + "/" + outputURL.lastPathComponent
 
         try fileManager.createDirectory(
             at: outputURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        try data.write(to: outputURL, options: .atomic)
+
+        // 出力先にシンボリックリンクが残っていると（以前のバージョンが書き出した `_site` が
+        // まさにそれ）、`replaceItemAt` は "file doesn't exist" で失敗する。最後の要素は
+        // 置き換える対象であって辿る対象ではないので、どちらの書き込み経路でも先に取り除いて
+        // おき、非クリーン再ビルドで自己修復させる。`attributesOfItem` は `lstat` 相当で
+        // リンクを辿らないため、壊れたリンクも判定できる。
+        if let attributes = try? fileManager.attributesOfItem(atPath: outputURL.path),
+           attributes[.type] as? FileAttributeType == .typeSymbolicLink {
+            try fileManager.removeItem(at: outputURL)
+        }
+
+        switch content {
+        case .data(let data):
+            try data.write(to: outputURL, options: .atomic)
+        case .file(let fileURL):
+            // `copyItem` はパーミッションと拡張属性を保ち、APFS では実体コピーせずクローンする。
+            // ただし `copyItem` はシンボリックリンクをリンクのままコピーする。`static/` の中で
+            // 完結するリンク（`AssetFileManager` が通すのはこれだけ）でも、出力側がリンクに
+            // なると以下の問題を引き起こす。
+            //
+            // - `_site` を単体で持ち出す（アーカイブ・アップロードなど）と、リンクの解決先が
+            //   出力ツリーの中にあるとは限らず、ファイルが失われる。
+            // - フィンガープリント有効時、上のハッシュは `FileHandle` 経由でリンク先の
+            //   実体を読んで計算する一方、書き込まれるのはリンクそのものなので、
+            //   「ハッシュは書き込んだバイト列を覆う」という不変条件が壊れる。
+            //
+            // そのためコピー元は必ず解決してから読む。
+            //
+            // 加えて、`removeItem` の後に `copyItem` する2段階だと、コピーが失敗した時点で
+            // 直前の良い出力を失い、`serve` から見ればファイルが存在しない瞬間ができる
+            // （パイプライン内の他の書き込みはすべて `.atomic` なのに、ここだけそうでない）。
+            // 一時名へコピーしてから `replaceItemAt` で原子的に差し替えることで、パーミッション・
+            // 拡張属性を保つという `copyItem` を選んだ理由を残したまま、両方を直す。
+            let source = fileURL.resolvingSymlinksInPath()
+            // `resolvingSymlinksInPath` は最後の要素が解決できない壊れたリンクには何もしない。
+            // そのまま `copyItem` するとリンクのままコピーされ、上の問題がそっくり再現する。
+            // 修正前の `Data(contentsOf:)` はここで失敗していたので、同じく失敗させる。
+            guard fileManager.fileExists(atPath: source.path) else {
+                throw AssetPipelineError.processingFailed(
+                    "Asset source is not readable (broken symlink?): \(fileURL.path)"
+                )
+            }
+            let staging = outputURL.deletingLastPathComponent()
+                .appendingPathComponent(".hirundo-\(UUID().uuidString)")
+            defer {
+                // 成功時は `replaceItemAt` が消費して既に存在しない。throw で抜けた場合だけ
+                // 残っているので、原子的な差し替えの体裁を保つために掃除する。
+                if fileManager.fileExists(atPath: staging.path) {
+                    try? fileManager.removeItem(at: staging)
+                }
+            }
+            try fileManager.copyItem(at: source, to: staging)
+            // 既定では差し替え先（＝前回の出力）のメタデータが引き継がれるため、`static/` 側で
+            // パーミッションを変えても非クリーン再ビルドに反映されない。`copyItem` が運んできた
+            // ソース由来のメタデータを使う。
+            _ = try fileManager.replaceItemAt(
+                outputURL,
+                withItemAt: staging,
+                options: .usingNewMetadataOnly
+            )
+        }
 
         manifest[relativePath] = outputRelativePath
+    }
+
+    /// 解決済みの親ディレクトリの、出力ルートからの相対パス。ルート直下なら空文字列、
+    /// ルートの外なら `nil`。
+    ///
+    /// 相対化するのはディレクトリだけで、最後の要素は呼び出し側が未解決のまま足す。
+    /// パス全体を解決してしまうと、置き換える予定の出力側リンクを辿った先を
+    /// マニフェストに書いてしまう。
+    private static func relativeDirectory(of directory: URL, under root: URL) -> String? {
+        let rootPath = root.path
+        if directory.path == rootPath { return "" }
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        guard directory.path.hasPrefix(prefix) else { return nil }
+        return String(directory.path.dropFirst(prefix.count))
     }
 
     private func warn(_ message: String) {

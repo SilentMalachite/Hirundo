@@ -79,7 +79,7 @@ final class ConfigParseTests: XCTestCase {
     }
 
     func testLimitsBlockAcceptsASubsetOfKeys() throws {
-        // Same defect as `features` had: the synthesized decoder demanded all ten keys.
+        // Same defect as `features` had: the synthesized decoder demanded all nine keys.
         let yaml = """
         site:
           title: "My Site"

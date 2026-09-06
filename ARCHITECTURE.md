@@ -79,23 +79,43 @@ Processes static assets with security focus:
 - File type validation
 - Content fingerprinting with HTML/CSS reference rewriting
 
-`features.minify` and `features.fingerprint` are the only asset-related settings reachable
-from `config.yaml`. Enabling fingerprinting names each asset `<name>-<hash>.<ext>`, where
-`<hash>` is the first 16 lowercase hex digits of a SHA-256 over the asset's *final* output
-bytes — for CSS, that means after minification and after its own `url(...)` references are
-rewritten, which is why asset processing runs in two passes (non-CSS, then CSS). The
-generated HTML's `href` / `src` / `srcset`, CSS `url(...)`, `<style>` bodies, and `style`
-attributes are rewritten to the hashed names; the mapping is written to
-`_site/asset-manifest.json`, and output from a previous build's hashed names is pruned on
-every build — using both the current `static/` tree and the previous build's manifest, so
-an asset whose whole directory was deleted from `static/` stops being served. Within the
-CSS pass, stylesheets are ordered by their `@import` / `url(...)` dependencies so a
-referenced stylesheet's hash is settled first; stylesheets in an import cycle keep their
-original names instead. Two things are never rewritten: a string inside JavaScript (not
-statically distinguishable from a reference) and a reference to an asset that must keep a
-fixed URL (`AssetNamePolicy` — `robots.txt` and friends at the output root, plus
-`.well-known/**`), which is not renamed in the first place. Asset concatenation and source
-map generation have been removed entirely — `AssetConcatenator`,
+`features.minify`, `features.fingerprint`, and `assets.fingerprintExclude` are the
+asset-related settings reachable from `config.yaml`. Enabling fingerprinting names each
+non-excluded asset `<name>-<hash>.<ext>`, where `<hash>` is the first 16 lowercase hex
+digits of a SHA-256 over the asset's *final* output bytes — for CSS, that means after
+minification and after its own `url(...)` references are rewritten, which is why asset
+processing runs in two passes (non-CSS, then CSS). Within the CSS pass, stylesheets are
+ordered by their `@import` / `url(...)` dependencies so a referenced stylesheet's hash is
+settled first; stylesheets in an import cycle keep their original names instead. The
+generated HTML's `href` / `src` / `srcset`, CSS `url(...)` and `@import`, `<style>` bodies,
+and `style` attributes are rewritten to the hashed names; the mapping is written to
+`_site/asset-manifest.json`.
+
+Output from a previous build's hashed names is pruned on every build, using both the current
+`static/` tree and the previous build's manifest, so an asset whose whole directory was
+deleted from `static/` stops being served. A `static/` directory the pruner cannot read is a
+build error rather than a silent no-op. Only fingerprint-shaped names are removed, which is
+what makes it structurally impossible to delete a generated page that collides with an asset
+path — the cost is that an excluded asset deleted from `static/` lingers until `--clean`.
+
+`AssetFingerprintExclusions` (`Assets/AssetFingerprintExclusions.swift`) keeps fingerprinting
+from renaming a file that is fetched under a fixed URL no page ever references — `robots.txt`,
+`sitemap.xml`, `favicon.ico`, `CNAME`, `_headers`, `_redirects`, `.htaccess`, `ads.txt`,
+`app-ads.txt`, `sw.js`, `service-worker.js`, and everything under `.well-known/` are excluded
+unconditionally. `assets.fingerprintExclude` adds glob-like patterns to that list (a pattern
+with no `/` matches the file name at any depth; one with `/` matches the whole relative path;
+`*` matches within one path segment; `**` as a whole segment matches zero or more segments)
+and cannot remove a built-in. An excluded asset is written under its original name and mapped
+to itself in the manifest, so the pruner never treats it as stale output.
+
+One thing is never rewritten: a string inside JavaScript, which is not statically
+distinguishable from a reference. A pass-through asset (anything not CSS or JS) is copied to
+its destination with `FileManager.copyItem` rather than read fully into memory and rewritten
+byte-for-byte, so the output keeps the source's permissions and extended attributes and APFS
+can clone the file instead of duplicating its bytes; fingerprinting such a file streams it
+through SHA-256 instead of loading it whole, and the copy is staged and swapped in with
+`replaceItemAt` so a rebuild never leaves a half-written asset in place. Asset concatenation
+and source map generation have been removed entirely — `AssetConcatenator`,
 `AssetPipeline.enableSourceMaps`, and the `sourceMap` option no longer exist.
 
 **Security Measures:**
@@ -225,7 +245,7 @@ abstraction.
 
 ### Type-Safe Configuration
 
-`HirundoConfig` decodes exactly six top-level keys. Unknown keys are silently
+`HirundoConfig` decodes exactly seven top-level keys. Unknown keys are silently
 ignored.
 
 ```swift
@@ -235,7 +255,8 @@ HirundoConfig
 ├── server   (optional, defaults)
 ├── blog     (optional, defaults)
 ├── features (optional, all false)
-└── limits   (optional, defaults)
+├── limits   (optional, defaults)
+└── assets   (optional, fingerprintExclude: [])
 ```
 
 Notable absences, so they are not looked for: there is no `plugins` block (the

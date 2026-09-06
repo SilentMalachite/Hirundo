@@ -63,7 +63,12 @@ public class AssetFileManager {
             let values = try? itemURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
             let isSymbolicLink = values?.isSymbolicLink ?? false
 
-            if isSymbolicLink && !isContained(itemURL, in: rootPath) {
+            // 壊れたリンクは解決できず、行き先が中か外かを確かめようがない。飛ばして黙らせる
+            // のではなく通し、`AssetPipeline.write` に「読めないソース」として報告させる ──
+            // ソース側の書き間違いなので、作者に見えなければ意味がない。
+            let isBrokenLink = isSymbolicLink && !fileManager.fileExists(atPath: itemURL.path)
+
+            if isSymbolicLink && !isBrokenLink && !isContained(itemURL, in: rootPath) {
                 warn("\(itemURL.lastPathComponent): symbolic link resolves outside "
                      + "\(rootPath); skipped")
                 continue

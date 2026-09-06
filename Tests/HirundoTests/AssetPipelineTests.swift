@@ -70,11 +70,11 @@ final class AssetPipelineTests: XCTestCase {
     
     func testAssetTypeDetection() throws {
         let assets = [
-            ("style.css", AssetItem.AssetType.css),
-            ("app.js", AssetItem.AssetType.javascript),
-            ("logo.png", AssetItem.AssetType.image("png")),
-            ("banner.jpg", AssetItem.AssetType.image("jpg")),
-            ("readme.txt", AssetItem.AssetType.other("txt"))
+            ("style.css", AssetType.css),
+            ("app.js", AssetType.javascript),
+            ("logo.png", AssetType.image("png")),
+            ("banner.jpg", AssetType.image("jpg")),
+            ("readme.txt", AssetType.other("txt"))
         ]
         
         for (filename, expectedType) in assets {
@@ -188,6 +188,234 @@ final class AssetPipelineTests: XCTestCase {
         XCTAssertEqual(processedContent, cssContent)
     }
 
+    /// パススルーアセット（画像など）の書き出しが `Data` 経由の全バイト書き換えに戻っていないか。
+    /// `FileManager.copyItem` を使えば、ソースの POSIX パーミッションを引き継ぐはず。通常の
+    /// umask では新規書き込みが 0644 になりがちな値をあえて避けて 0640 にすることで、
+    /// 「たまたま一致した」を排除する。ハッシュ名も、書き込んだバイト列（＝ソースのバイト列、
+    /// パススルーなので変化しない）から計算した値と一致するべき。
+    func testPassThroughAssetPreservesSourcePermissionsAndHashesTheBytesWritten() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let logoFile = sourceDir.appendingPathComponent("logo.png")
+        let logoContent = Data("not really a png, just some bytes to hash".utf8)
+        try logoContent.write(to: logoFile)
+        try FileManager.default.setAttributes([.posixPermissions: 0o640], ofItemAtPath: logoFile.path)
+
+        pipeline.enableFingerprinting = true
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        let fingerprintedPath = try XCTUnwrap(manifest["logo.png"])
+        let expectedFingerprint = AssetProcessor().generateFingerprint(for: logoContent)
+        XCTAssertEqual(
+            fingerprintedPath, "logo-\(expectedFingerprint).png",
+            "出力名 \(fingerprintedPath) が書き込んだバイト列のハッシュ \(expectedFingerprint) から作られる正確な名前と一致しない"
+        )
+
+        let outputURL = destDir.appendingPathComponent(fingerprintedPath)
+        XCTAssertEqual(try Data(contentsOf: outputURL), logoContent)
+
+        let outputAttributes = try FileManager.default.attributesOfItem(atPath: outputURL.path)
+        let outputPermissions = try XCTUnwrap(outputAttributes[.posixPermissions] as? Int)
+        XCTAssertEqual(
+            outputPermissions, 0o640,
+            "コピーがソースのパーミッションを引き継いでいない（Data 経由の書き込みに戻っている）"
+        )
+    }
+
+    /// レビューで見つかった Critical の回帰: `copyItem` はシンボリックリンクをリンクのまま
+    /// コピーするため、ベンダリングでよくある `static/img/logo.png -> ../../shared/logo.png`
+    /// のような配置だと、`_site` の画像が出力先の外を指すリンクになってしまう。
+    /// ハッシュはリンク先の実体（`FileHandle` は辿る）に対して取られるので、書き込まれる
+    /// バイト列と食い違う。ここでは、出力が通常ファイルとしてリンク先のバイト列を持つことを
+    /// 固定する。
+    func testSymlinkedPassThroughAssetIsWrittenAsARegularFileWithTheTargetsBytes() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(
+            at: sourceDir.appendingPathComponent("img"),
+            withIntermediateDirectories: true
+        )
+
+        // リンク先は static の中に置く。外を指すリンクは `AssetFileManager` が列挙の時点で
+        // 飛ばすので、`write` まで届くのは中で完結するリンクだけ。
+        let sharedDir = sourceDir.appendingPathComponent("shared")
+        try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
+        let targetContent = Data("this is the real image bytes".utf8)
+        let targetFile = sharedDir.appendingPathComponent("logo-real.png")
+        try targetContent.write(to: targetFile)
+
+        let logoLink = sourceDir.appendingPathComponent("img/logo.png")
+        try FileManager.default.createSymbolicLink(at: logoLink, withDestinationURL: targetFile)
+
+        pipeline.enableFingerprinting = true
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        let outputRelativePath = try XCTUnwrap(manifest["img/logo.png"])
+        let outputURL = destDir.appendingPathComponent(outputRelativePath)
+
+        let resourceValues = try outputURL.resourceValues(forKeys: [.isSymbolicLinkKey])
+        XCTAssertNotEqual(
+            resourceValues.isSymbolicLink, true,
+            "出力がシンボリックリンクのまま書き出されている: \(outputURL.path)"
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: outputURL), targetContent,
+            "出力のバイト列がリンク先の実体と一致しない"
+        )
+
+        // フィンガープリントは「書き込んだバイト列」を覆っていなければならない。
+        let expectedFingerprint = AssetProcessor().generateFingerprint(for: targetContent)
+        XCTAssertEqual(outputRelativePath, "img/logo-\(expectedFingerprint).png")
+    }
+
+    /// レビューで見つかった Critical の回帰の核心: シンボリックリンクをリンクのまま書き出すと、
+    /// `write` 冒頭の閉じ込め判定は候補パスを `resolvingSymlinksInPath()` で解決するため、
+    /// 次の非クリーンビルド（`hirundo serve` の再ビルド相当）でそのリンクの解決先が出力先の
+    /// 外だと判定され、ビルドが `Output path escapes destination directory` で落ちる。
+    /// このテストは2回目の `processAssets` が例外を投げないことでその回帰を固定する。
+    func testSecondBuildAfterASymlinkedAssetDoesNotThrow() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(
+            at: sourceDir.appendingPathComponent("img"),
+            withIntermediateDirectories: true
+        )
+
+        let sharedDir = tempDir.appendingPathComponent("shared")
+        try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
+        let targetFile = sharedDir.appendingPathComponent("logo-real.png")
+        try Data("this is the real image bytes".utf8).write(to: targetFile)
+
+        let logoLink = sourceDir.appendingPathComponent("img/logo.png")
+        try FileManager.default.createSymbolicLink(at: logoLink, withDestinationURL: targetFile)
+
+        // `hirundo serve` はクリーンせずに同じ出力先へ再ビルドする。フィンガープリント無効でも
+        // 壊れる（ブリーフ item 1 の主張どおり）ことを確かめるため、ここでは無効のままにする。
+        _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+        XCTAssertNoThrow(
+            try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
+            "1回目のビルドが残したシンボリックリンクにより、2回目のビルドが閉じ込め判定で落ちてはいけない"
+        )
+    }
+
+    /// 上の修正を入れる前のビルドが残した `_site` には、出力先そのものがシンボリックリンクに
+    /// なっているファイルがある。`replaceItemAt` は差し替え先が実在のファイルでないと
+    /// "file doesn't exist" で失敗するため、そのままでは非クリーン再ビルドが再び詰まる。
+    /// 修正前のコード（`removeItem` してから `copyItem`）はこの状態から自己修復できていたので、
+    /// 回復能力を落とさないことを固定する。
+    func testBuildOverAnOutputLeftAsASymlinkRecovers() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+
+        let sharedDir = tempDir.appendingPathComponent("shared")
+        try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
+        let targetFile = sharedDir.appendingPathComponent("logo-real.png")
+        let targetContent = Data("the real bytes".utf8)
+        try targetContent.write(to: targetFile)
+
+        try Data("fresh bytes".utf8).write(to: sourceDir.appendingPathComponent("logo.png"))
+
+        // 修正前のビルドが残した出力を再現する: 出力先が出力ツリーの外を指すリンクになっている。
+        let staleOutput = destDir.appendingPathComponent("logo.png")
+        try FileManager.default.createSymbolicLink(at: staleOutput, withDestinationURL: targetFile)
+
+        XCTAssertNoThrow(
+            try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
+            "リンクとして残った出力の上に書けず、非クリーン再ビルドが回復できない"
+        )
+
+        let resourceValues = try staleOutput.resourceValues(forKeys: [.isSymbolicLinkKey])
+        XCTAssertNotEqual(resourceValues.isSymbolicLink, true)
+        XCTAssertEqual(try Data(contentsOf: staleOutput), Data("fresh bytes".utf8))
+        // リンク先が書き換えられていないこと（リンク越しに書いてしまうと出力先の外を壊す）。
+        XCTAssertEqual(try Data(contentsOf: targetFile), targetContent)
+    }
+
+    /// 上の自己修復のために閉じ込め判定は最後の要素を解決しなくなったが、途中のディレクトリは
+    /// 引き続き解決して判定する。出力ツリー内のディレクトリが外を指すリンクにすり替えられていたら、
+    /// 書き込みは拒否されなければならない。
+    func testWriteThroughASymlinkedOutputDirectoryIsRefused() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(
+            at: sourceDir.appendingPathComponent("img"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+        try Data("bytes".utf8).write(to: sourceDir.appendingPathComponent("img/logo.png"))
+
+        // 出力先の `img/` が出力ツリーの外を指すリンクになっている。
+        let outsideDir = tempDir.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: destDir.appendingPathComponent("img"),
+            withDestinationURL: outsideDir
+        )
+
+        XCTAssertThrowsError(
+            try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
+            "出力ツリーの外を指すディレクトリリンク越しに書き込んでいる"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: outsideDir.appendingPathComponent("logo.png").path),
+            "出力先の外にファイルが書き出された"
+        )
+    }
+
+    /// `resolvingSymlinksInPath()` は最後の要素が解決できない壊れたリンクには何もしないため、
+    /// 解決したつもりのパスがリンクのままになり、`copyItem` がリンクをコピーしてしまう。
+    /// このブランチ以前の `Data(contentsOf:)` はここで失敗していたので、同じく失敗させる。
+    func testBrokenSymlinkedAssetThrowsInsteadOfCopyingTheLink() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let missingTarget = sourceDir.appendingPathComponent("never-created.png")
+        try FileManager.default.createSymbolicLink(
+            at: sourceDir.appendingPathComponent("logo.png"),
+            withDestinationURL: missingTarget
+        )
+
+        XCTAssertThrowsError(
+            try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
+            "壊れたシンボリックリンクが黙ってリンクのままコピーされている"
+        )
+
+        let output = destDir.appendingPathComponent("logo.png")
+        if FileManager.default.fileExists(atPath: output.path) {
+            let resourceValues = try output.resourceValues(forKeys: [.isSymbolicLinkKey])
+            XCTAssertNotEqual(resourceValues.isSymbolicLink, true)
+        }
+    }
+
+    /// `replaceItemAt` は既定で差し替え先（＝前回の出力）のメタデータを引き継ぐ。それだと
+    /// `static/` 側でパーミッションを変えても非クリーン再ビルドに反映されない。修正前の
+    /// `copyItem` はソース由来のパーミッションで書いていたので、同じ結果になることを固定する。
+    func testPassThroughPermissionChangeReachesANonCleanRebuild() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let sourceFile = sourceDir.appendingPathComponent("logo.png")
+        try Data("bytes".utf8).write(to: sourceFile)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: sourceFile.path)
+        _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: sourceFile.path)
+        _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        let output = destDir.appendingPathComponent("logo.png")
+        let permissions = try FileManager.default.attributesOfItem(atPath: output.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(
+            permissions?.int16Value, 0o644,
+            "再ビルドの出力が前回の出力のパーミッションを引きずっている"
+        )
+    }
+
     func testManifestValueKeepsItsDirectory() throws {
         let sourceDir = tempDir.appendingPathComponent("source")
         let destDir = tempDir.appendingPathComponent("dest")
@@ -268,6 +496,50 @@ final class AssetPipelineTests: XCTestCase {
         )
     }
 
+    func testJSFingerprintCoversTheMinifiedBytesNotTheSource() throws {
+        // CSS 側は `testFingerprintCoversTheProcessedBytesNotTheSource` で固定済み。JS も同じ
+        // 性質（ハッシュは最小化後のバイト列に対して取られる）を持つはずだが、そちらは
+        // 未検証だった。同じソースを最小化あり・なしで処理し、出力名のハッシュが違うことと、
+        // そのハッシュが実際にディスクへ書いたバイト列と一致することの両方を確かめる。
+        let sourceDir = tempDir.appendingPathComponent("source")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        let jsContent = """
+        function greet() {
+            console.log("hello");
+        }
+        """
+        try jsContent.write(
+            to: sourceDir.appendingPathComponent("app.js"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let plain = AssetPipeline()
+        plain.enableFingerprinting = true
+        let plainDest = tempDir.appendingPathComponent("dest-plain-js")
+        let plainManifest = try plain.processAssets(from: sourceDir.path, to: plainDest.path)
+
+        let minified = AssetPipeline()
+        minified.enableFingerprinting = true
+        minified.jsOptions.minify = true
+        let minifiedDest = tempDir.appendingPathComponent("dest-minified-js")
+        let minifiedManifest = try minified.processAssets(from: sourceDir.path, to: minifiedDest.path)
+
+        XCTAssertNotEqual(
+            plainManifest["app.js"],
+            minifiedManifest["app.js"],
+            "最小化でバイト列が変わったのにハッシュが同じなのは、ソースをハッシュしている証拠"
+        )
+
+        let minifiedPath = try XCTUnwrap(minifiedManifest["app.js"])
+        let bytesOnDisk = try Data(contentsOf: minifiedDest.appendingPathComponent(minifiedPath))
+        let expectedFingerprint = AssetProcessor().generateFingerprint(for: bytesOnDisk)
+        XCTAssertEqual(
+            minifiedPath, "app-\(expectedFingerprint).js",
+            "出力名 \(minifiedPath) が実際に書き込んだバイト列のハッシュ \(expectedFingerprint) から作られる正確な名前と一致しない"
+        )
+    }
+
     func testCSSHashCoversTheRewrittenBytes() throws {
         // CSS が参照する画像の中身だけを変える。画像のハッシュが変われば、書き換え後の CSS の
         // バイト列も変わり、CSS 自身のハッシュも変わらなければならない。
@@ -304,6 +576,84 @@ final class AssetPipelineTests: XCTestCase {
             first["css/style.css"],
             second["css/style.css"],
             "CSS のハッシュは url(...) を書き換えた後のバイト列に対して取られるべき"
+        )
+    }
+
+    func testExcludedAssetIsWrittenUnderItsOriginalNameAndMapsToItself() throws {
+        // robots.txt はどのページからも参照されないため、フィンガープリントすると404になる。
+        // `AssetFingerprintExclusions` の組み込みパターンで常に除外されるべき。
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        pipeline.enableFingerprinting = true
+        try "User-agent: *\n".write(
+            to: sourceDir.appendingPathComponent("robots.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        XCTAssertEqual(manifest["robots.txt"], "robots.txt", "除外されたアセットはキー == 値のままであるべき")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: destDir.appendingPathComponent("robots.txt").path),
+            "除外されたアセットは元の名前で書き出されるべき"
+        )
+    }
+
+    func testExcludedAssetDoesNotPreventOrdinaryAssetsFromBeingFingerprinted() throws {
+        // 同じビルドの中で、除外されないアセット（css/style.css）は通常どおりハッシュされる。
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(
+            at: sourceDir.appendingPathComponent("css"),
+            withIntermediateDirectories: true
+        )
+
+        pipeline.enableFingerprinting = true
+        try "User-agent: *\n".write(
+            to: sourceDir.appendingPathComponent("robots.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "body{}".write(
+            to: sourceDir.appendingPathComponent("css/style.css"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        XCTAssertEqual(manifest["robots.txt"], "robots.txt")
+        let hashedStylesheet = try XCTUnwrap(manifest["css/style.css"])
+        XCTAssertNotEqual(hashedStylesheet, "css/style.css", "除外対象ではないアセットはハッシュされるべき")
+    }
+
+    func testWriteGuardHonoursANonBuiltInExclusionPattern() throws {
+        // このテストは `AssetPipeline` 単体の話であり、`config.assets.fingerprintExclude` から
+        // `assetPipeline.fingerprintExclusions` への配線（`SiteGenerator.configureAssetPipeline`）
+        // は検証しない ── そちらは `AssetFingerprintIntegrationTests.
+        // testConfigSuppliedFingerprintExcludePatternExemptsAFileEndToEnd` が担う。ここで
+        // 固定するのは、`write()` の除外判定が組み込みパターンだけでなく
+        // `fingerprintExclusions` にセットされた任意のパターンにも従うこと。
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        pipeline.enableFingerprinting = true
+        pipeline.fingerprintExclusions = AssetFingerprintExclusions(additional: ["keep-name.txt"])
+        try "pinned".write(
+            to: sourceDir.appendingPathComponent("keep-name.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        XCTAssertEqual(manifest["keep-name.txt"], "keep-name.txt")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: destDir.appendingPathComponent("keep-name.txt").path)
         )
     }
 
@@ -487,7 +837,10 @@ final class AssetPipelineTests: XCTestCase {
         }
     }
 
-    func testFingerprintsAFixedUrlNameThatIsNotAtTheRoot() throws {
+    func testExcludesAFixedUrlNameAtAnyDepth() throws {
+        // 組み込みパターンはファイル名だけで照合する（`/` を含まないため）。`.htaccess` は
+        // Apache が各ディレクトリで読み、`sw.js` は JavaScript 内の固定 URL で登録されるので、
+        // ルート直下に限ると取りこぼす。壊れる側に倒すより、ハッシュを諦める側に倒す。
         let sourceDir = tempDir.appendingPathComponent("source")
         let destDir = tempDir.appendingPathComponent("dest")
         try FileManager.default.createDirectory(
@@ -503,8 +856,7 @@ final class AssetPipelineTests: XCTestCase {
 
         let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
 
-        let value = try XCTUnwrap(manifest["docs/robots.txt"])
-        XCTAssertNotEqual(value, "docs/robots.txt", "ルート直下でなければ固定URLの契約は無い")
+        XCTAssertEqual(manifest["docs/robots.txt"], "docs/robots.txt")
     }
 
     // MARK: - シンボリックリンク

@@ -30,7 +30,8 @@ public enum ConfigDiagnostics {
         HirundoConfig.CodingKeys.server.rawValue: keys(of: Server.CodingKeys.self),
         HirundoConfig.CodingKeys.blog.rawValue: keys(of: Blog.CodingKeys.self),
         HirundoConfig.CodingKeys.features.rawValue: keys(of: Features.CodingKeys.self),
-        HirundoConfig.CodingKeys.limits.rawValue: keys(of: Limits.CodingKeys.self)
+        HirundoConfig.CodingKeys.limits.rawValue: keys(of: Limits.CodingKeys.self),
+        HirundoConfig.CodingKeys.assets.rawValue: keys(of: Assets.CodingKeys.self)
     ]
 
     private static func keys<K: CodingKey & CaseIterable>(of _: K.Type) -> Set<String> {
