@@ -9,7 +9,7 @@ Swiftで構築された、モダンで高速、かつセキュアな静的サイ
 - **📝 Markdown**: Apple swift-markdownを使用したフロントマター付きCommonMarkサポート
 - **🎨 テンプレート**: カスタムフィルター付きの強力なStencilベースのテンプレートエンジン
 - **🔄 ライブリロード**: リアルタイムエラー報告機能付き自動再構築開発サーバー
-- **🧩 機能フラグ**: sitemap / rss / searchIndex / minify を `features` で切り替え
+- **🧩 機能フラグ**: sitemap / rss / searchIndex / minify / fingerprint を `features` で切り替え
 - **💾 スマートキャッシング**: 超高速再構築のためのインテリジェント無効化キャッシング
 - **📦 型安全**: 包括的検証付きの強く型付けされた設定とモデル
 - **⚡ 設定可能**: カスタマイズ可能なセキュリティ制限（`limits`）
@@ -146,6 +146,7 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 - **rss**: ブログのRSSフィード生成
 - **searchIndex**: 検索インデックス（JSON）の生成
 - **minify**: アセットパイプラインでのCSS/JS最小化（**HTML出力は対象外**）
+- **fingerprint**: アセット名への内容ハッシュ付与と、HTML/CSSの参照書き換え
 
 各フラグは独立して省略できます（`features: {sitemap: true}` のように1つだけ書けます）。
 `limits` も同様に、指定したキーだけが上書きされ、残りはデフォルト値になります。
@@ -191,6 +192,7 @@ features:
   rss: true
   searchIndex: false
   minify: false
+  fingerprint: false
 
 # セキュリティとパフォーマンス制限（オプション。以下の値はいずれも省略時のデフォルト）
 limits:
@@ -240,7 +242,6 @@ limits:
 ## 今後の拡張予定
 
 - 国際化（i18n）サポート
-- CSS/JS処理のためのアセットパイプライン
 - 高度なキャッシング戦略
 - カスタムプラグイン開発サポート
 - I/O操作のタイムアウト設定（`timeouts` ブロック）

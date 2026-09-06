@@ -16,7 +16,7 @@ A modern, fast, and secure static site generator built with Swift.
 - **📝 Markdown**: CommonMark support with YAML frontmatter using Apple's swift-markdown
 - **🎨 Templates**: Stencil-based templating engine with 20 custom filters
 - **🔄 Live Reload**: Development server that rebuilds on change and pushes reloads over WebSocket
-- **🧩 Built-in Features**: Sitemap, RSS, search index, and asset minification as simple on/off flags
+- **🧩 Built-in Features**: Sitemap, RSS, search index, asset minification, and asset fingerprinting as simple on/off flags
 - **📦 Type Safe**: Strongly typed, validated configuration and models
 - **⚡ Simple**: A small configuration surface — six top-level keys, no plugin runtime to manage
 
@@ -383,12 +383,13 @@ blog:
   generateCategories: true
   generateTags: true
 
-# Built-in feature flags. A mapping, not a list. Omit the block and all four are false.
+# Built-in feature flags. A mapping, not a list. Omit the block and all five are false.
 features:
   sitemap: true
   rss: true
   searchIndex: true
   minify: true
+  fingerprint: true
 
 # Security and performance limits. Every key is optional; the values below are the defaults.
 limits:
@@ -442,7 +443,7 @@ site:
 | `build` | `content` / `_site` / `static` / `templates` |
 | `server` | `port: 8080`, `liveReload: true` |
 | `blog` | `postsPerPage: 10`, all `generate*` true |
-| `features` | all four false |
+| `features` | all five false |
 | `limits` | the values shown in the example above |
 
 `hirundo init` writes everything through `features` and omits `limits`, which therefore
@@ -535,7 +536,7 @@ Templates have access to these variables:
 
 ## Built-in Features
 
-Hirundo ships four built-in features, toggled by the `features` block. Dynamic loading of
+Hirundo ships five built-in features, toggled by the `features` block. Dynamic loading of
 external code is not supported, for security and simplicity.
 
 | Flag | Effect |
@@ -544,8 +545,45 @@ external code is not supported, for security and simplicity.
 | `rss` | Writes `rss.xml` from your posts |
 | `searchIndex` | Writes `search-index.json` for client-side search |
 | `minify` | Enables CSS and JS minification in the asset pipeline |
+| `fingerprint` | Adds a content hash to asset names and rewrites HTML/CSS references to match |
 
 Note that `minify` applies to **CSS and JS assets only** — generated HTML is not minified.
+
+Enabling `fingerprint` writes `static/` assets under content-hashed names, such as
+`style-9f2a1c04b7e3d5a1.css`, and rewrites the generated HTML's `href` / `src` / `srcset`,
+CSS `url(...)`, `<style>` bodies, and `style` attributes to point at those names. The mapping
+is written to `_site/asset-manifest.json`. Output from older hashed names is removed on every
+build, so output does not grow without bound even under `hirundo serve`'s non-clean rebuilds.
+That pruning only runs while the flag is on, though: turning `fingerprint` back off does
+**not** remove output already written under a hashed name, since nothing prunes it any more.
+Run `hirundo build --clean` after changing the flag in either direction.
+
+There are several limitations:
+
+- **Only `href`, `src`, and `srcset` are rewritten as URL-bearing HTML attributes**, plus
+  `style` attribute values and `<style>` element bodies, which go through the same CSS
+  `url(...)` rewriter as `.css` files. No other attribute — `data-src`, `poster`,
+  `background`, and the like — is inspected, even where a browser would load an asset
+  through it.
+- **A reference is matched against the manifest literally, with no percent-decoding.** A
+  percent-encoded path such as `/images/my%20photo.jpg` does not match the manifest entry for
+  an asset stored as `images/my photo.jpg`; it is left unchanged and, once the target has
+  been renamed to its hashed form, becomes a dead link. This is one instance of a general
+  rule: a reference that fails to resolve against the manifest is passed through silently by
+  design. The build does not warn about it — the CSS-to-CSS case below is the one exception
+  that does.
+- **References inside JavaScript are not rewritten.** Whether a string like
+  `fetch("/images/logo.png")` is a reference cannot be determined statically. Read
+  `asset-manifest.json` if you need to reference an asset from JavaScript.
+- **A CSS-to-CSS `@import url(...)` is not rewritten**, because the referenced file's hash
+  is not yet known. Finding one prints a warning.
+- **Fingerprinting renames every file under `static/`, including ones fetched by a fixed,
+  well-known name that no page references** — `robots.txt`, `favicon.ico`, `CNAME`,
+  `_headers`, `_redirects`, and anything under `.well-known/`. Nothing rewrites a reference
+  to one of these because no such reference exists in any page; once the flag is on, each is
+  served only under its hashed name, and a request for the well-known name 404s. Do not
+  enable `features.fingerprint` if your site depends on any of them — a browser's implicit
+  `/favicon.ico` probe is the easiest way to notice this.
 
 Archive, category, and tag pages are controlled separately, by the `blog` block.
 
@@ -558,7 +596,7 @@ They are not:
   `liveReload`; a `cors:` key under it is silently ignored.
 - **Timeout configuration.** There is no `timeouts` block and no configurable timeouts for
   file, directory, HTTP, file-watching, or server-start operations.
-- **Plugin architecture.** The plugin system was removed; the four flags under `features`
+- **Plugin architecture.** The plugin system was removed; the five flags under `features`
   replace it. There is no custom-plugin development support, and no `imageOptimization` or
   `syntaxHighlight` feature.
 - **WebSocket authentication for live reload.** There is no `/auth-token` endpoint, no token
@@ -567,13 +605,10 @@ They are not:
   identifies no one: anyone who can reach the port can read the site, and can reach live
   reload too by opening the site by IP address. Do not expose the development server to an
   untrusted network.
-- **Asset fingerprinting, source maps, and JS/CSS concatenation.** There are no
-  `build.enableAssetFingerprinting`, `enableSourceMaps`, `concatenateJS` or `concatenateCSS`
-  keys — earlier versions decoded them and acted on none of them, so they were removed.
-  Fingerprinting and concatenation exist as library-level options on `AssetPipeline`, but
-  nothing rewrites the `href`/`src` references in generated HTML, so turning either on would
-  produce a site pointing at files that no longer exist. No source map is generated by any
-  code path. The only asset option reachable from `config.yaml` is `features.minify`.
+- **Asset concatenation and source maps.** JS/CSS concatenation and source map generation
+  have been removed, `AssetConcatenator` and all, along with the `sourceMap` option. JS
+  transpilation (`transpile` / `target`) is gone the same way. Use Babel or esbuild for
+  ES6+ transforms.
 - **`layout:` in frontmatter.** Use `template:`.
 
 `hirundo validate` reports every key in this list that your `config.yaml` sets.

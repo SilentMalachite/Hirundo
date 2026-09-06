@@ -77,17 +77,21 @@ Processes static assets with security focus:
 - CSS/JS minification with validation
 - Path sanitization
 - File type validation
-- Content fingerprinting and concatenation
+- Content fingerprinting with HTML/CSS reference rewriting
 
-Fingerprinting and concatenation are library-level options on
-`AssetPipeline`/`AssetConcatenator`, not reachable from `config.yaml`: the
-matching `build:` keys were removed because nothing outside `Models/Build.swift`
-ever read them. Neither option is usable as it stands — nothing rewrites the
-`href`/`src` references in generated HTML, so a fingerprinted or bundled asset
-is one no page loads. `AssetPipeline.enableSourceMaps` and the `sourceMap`
-options are dead storage; no source map is produced anywhere. The only asset
-option wired to configuration is `features.minify`, which covers CSS and JS
-assets and not HTML.
+`features.minify` and `features.fingerprint` are the only asset-related settings reachable
+from `config.yaml`. Enabling fingerprinting names each asset `<name>-<hash>.<ext>`, where
+`<hash>` is the first 16 lowercase hex digits of a SHA-256 over the asset's *final* output
+bytes — for CSS, that means after minification and after its own `url(...)` references are
+rewritten, which is why asset processing runs in two passes (non-CSS, then CSS). The
+generated HTML's `href` / `src` / `srcset`, CSS `url(...)`, `<style>` bodies, and `style`
+attributes are rewritten to the hashed names; the mapping is written to
+`_site/asset-manifest.json`, and output from a previous build's hashed names is pruned on
+every build. Two references are not rewritten: a string inside JavaScript (not statically
+distinguishable from a reference) and a CSS-to-CSS `@import url(...)` (its target's hash is
+not yet known when the importing stylesheet is processed; this prints a warning). Asset
+concatenation and source map generation have been removed entirely — `AssetConcatenator`,
+`AssetPipeline.enableSourceMaps`, and the `sourceMap` option no longer exist.
 
 **Security Measures:**
 - Path traversal prevention
@@ -144,11 +148,12 @@ Hirundo provides built-in features (no dynamic loading) that participate in the 
 - RSS feed creation
 - CSS/JS minification
 - Search index generation
+- Asset fingerprinting with HTML/CSS reference rewriting
 
 Configure these under `features:` in `config.yaml`. Each is a plain boolean
-(`sitemap`, `rss`, `searchIndex`, `minify`), all defaulting to `false`. Note
-that `minify` sets `minify` on the CSS and JS asset options together; there is
-no HTML minification and no separate per-language toggle.
+(`sitemap`, `rss`, `searchIndex`, `minify`, `fingerprint`), all defaulting to
+`false`. Note that `minify` sets `minify` on the CSS and JS asset options
+together; there is no HTML minification and no separate per-language toggle.
 
 ### 7. Site Scaffolder (`Scaffold/`)
 

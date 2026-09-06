@@ -45,6 +45,7 @@ enum ScaffoldTemplates {
           rss: \(blogFlag)
           searchIndex: false
           minify: false
+          fingerprint: false
 
         """
     }

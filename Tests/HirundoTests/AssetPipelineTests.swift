@@ -116,93 +116,6 @@ final class AssetPipelineTests: XCTestCase {
         XCTAssertTrue(processedCSS.contains("body{"))
     }
     
-    func testAssetFingerprinting() throws {
-        let sourceDir = tempDir.appendingPathComponent("source")
-        let destDir = tempDir.appendingPathComponent("dest")
-        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
-        
-        // Enable fingerprinting
-        pipeline.enableFingerprinting = true
-        
-        // Create test file
-        let cssFile = sourceDir.appendingPathComponent("style.css")
-        let cssContent = "body { color: blue; }"
-        try cssContent.write(to: cssFile, atomically: true, encoding: .utf8)
-        
-        // Process assets
-        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
-        
-        // Verify fingerprinted file exists
-        XCTAssertNotNil(manifest["style.css"])
-        let fingerprintedName = manifest["style.css"]!
-        XCTAssertTrue(fingerprintedName.contains("-"))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: destDir.appendingPathComponent(fingerprintedName).path))
-        
-        // Verify original content
-        let processedContent = try String(contentsOf: destDir.appendingPathComponent(fingerprintedName), encoding: .utf8)
-        XCTAssertEqual(processedContent, cssContent)
-    }
-    
-    func testAssetManifest() throws {
-        let sourceDir = tempDir.appendingPathComponent("source")
-        let destDir = tempDir.appendingPathComponent("dest")
-        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
-        
-        pipeline.enableFingerprinting = true
-        
-        // Create multiple assets
-        try "body{}".write(to: sourceDir.appendingPathComponent("style.css"), atomically: true, encoding: .utf8)
-        try "console.log(1)".write(to: sourceDir.appendingPathComponent("app.js"), atomically: true, encoding: .utf8)
-        
-        // Process assets
-        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
-        
-        // Verify manifest
-        XCTAssertEqual(manifest.count, 2)
-        XCTAssertNotNil(manifest["style.css"])
-        XCTAssertNotNil(manifest["app.js"])
-        
-        // Save and load manifest
-        let manifestPath = destDir.appendingPathComponent("asset-manifest.json")
-        try pipeline.saveManifest(manifest, to: manifestPath.path)
-        
-        let loadedManifest = try pipeline.loadManifest(from: manifestPath.path)
-        XCTAssertEqual(loadedManifest, manifest)
-    }
-    
-    func testAssetConcatenation() throws {
-        let sourceDir = tempDir.appendingPathComponent("source")
-        let destDir = tempDir.appendingPathComponent("dest")
-        let jsDir = sourceDir.appendingPathComponent("js")
-        try FileManager.default.createDirectory(at: jsDir, withIntermediateDirectories: true)
-        
-        // Create multiple JS files
-        try "var a = 1;".write(to: jsDir.appendingPathComponent("1.js"), atomically: true, encoding: .utf8)
-        try "var b = 2;".write(to: jsDir.appendingPathComponent("2.js"), atomically: true, encoding: .utf8)
-        try "var c = 3;".write(to: jsDir.appendingPathComponent("3.js"), atomically: true, encoding: .utf8)
-        
-        // Configure concatenation
-        pipeline.concatenationRules = [
-            AssetConcatenationRule(
-                pattern: "js/*.js",
-                output: "js/bundle.js",
-                separator: "\n"
-            )
-        ]
-        
-        // Process assets
-        let _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
-        
-        // Verify concatenated file
-        let bundlePath = destDir.appendingPathComponent("js/bundle.js")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: bundlePath.path))
-        
-        let bundleContent = try String(contentsOf: bundlePath, encoding: .utf8)
-        XCTAssertTrue(bundleContent.contains("var a = 1;"))
-        XCTAssertTrue(bundleContent.contains("var b = 2;"))
-        XCTAssertTrue(bundleContent.contains("var c = 3;"))
-    }
-    
     func testImageOptimization() throws {
         // This test would require actual image data
         // For now, we'll test the pipeline recognizes image types
@@ -254,27 +167,177 @@ final class AssetPipelineTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: destDir.appendingPathComponent("debug.log").path))
     }
     
-    func testAssetPipelineIntegration() throws {
-        // Test the full pipeline with minify + fingerprinting enabled
+    func testAssetFingerprinting() throws {
         let sourceDir = tempDir.appendingPathComponent("source")
         let destDir = tempDir.appendingPathComponent("dest")
         try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
 
-        // Create test assets
-        try "body { margin: 0; }".write(to: sourceDir.appendingPathComponent("style.css"), atomically: true, encoding: .utf8)
-        try "function test() { return true; }".write(to: sourceDir.appendingPathComponent("script.js"), atomically: true, encoding: .utf8)
-
-        // Enable built-in options
         pipeline.enableFingerprinting = true
-        pipeline.cssOptions.minify = true
-        pipeline.jsOptions.minify = true
+
+        let cssFile = sourceDir.appendingPathComponent("style.css")
+        let cssContent = "body { color: blue; }"
+        try cssContent.write(to: cssFile, atomically: true, encoding: .utf8)
 
         let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
 
-        // Verify processing
-        XCTAssertEqual(manifest.count, 2)
-        // Check CSS exists and appears minified
-        XCTAssertTrue(FileManager.default.fileExists(atPath: destDir.appendingPathComponent(manifest["style.css"] ?? "style.css").path))
+        let fingerprintedPath = try XCTUnwrap(manifest["style.css"])
+        XCTAssertTrue(fingerprintedPath.contains("-"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destDir.appendingPathComponent(fingerprintedPath).path))
+
+        let processedContent = try String(contentsOf: destDir.appendingPathComponent(fingerprintedPath), encoding: .utf8)
+        XCTAssertEqual(processedContent, cssContent)
+    }
+
+    func testManifestValueKeepsItsDirectory() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(
+            at: sourceDir.appendingPathComponent("css"),
+            withIntermediateDirectories: true
+        )
+        pipeline.enableFingerprinting = true
+        try "body{}".write(to: sourceDir.appendingPathComponent("css/style.css"), atomically: true, encoding: .utf8)
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        let value = try XCTUnwrap(manifest["css/style.css"])
+        XCTAssertTrue(value.hasPrefix("css/"), "値は出力相対パスであるべき。実際: \(value)")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destDir.appendingPathComponent(value).path))
+    }
+
+    func testManifestIsCompleteWithoutFingerprinting() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        try "body{}".write(to: sourceDir.appendingPathComponent("style.css"), atomically: true, encoding: .utf8)
+        try Data().write(to: sourceDir.appendingPathComponent("logo.png"))
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        XCTAssertEqual(manifest["style.css"], "style.css")
+        XCTAssertEqual(manifest["logo.png"], "logo.png")
+    }
+
+    func testManifestRoundTripsThroughDisk() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(
+            at: sourceDir.appendingPathComponent("css"),
+            withIntermediateDirectories: true
+        )
+        pipeline.enableFingerprinting = true
+        try "body{}".write(to: sourceDir.appendingPathComponent("css/style.css"), atomically: true, encoding: .utf8)
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+        let path = destDir.appendingPathComponent("asset-manifest.json").path
+        try pipeline.saveManifest(manifest, to: path)
+
+        XCTAssertEqual(try pipeline.loadManifest(from: path), manifest)
+    }
+
+    func testFingerprintCoversTheProcessedBytesNotTheSource() throws {
+        // 同じソースを、最小化あり・なしで別々の出力に処理する。ハッシュが処理後のバイト列に
+        // 対して取られていれば、ふたつの出力名は違うものになる。
+        let sourceDir = tempDir.appendingPathComponent("source")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        try "body {\n  color: red;\n}\n".write(
+            to: sourceDir.appendingPathComponent("style.css"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let plain = AssetPipeline()
+        plain.enableFingerprinting = true
+        let plainManifest = try plain.processAssets(
+            from: sourceDir.path,
+            to: tempDir.appendingPathComponent("dest-plain").path
+        )
+
+        let minified = AssetPipeline()
+        minified.enableFingerprinting = true
+        minified.cssOptions.minify = true
+        let minifiedManifest = try minified.processAssets(
+            from: sourceDir.path,
+            to: tempDir.appendingPathComponent("dest-minified").path
+        )
+
+        XCTAssertNotEqual(
+            plainManifest["style.css"],
+            minifiedManifest["style.css"],
+            "最小化でバイト列が変わったのにハッシュが同じなのは、ソースをハッシュしている証拠"
+        )
+    }
+
+    func testCSSHashCoversTheRewrittenBytes() throws {
+        // CSS が参照する画像の中身だけを変える。画像のハッシュが変われば、書き換え後の CSS の
+        // バイト列も変わり、CSS 自身のハッシュも変わらなければならない。
+        func build(imageBytes: Data, into name: String) throws -> AssetManifest {
+            let sourceDir = tempDir.appendingPathComponent("source-\(name)")
+            try FileManager.default.createDirectory(
+                at: sourceDir.appendingPathComponent("css"),
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.createDirectory(
+                at: sourceDir.appendingPathComponent("images"),
+                withIntermediateDirectories: true
+            )
+            try "body{background:url(../images/bg.png)}".write(
+                to: sourceDir.appendingPathComponent("css/style.css"),
+                atomically: true,
+                encoding: .utf8
+            )
+            try imageBytes.write(to: sourceDir.appendingPathComponent("images/bg.png"))
+
+            let pipeline = AssetPipeline()
+            pipeline.enableFingerprinting = true
+            return try pipeline.processAssets(
+                from: sourceDir.path,
+                to: tempDir.appendingPathComponent("dest-\(name)").path
+            )
+        }
+
+        let first = try build(imageBytes: Data("one".utf8), into: "first")
+        let second = try build(imageBytes: Data("two".utf8), into: "second")
+
+        XCTAssertNotEqual(first["images/bg.png"], second["images/bg.png"], "前提: 画像のハッシュは変わる")
+        XCTAssertNotEqual(
+            first["css/style.css"],
+            second["css/style.css"],
+            "CSS のハッシュは url(...) を書き換えた後のバイト列に対して取られるべき"
+        )
+    }
+
+    func testCSSToCSSReferenceIsLeftUnresolved() throws {
+        // パス2は全 CSS を同時に扱うため、CSS が別の CSS を url(...) / @import で参照していても
+        // 参照先のハッシュ名はまだ決まっていない。ファイルシステムの列挙順に関わらず、常に
+        // 無変更で残らなければならない（パス1完了時点のマニフェストには CSS のエントリが
+        // 一つも無いので、この振る舞いは処理順に依存しない）。
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        pipeline.enableFingerprinting = true
+
+        try "@import url(\"theme.css\");\nbody { color: red; }".write(
+            to: sourceDir.appendingPathComponent("style.css"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "body { margin: 0; }".write(
+            to: sourceDir.appendingPathComponent("theme.css"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        let outputPath = try XCTUnwrap(manifest["style.css"])
+        let outputContent = try String(contentsOf: destDir.appendingPathComponent(outputPath), encoding: .utf8)
+
+        XCTAssertTrue(
+            outputContent.contains("url(\"theme.css\")"),
+            "CSS→CSS参照はハッシュ名を解決できないため無変更で残るべき。実際: \(outputContent)"
+        )
     }
 }
 

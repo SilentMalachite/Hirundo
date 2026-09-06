@@ -3,8 +3,6 @@ import CryptoKit
 
 /// Handles individual asset processing operations
 public class AssetProcessor {
-    private let fileManager = FileManager.default
-    
     public init() {}
     
     /// Detects asset type from filename
@@ -56,39 +54,6 @@ public class AssetProcessor {
             .path
     }
     
-    /// Processes asset content based on type
-    public func processAssetContent(_ asset: AssetItem, cssOptions: CSSProcessingOptions, jsOptions: JSProcessingOptions) throws {
-        switch asset.type {
-        case .css:
-            try processCSSThroughPipeline(asset, options: cssOptions)
-        case .javascript:
-            try processJSThroughPipeline(asset, options: jsOptions)
-        default:
-            // For other assets, just copy
-            if asset.sourcePath != asset.outputPath {
-                // Remove existing file if it exists
-                if fileManager.fileExists(atPath: asset.outputPath) {
-                    try fileManager.removeItem(atPath: asset.outputPath)
-                }
-                try fileManager.copyItem(atPath: asset.sourcePath, toPath: asset.outputPath)
-            }
-        }
-    }
-    
-    /// Processes CSS file through pipeline
-    private func processCSSThroughPipeline(_ asset: AssetItem, options: CSSProcessingOptions) throws {
-        let content = try String(contentsOfFile: asset.sourcePath, encoding: .utf8)
-        let processed = processCSS(content, options: options)
-        try processed.write(toFile: asset.outputPath, atomically: true, encoding: .utf8)
-    }
-    
-    /// Processes JavaScript file through pipeline
-    private func processJSThroughPipeline(_ asset: AssetItem, options: JSProcessingOptions) throws {
-        let content = try String(contentsOfFile: asset.sourcePath, encoding: .utf8)
-        let processed = processJS(content, options: options)
-        try processed.write(toFile: asset.outputPath, atomically: true, encoding: .utf8)
-    }
-    
     /// Processes CSS content
     public func processCSS(_ content: String, options: CSSProcessingOptions = CSSProcessingOptions()) -> String {
         var processed = content
@@ -107,15 +72,11 @@ public class AssetProcessor {
     /// Processes JavaScript content
     public func processJS(_ content: String, options: JSProcessingOptions = JSProcessingOptions()) -> String {
         var processed = content
-        
-        if options.transpile {
-            processed = transpileJS(processed, target: options.target)
-        }
-        
+
         if options.minify {
             processed = minifyJS(processed)
         }
-        
+
         return processed
     }
     
@@ -348,16 +309,5 @@ public class AssetProcessor {
         let bracketCount = js.filter { $0 == "[" }.count - js.filter { $0 == "]" }.count
         
         return braceCount == 0 && parenCount == 0 && bracketCount == 0
-    }
-    
-    /// JavaScript transpilation (disabled for safety)
-    private func transpileJS(_ js: String, target: String) -> String {
-        print("⚠️ JavaScript transpilation is disabled for safety reasons.")
-        print("   Use a dedicated build tool like Babel or esbuild for ES6+ transpilation.")
-        print("   Returning original JavaScript unchanged.")
-        
-        // Return original JavaScript unchanged
-        // Transpilation with regex is unreliable and can break code
-        return js
     }
 }

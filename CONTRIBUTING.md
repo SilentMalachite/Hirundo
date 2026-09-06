@@ -119,7 +119,7 @@ Sources/
 │   ├── Sanitizers/         # HTML sanitization
 │   ├── Scaffold/           # `hirundo init` site scaffolding
 │   ├── Templates/          # Stencil cache, filters, context building
-│   ├── Assets/             # Asset processing and concatenation
+│   ├── Assets/             # Asset processing, fingerprinting, and reference rewriting
 │   ├── Validators/         # Markdown validation
 │   ├── Utils/, Utilities/  # Helper utilities
 │   └── *.swift             # Core functionality
@@ -223,6 +223,7 @@ public struct Features: Codable, Sendable, Equatable {
     public var rss: Bool
     public var searchIndex: Bool
     public var minify: Bool
+    public var fingerprint: Bool
 }
 ```
 
@@ -245,6 +246,7 @@ features:
   rss: true
   searchIndex: false
   minify: true
+  fingerprint: false
 ```
 
 Note that `minify` enables CSS and JS asset minification together; it does not
