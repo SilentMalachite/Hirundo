@@ -953,14 +953,18 @@ final class AssetPipelineTests: XCTestCase {
             try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outsideTarget)
         }
 
-        XCTAssertThrowsError(try hooked.processAssets(from: sourceDir.path, to: destDir.path))
-        let output = destDir.appendingPathComponent("style.css")
-        if FileManager.default.fileExists(atPath: output.path) {
-            XCTAssertNotEqual(
-                try String(contentsOf: output, encoding: .utf8), "/* secret */",
-                "static/ の外の中身が出力に書き出された"
-            )
+        XCTAssertThrowsError(
+            try hooked.processAssets(from: sourceDir.path, to: destDir.path),
+            "パス1の後に外へ向け直されたリンクが読まれている"
+        ) { error in
+            guard case AssetPipelineError.pathTraversalAttempt = error else {
+                return XCTFail("pathTraversalAttempt 以外のエラー: \(error)")
+            }
         }
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: destDir.appendingPathComponent("style.css").path),
+            "static/ の外の中身が出力に書き出された"
+        )
     }
 
     /// 閉じ込め判定は通ったが、コピーの前にソースが書き換えられた。ハッシュ計算とコピーが

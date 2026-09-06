@@ -410,7 +410,15 @@ public class AssetPipeline {
             defer {
                 // 成功時は `replaceItemAt` が消費して既に存在しない。throw で抜けた場合だけ
                 // 残っているので、原子的な差し替えの体裁を保つために掃除する。
-                if fileManager.fileExists(atPath: staging.path) {
+                //
+                // 存在確認に `fileExists` を使わないのは、識別情報の比較が守っているまさに
+                // その競合 ── 判定後にソースの最終要素がリンクへ差し替えられる ── で、
+                // `copyItem` がリンクをリンクのままコピーし、ステージングが壊れたリンクに
+                // なり得るため。`fileExists` は解決先を見るので壊れたリンクを「無い」と答え、
+                // 掃除が飛ばされて `.hirundo-<uuid>` が出力ツリーに残る（`AssetPruner` は
+                // ハッシュ名にしか触らないので、誰も回収しない）。`attributesOfItem` は
+                // `lstat` 相当でリンクを辿らないため、壊れたリンクも見える。
+                if (try? fileManager.attributesOfItem(atPath: staging.path)) != nil {
                     try? fileManager.removeItem(at: staging)
                 }
             }
