@@ -208,9 +208,9 @@ final class AssetPipelineTests: XCTestCase {
 
         let fingerprintedPath = try XCTUnwrap(manifest["logo.png"])
         let expectedFingerprint = AssetProcessor().generateFingerprint(for: logoContent)
-        XCTAssertTrue(
-            fingerprintedPath.contains(expectedFingerprint),
-            "出力名 \(fingerprintedPath) が書き込んだバイト列のハッシュ \(expectedFingerprint) を含んでいない"
+        XCTAssertEqual(
+            fingerprintedPath, "logo-\(expectedFingerprint).png",
+            "出力名 \(fingerprintedPath) が書き込んだバイト列のハッシュ \(expectedFingerprint) から作られる正確な名前と一致しない"
         )
 
         let outputURL = destDir.appendingPathComponent(fingerprintedPath)
@@ -221,6 +221,82 @@ final class AssetPipelineTests: XCTestCase {
         XCTAssertEqual(
             outputPermissions, 0o640,
             "コピーがソースのパーミッションを引き継いでいない（Data 経由の書き込みに戻っている）"
+        )
+    }
+
+    /// レビューで見つかった Critical の回帰: `copyItem` はシンボリックリンクをリンクのまま
+    /// コピーするため、ベンダリングでよくある `static/img/logo.png -> ../../shared/logo.png`
+    /// のような配置だと、`_site` の画像が出力先の外を指すリンクになってしまう。
+    /// ハッシュはリンク先の実体（`FileHandle` は辿る）に対して取られるので、書き込まれる
+    /// バイト列と食い違う。ここでは、出力が通常ファイルとしてリンク先のバイト列を持つことを
+    /// 固定する。
+    func testSymlinkedPassThroughAssetIsWrittenAsARegularFileWithTheTargetsBytes() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(
+            at: sourceDir.appendingPathComponent("img"),
+            withIntermediateDirectories: true
+        )
+
+        // リンク先は static にも _site にもならない場所に置く。シンボリックリンクをそのまま
+        // コピーしてしまうと、出力の閉じ込め判定が外れて壊れる。
+        let sharedDir = tempDir.appendingPathComponent("shared")
+        try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
+        let targetContent = Data("this is the real image bytes".utf8)
+        let targetFile = sharedDir.appendingPathComponent("logo-real.png")
+        try targetContent.write(to: targetFile)
+
+        let logoLink = sourceDir.appendingPathComponent("img/logo.png")
+        try FileManager.default.createSymbolicLink(at: logoLink, withDestinationURL: targetFile)
+
+        pipeline.enableFingerprinting = true
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        let outputRelativePath = try XCTUnwrap(manifest["img/logo.png"])
+        let outputURL = destDir.appendingPathComponent(outputRelativePath)
+
+        let resourceValues = try outputURL.resourceValues(forKeys: [.isSymbolicLinkKey])
+        XCTAssertNotEqual(
+            resourceValues.isSymbolicLink, true,
+            "出力がシンボリックリンクのまま書き出されている: \(outputURL.path)"
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: outputURL), targetContent,
+            "出力のバイト列がリンク先の実体と一致しない"
+        )
+
+        // フィンガープリントは「書き込んだバイト列」を覆っていなければならない。
+        let expectedFingerprint = AssetProcessor().generateFingerprint(for: targetContent)
+        XCTAssertEqual(outputRelativePath, "img/logo-\(expectedFingerprint).png")
+    }
+
+    /// レビューで見つかった Critical の回帰の核心: シンボリックリンクをリンクのまま書き出すと、
+    /// `write` 冒頭の閉じ込め判定は候補パスを `resolvingSymlinksInPath()` で解決するため、
+    /// 次の非クリーンビルド（`hirundo serve` の再ビルド相当）でそのリンクの解決先が出力先の
+    /// 外だと判定され、ビルドが `Output path escapes destination directory` で落ちる。
+    /// このテストは2回目の `processAssets` が例外を投げないことでその回帰を固定する。
+    func testSecondBuildAfterASymlinkedAssetDoesNotThrow() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(
+            at: sourceDir.appendingPathComponent("img"),
+            withIntermediateDirectories: true
+        )
+
+        let sharedDir = tempDir.appendingPathComponent("shared")
+        try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
+        let targetFile = sharedDir.appendingPathComponent("logo-real.png")
+        try Data("this is the real image bytes".utf8).write(to: targetFile)
+
+        let logoLink = sourceDir.appendingPathComponent("img/logo.png")
+        try FileManager.default.createSymbolicLink(at: logoLink, withDestinationURL: targetFile)
+
+        // `hirundo serve` はクリーンせずに同じ出力先へ再ビルドする。フィンガープリント無効でも
+        // 壊れる（ブリーフ item 1 の主張どおり）ことを確かめるため、ここでは無効のままにする。
+        _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+        XCTAssertNoThrow(
+            try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
+            "1回目のビルドが残したシンボリックリンクにより、2回目のビルドが閉じ込め判定で落ちてはいけない"
         )
     }
 
@@ -342,9 +418,9 @@ final class AssetPipelineTests: XCTestCase {
         let minifiedPath = try XCTUnwrap(minifiedManifest["app.js"])
         let bytesOnDisk = try Data(contentsOf: minifiedDest.appendingPathComponent(minifiedPath))
         let expectedFingerprint = AssetProcessor().generateFingerprint(for: bytesOnDisk)
-        XCTAssertTrue(
-            minifiedPath.contains(expectedFingerprint),
-            "出力名 \(minifiedPath) が実際に書き込んだバイト列のハッシュ \(expectedFingerprint) を含んでいない"
+        XCTAssertEqual(
+            minifiedPath, "app-\(expectedFingerprint).js",
+            "出力名 \(minifiedPath) が実際に書き込んだバイト列のハッシュ \(expectedFingerprint) から作られる正確な名前と一致しない"
         )
     }
 

@@ -18,11 +18,26 @@ public class AssetPipeline {
 
     // Configuration
     public var enableFingerprinting: Bool = false
+
+    /// **コピーそのものをしない**ファイルのパターン。一致したファイルは出力ディレクトリに
+    /// 一切現れず、マニフェストにも載らない。
+    ///
+    /// `AssetFileManager.matchesPattern` の五択（`*`、`*x*`、`*x`、`x*`、完全一致）だけを
+    /// 理解する簡易マッチャーで、`shouldExclude` がパターンをファイル名（ディレクトリ部分を
+    /// 落とした最後の要素）にのみ照合する ── ディレクトリを含むパターン（`images/*.png` など）
+    /// は意図どおりに効かない。`/` の有無で挙動を変える `fingerprintExclusions` とは別物なので
+    /// 混同しないこと。「コピーするがハッシュしない」ファイルには代わりに `fingerprintExclusions`
+    /// を使う。
     public var excludePatterns: [String] = []
 
-    /// フィンガープリントの対象から外すファイル。`enableFingerprinting` が true でも、
-    /// ここに一致するファイルは元の名前のまま書き出す（`write` 内の唯一のハッシュ判定箇所で
-    /// 参照する）。
+    /// **コピーはするがフィンガープリントだけ外す**ファイル。`enableFingerprinting` が true
+    /// でも、ここに一致するファイルは元の名前のまま書き出す（`write` 内の唯一のハッシュ判定
+    /// 箇所で参照する）。
+    ///
+    /// `AssetFingerprintExclusions.matches` というセグメント対応のマッチャーを使う。パターンに
+    /// `/` を含むかどうかでファイル名一致とパス全体一致を切り替え、`*` と `**` を理解する ──
+    /// `excludePatterns` の五択マッチャーより表現力が高い。「一切コピーしない」ファイルには
+    /// 代わりに `excludePatterns` を使う。
     public var fingerprintExclusions: AssetFingerprintExclusions = AssetFingerprintExclusions()
     public var cssOptions: CSSProcessingOptions = CSSProcessingOptions()
     public var jsOptions: JSProcessingOptions = JSProcessingOptions()
@@ -240,11 +255,39 @@ public class AssetPipeline {
             try data.write(to: outputURL, options: .atomic)
         case .file(let fileURL):
             // `copyItem` はパーミッションと拡張属性を保ち、APFS では実体コピーせずクローンする。
-            // ただし宛先が既にあると失敗するので（`serve` は clean せず再ビルドする）、先に消す。
-            if fileManager.fileExists(atPath: outputURL.path) {
-                try fileManager.removeItem(at: outputURL)
+            // ただし `copyItem` はシンボリックリンクをリンクのままコピーする。ソースが
+            // シンボリックリンク（`static/img/logo.png -> ../../shared/logo.png` のような
+            // ベンダリング）だと、出力もリンクになってしまい、以下の問題を引き起こす。
+            //
+            // - `_site` を単体で持ち出す（アーカイブ・アップロードなど）と、相対リンクの
+            //   解決先が存在せず画像が失われる。
+            // - フィンガープリント有効時、上のハッシュは `FileHandle` 経由でリンク先の
+            //   実体を読んで計算する一方、書き込まれるのはリンクそのものなので、
+            //   「ハッシュは書き込んだバイト列を覆う」という不変条件が壊れる。
+            // - 次の非クリーンビルドで、このリンクが `write` 冒頭の閉じ込め判定に
+            //   `resolvingSymlinksInPath()` 済みの候補パスとして通り、リンク先が出力先の
+            //   外を指していれば `Output path escapes destination directory` で落ちる
+            //   （`removeItem` が走らないので自己修復もできない）。
+            //
+            // そのためコピー元は必ず解決してから読む。
+            //
+            // 加えて、`removeItem` の後に `copyItem` する2段階だと、コピーが失敗した時点で
+            // 直前の良い出力を失い、`serve` から見ればファイルが存在しない瞬間ができる
+            // （パイプライン内の他の書き込みはすべて `.atomic` なのに、ここだけそうでない）。
+            // 一時名へコピーしてから `replaceItemAt` で原子的に差し替えることで、パーミッション・
+            // 拡張属性を保つという `copyItem` を選んだ理由を残したまま、両方を直す。
+            let source = fileURL.resolvingSymlinksInPath()
+            let staging = outputURL.deletingLastPathComponent()
+                .appendingPathComponent(".hirundo-\(UUID().uuidString)")
+            defer {
+                // 成功時は `replaceItemAt` が消費して既に存在しない。throw で抜けた場合だけ
+                // 残っているので、原子的な差し替えの体裁を保つために掃除する。
+                if fileManager.fileExists(atPath: staging.path) {
+                    try? fileManager.removeItem(at: staging)
+                }
             }
-            try fileManager.copyItem(at: fileURL, to: outputURL)
+            try fileManager.copyItem(at: source, to: staging)
+            _ = try fileManager.replaceItemAt(outputURL, withItemAt: staging)
         }
 
         manifest[relativePath] = outputRelativePath

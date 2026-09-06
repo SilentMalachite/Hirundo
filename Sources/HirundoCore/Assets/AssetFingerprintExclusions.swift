@@ -22,8 +22,24 @@ public struct AssetFingerprintExclusions: Equatable, Sendable {
     private let patterns: [String]
 
     /// `additional` は組み込みパターンに追加されるだけで、組み込みを取り除くことはできない。
+    ///
+    /// 各パターンの先頭の `/` または `./` は取り除く。`staticRelativePath` は先頭に `/` を
+    /// 持たないため、`"/robots.txt"` は「ファイルへの参照のつもり」で書かれた最初の一手だが、
+    /// 素通しすると全体パス一致に回されて絶対に一致しなくなる（`"./ads.txt"` も同様）。
+    /// 警告なしで一度も一致しないまま静かに壊れるくらいなら、寛容に解釈する。
     public init(additional: [String] = []) {
-        patterns = Self.builtIn + additional
+        patterns = Self.builtIn + additional.map(Self.strippingLeadingSlashOrDotSlash)
+    }
+
+    /// パターン先頭の `/` または `./` を1つだけ取り除く。
+    private static func strippingLeadingSlashOrDotSlash(_ pattern: String) -> String {
+        if pattern.hasPrefix("./") {
+            return String(pattern.dropFirst(2))
+        }
+        if pattern.hasPrefix("/") {
+            return String(pattern.dropFirst())
+        }
+        return pattern
     }
 
     /// `staticRelativePath` は static ディレクトリからの相対パスで、区切りは `/`、

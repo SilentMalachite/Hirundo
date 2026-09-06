@@ -35,6 +35,9 @@ public enum AssetPruner {
     ) throws {
         let keep = manifest.outputPaths
         let topLevel = try fileManager.contentsOfDirectory(atPath: staticDirectory.path)
+        // トップレベルの各ファイル用の候補探しは同じ出力ルートを毎回列挙するだけなので、
+        // ループの外で一度だけ読む（`processAssets` が既に作っているので必ず存在する）。
+        let outputDirectoryContents = try fileManager.contentsOfDirectory(atPath: outputDirectory.path)
 
         for entry in topLevel {
             var isDirectory: ObjCBool = false
@@ -58,8 +61,7 @@ public enum AssetPruner {
                 // トップレベルのファイルは出力でハッシュ名になっているので、名前の完全一致では
                 // 見つからない。語幹が一致する出力ルート直下のファイルを候補にする。
                 let stem = URL(fileURLWithPath: entry).deletingPathExtension().lastPathComponent
-                let siblings = try fileManager.contentsOfDirectory(atPath: outputDirectory.path)
-                for sibling in siblings where sibling.hasPrefix(stem + "-") {
+                for sibling in outputDirectoryContents where sibling.hasPrefix(stem + "-") {
                     let siblingURL = outputDirectory.appendingPathComponent(sibling)
                     guard (try? siblingURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
                     else { continue }

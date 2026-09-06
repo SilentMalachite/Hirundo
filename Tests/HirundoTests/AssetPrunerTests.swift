@@ -189,6 +189,9 @@ final class AssetPrunerTests: XCTestCase {
         // static/ のトップレベルが読めない場合（権限エラーなど）に「削除対象なし」として黙って
         // 戻ってしまうと、I/O エラーが握りつぶされて古い出力が積み上がっても気づけない。
         // エラーとして呼び出し元（`SiteGenerator` の `static assets` ステップ）に伝えるべき。
+        // root は権限を無視するため `chmod 000` が no-op になり、この検証は root コンテナの
+        // CI では何もテストしないまま `XCTAssertThrowsError` だけが失敗する。
+        try XCTSkipIf(getuid() == 0, "chmod 000 is a no-op for root; nothing to assert")
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: staticDir.path)
         defer {
             try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staticDir.path)

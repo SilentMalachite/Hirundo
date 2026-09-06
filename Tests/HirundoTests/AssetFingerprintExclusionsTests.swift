@@ -54,6 +54,28 @@ final class AssetFingerprintExclusionsTests: XCTestCase {
         XCTAssertTrue(exclusions.excludes(".well-known/security.txt"))
     }
 
+    // MARK: - 先頭の `/` と `./` は取り除かれる
+
+    func testLeadingSlashIsStrippedSoThePatternStillMatches() {
+        // `staticRelativePath` に先頭の `/` は付かないため、素通しすると絶対に一致しない。
+        // "/robots.txt" は組み込みの "robots.txt" と同じ意味に解釈されるべき。
+        let exclusions = AssetFingerprintExclusions(additional: ["/ads.txt"])
+        XCTAssertTrue(exclusions.excludes("ads.txt"))
+        XCTAssertTrue(exclusions.excludes("vendor/ads.txt"))
+    }
+
+    func testLeadingDotSlashIsStrippedSoThePatternStillMatches() {
+        let exclusions = AssetFingerprintExclusions(additional: ["./ads.txt"])
+        XCTAssertTrue(exclusions.excludes("ads.txt"))
+        XCTAssertTrue(exclusions.excludes("vendor/ads.txt"))
+    }
+
+    func testLeadingSlashIsStrippedFromASlashContainingPatternToo() {
+        let exclusions = AssetFingerprintExclusions(additional: ["/css/style.css"])
+        XCTAssertTrue(exclusions.excludes("css/style.css"))
+        XCTAssertFalse(exclusions.excludes("deep/css/style.css"), "/ を含むパターンは全体パス一致のみ")
+    }
+
     // MARK: - `*` は `/` を跨がない
 
     func testStarDoesNotCrossSlash() {
