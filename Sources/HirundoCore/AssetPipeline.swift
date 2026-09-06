@@ -96,7 +96,7 @@ public class AssetPipeline {
     }
 
     // Detect asset type from filename
-    public func detectAssetType(for filename: String) -> AssetItem.AssetType {
+    public func detectAssetType(for filename: String) -> AssetType {
         return processor.detectAssetType(for: filename)
     }
 

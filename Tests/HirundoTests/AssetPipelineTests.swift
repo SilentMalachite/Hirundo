@@ -70,11 +70,11 @@ final class AssetPipelineTests: XCTestCase {
     
     func testAssetTypeDetection() throws {
         let assets = [
-            ("style.css", AssetItem.AssetType.css),
-            ("app.js", AssetItem.AssetType.javascript),
-            ("logo.png", AssetItem.AssetType.image("png")),
-            ("banner.jpg", AssetItem.AssetType.image("jpg")),
-            ("readme.txt", AssetItem.AssetType.other("txt"))
+            ("style.css", AssetType.css),
+            ("app.js", AssetType.javascript),
+            ("logo.png", AssetType.image("png")),
+            ("banner.jpg", AssetType.image("jpg")),
+            ("readme.txt", AssetType.other("txt"))
         ]
         
         for (filename, expectedType) in assets {

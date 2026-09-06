@@ -6,7 +6,7 @@ public class AssetProcessor {
     public init() {}
     
     /// Detects asset type from filename
-    public func detectAssetType(for filename: String) -> AssetItem.AssetType {
+    public func detectAssetType(for filename: String) -> AssetType {
         let ext = URL(fileURLWithPath: filename).pathExtension.lowercased()
         
         switch ext {
