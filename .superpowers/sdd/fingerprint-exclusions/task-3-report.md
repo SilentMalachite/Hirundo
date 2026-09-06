@@ -195,5 +195,5 @@ Test Suite 'All tests' passed at 2026-09-06 12:05:45.311.
 636 = 635 (previous total) + 1 new test (the rename doesn't change the count).
 `swift build` clean.
 
-Committed as `<see commit history>` (`test: cover the config-to-pipeline fingerprint
-exclusion wiring end-to-end`).
+Committed as `9e59cdfcbb9ac98d98f6ef6e7be582831a5ced02` (`test: cover the
+config-to-pipeline fingerprint exclusion wiring end-to-end`).
