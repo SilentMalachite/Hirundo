@@ -144,6 +144,44 @@ final class AssetFingerprintIntegrationTests: XCTestCase {
         XCTAssertEqual(try manifest()["robots.txt"], "robots.txt")
     }
 
+    /// `config.assets.fingerprintExclude` から `assetPipeline.fingerprintExclusions` への配線
+    /// （`SiteGenerator.configureAssetPipeline`、`SiteGenerator.swift:430-432`）を、実際に
+    /// `config.yaml` を経由して検証する。`ads.txt` は組み込みパターンのどれにも一致しないので、
+    /// これが除外されるのは配線が効いている場合に限られる ── その配線を消せばこのテストは
+    /// 落ちる（RED として確認済み。詳細は task-3-report.md のフィックスラウンド参照）。
+    func testConfigSuppliedFingerprintExcludePatternExemptsAFileEndToEnd() async throws {
+        try write("""
+        site:
+          title: "Fingerprint Site"
+          url: "https://example.com"
+
+        features:
+          fingerprint: true
+          minify: true
+
+        assets:
+          fingerprintExclude:
+            - "ads.txt"
+        """, to: "config.yaml")
+        try write("place: /ads.txt\n", to: "static/ads.txt")
+
+        let generator = try SiteGenerator(projectPath: projectPath)
+        try await generator.build()
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: outputURL.appendingPathComponent("ads.txt").path),
+            "ads.txt が元の名前で出力されていない"
+        )
+        let builtManifest = try manifest()
+        XCTAssertEqual(builtManifest["ads.txt"], "ads.txt")
+
+        // 同じビルドの中で、除外対象ではない通常のアセットは変わらずハッシュされるべき。
+        // (この後半のアサーションが無いと、フィンガープリント自体が丸ごと無効化されていても
+        // このテストは通ってしまう。)
+        let hashedStylesheet = try XCTUnwrap(builtManifest["css/style.css"])
+        XCTAssertNotEqual(hashedStylesheet, "css/style.css", "除外対象ではないアセットはハッシュされるべき")
+    }
+
     func testCleanBuildNeverWritesTheUnhashedFilename() async throws {
         let generator = try SiteGenerator(projectPath: projectPath)
         try await generator.build(clean: true)

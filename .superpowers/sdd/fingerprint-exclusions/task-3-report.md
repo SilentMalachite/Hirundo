@@ -119,3 +119,81 @@ Baseline was 631 tests; 635 = 631 + 4 new tests. Exact match. `swift build` is c
 
 None. The change is minimal (7 lines in `AssetPipeline.swift`, 3 lines in `SiteGenerator.swift`)
 and isolated to the one call site the brief named.
+
+## Fix round 1/5
+
+**Finding (Important):** the third of the brief's three wiring steps —
+`config.assets.fingerprintExclude` → `assetPipeline.fingerprintExclusions` at
+`SiteGenerator.swift:430-432` — had no test anywhere in the suite.
+`testUserSuppliedFingerprintExcludePatternExemptsAFile` was named and commented for a
+pattern "supplied through `assets.fingerprintExclude`", but its body set
+`pipeline.fingerprintExclusions` directly on an `AssetPipeline` it constructed itself,
+never touching `Config`, `Assets`, or `SiteGenerator`. It re-exercised the `write()`
+guard that `testExcludedAssetIsWrittenUnderItsOriginalNameAndMapsToItself` already
+covered. Deleting `SiteGenerator.swift:430-432` left the full suite green.
+
+**Fix applied:**
+
+1. Added `testConfigSuppliedFingerprintExcludePatternExemptsAFileEndToEnd` to
+   `Tests/HirundoTests/AssetFingerprintIntegrationTests.swift`, following the file's
+   existing fixture style. It overwrites the `setUp`-provided `config.yaml` with one
+   that adds `assets.fingerprintExclude: ["ads.txt"]` (`ads.txt` matches none of the
+   built-in patterns), writes `static/ads.txt`, runs a real
+   `SiteGenerator(projectPath:).build()`, and asserts:
+   - `_site/ads.txt` exists under its original name
+   - the on-disk manifest maps `ads.txt` → `ads.txt`
+   - `css/style.css` in the same build still gets a hashed name (so the test cannot
+     pass merely because fingerprinting as a whole is off)
+
+2. **Verified the new test actually depends on the wiring**, as requested: temporarily
+   deleted `SiteGenerator.swift:430-432` and reran just that test.
+
+   Command: `swift test --filter "AssetFingerprintIntegrationTests/testConfigSuppliedFingerprintExcludePatternExemptsAFileEndToEnd"`
+
+   With the wiring lines removed:
+   ```
+   .../AssetFingerprintIntegrationTests.swift:171: XCTAssertTrue failed - ads.txt が元の名前で出力されていない
+   .../AssetFingerprintIntegrationTests.swift:176: XCTAssertEqual failed: ("Optional("ads-8b546c023a3875ca.txt")") is not equal to ("Optional("ads.txt")")
+   Executed 1 test, with 2 failures (0 unexpected)
+   ```
+   Confirmed: the test fails when the wiring is absent. Restored the two lines
+   immediately after (`assetPipeline.fingerprintExclusions = AssetFingerprintExclusions(additional: config.assets.fingerprintExclude)`),
+   then confirmed `git diff Sources/HirundoCore/SiteGenerator.swift` produced no
+   output — the file is byte-identical to the committed version, no residue from the
+   experiment.
+
+3. **Renamed the misnamed unit test** rather than dropping it: chose to keep it because
+   it still gives fast, `SiteGenerator`/YAML-independent coverage that `write()`'s
+   exclusion check consults whatever `AssetFingerprintExclusions` value is set on the
+   pipeline, not just the zero-arg built-in-only default (that distinction isn't
+   otherwise pinned — every other `AssetPipelineTests` case either uses the default or
+   exercises a built-in pattern like `robots.txt`). Renamed
+   `testUserSuppliedFingerprintExcludePatternExemptsAFile` to
+   `testWriteGuardHonoursANonBuiltInExclusionPattern` and rewrote its comment to state
+   plainly that it does not exercise the config-to-pipeline wiring, pointing at the new
+   end-to-end test for that.
+
+**Verification:**
+
+Command: `swift test --filter "AssetPipelineTests|AssetFingerprintIntegrationTests" 2>&1 | tail -20`
+
+```
+Test Suite 'AssetPipelineTests' passed ... Executed 16 tests, with 0 failures (0 unexpected)
+Test Suite 'HirundoPackageTests.xctest' passed ... Executed 21 tests, with 0 failures (0 unexpected)
+Test Suite 'Selected tests' passed ... Executed 21 tests, with 0 failures (0 unexpected)
+```
+
+Command: `swift test 2>&1 | tail -10`
+
+```
+Test Suite 'HirundoPackageTests.xctest' passed at 2026-09-06 12:05:45.311.
+	 Executed 636 tests, with 0 failures (0 unexpected) in 15.915 (15.971) seconds
+Test Suite 'All tests' passed at 2026-09-06 12:05:45.311.
+	 Executed 636 tests, with 0 failures (0 unexpected) in 15.915 (15.972) seconds
+```
+
+636 = 635 (previous total) + 1 new test (the rename doesn't change the count).
+`swift build` clean.
+
+Committed as `<see commit history>` (`test: cover the config-to-pipeline fingerprint
+exclusion wiring end-to-end`).

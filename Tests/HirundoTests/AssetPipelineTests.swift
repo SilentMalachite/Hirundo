@@ -358,8 +358,13 @@ final class AssetPipelineTests: XCTestCase {
         XCTAssertNotEqual(hashedStylesheet, "css/style.css", "除外対象ではないアセットはハッシュされるべき")
     }
 
-    func testUserSuppliedFingerprintExcludePatternExemptsAFile() throws {
-        // `assets.fingerprintExclude` で追加したパターンも、組み込みパターンと同様に効くべき。
+    func testWriteGuardHonoursANonBuiltInExclusionPattern() throws {
+        // このテストは `AssetPipeline` 単体の話であり、`config.assets.fingerprintExclude` から
+        // `assetPipeline.fingerprintExclusions` への配線（`SiteGenerator.configureAssetPipeline`）
+        // は検証しない ── そちらは `AssetFingerprintIntegrationTests.
+        // testConfigSuppliedFingerprintExcludePatternExemptsAFileEndToEnd` が担う。ここで
+        // 固定するのは、`write()` の除外判定が組み込みパターンだけでなく
+        // `fingerprintExclusions` にセットされた任意のパターンにも従うこと。
         let sourceDir = tempDir.appendingPathComponent("source")
         let destDir = tempDir.appendingPathComponent("dest")
         try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
