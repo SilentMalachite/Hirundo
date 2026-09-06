@@ -239,6 +239,32 @@ final class AssetFingerprintIntegrationTests: XCTestCase {
         XCTAssertEqual(content, original, ".htm ファイルは書き換え対象から外れているべき")
     }
 
+    /// パス2は全 CSS を同時に扱うため、CSS→CSS の `@import url(...)` は常に未解決のまま残る
+    /// （`AssetPipelineTests.testCSSToCSSReferenceIsLeftUnresolved` が固定済み）。そのとき
+    /// `AssetPipeline` がファイルと参照先を名指しした警告を stderr に1行書くはずだが、
+    /// 未検証だった。
+    func testUnresolvedCSSToCSSImportWarnsOnStderr() async throws {
+        try write(
+            "@import url(\"other.css\");\nbody{background:url(../images/logo.png)}",
+            to: "static/css/style.css"
+        )
+
+        let generator = try SiteGenerator(projectPath: projectPath)
+
+        let stderrOutput = try await capturingStandardError {
+            try await generator.build()
+        }
+
+        XCTAssertTrue(
+            stderrOutput.contains("css/style.css"),
+            "警告がファイルを名指ししていない: \(stderrOutput)"
+        )
+        XCTAssertTrue(
+            stderrOutput.contains("other.css"),
+            "警告が未解決の参照を名指ししていない: \(stderrOutput)"
+        )
+    }
+
     // MARK: - stderr capture
 
     /// `body` の実行中だけ stderr をパイプにつなぎ替えて、そこに書かれたものを文字列で返す。

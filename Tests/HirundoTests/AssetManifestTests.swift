@@ -48,6 +48,15 @@ final class AssetManifestTests: XCTestCase {
         )
     }
 
+    func testRewritesRelativeReferenceResolvedFromTheOutputRoot() {
+        // `directory` が空文字列（出力ルート直下のページから）でも、プレーンな相対参照は
+        // 通常どおり解決されるべき。ルート絶対参照（`/images/logo.png`）とは別の経路。
+        XCTAssertEqual(
+            manifest.rewrite(reference: "images/logo.png", inDirectory: ""),
+            "images/logo-1b4d0f77c2ae8e93.png"
+        )
+    }
+
     func testSkipsReferenceThatEscapesTheOutputRoot() {
         XCTAssertNil(manifest.rewrite(reference: "../../../etc/passwd", inDirectory: "css"))
     }

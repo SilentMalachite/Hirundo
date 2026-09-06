@@ -153,6 +153,30 @@ final class AssetReferenceRewriterTests: XCTestCase {
         )
     }
 
+    func testRewritesSingleQuotedAttributeValue() {
+        XCTAssertEqual(
+            AssetReferenceRewriter.rewriteHTML(
+                "<link href='/css/style.css'>",
+                manifest: manifest,
+                inDirectory: ""
+            ),
+            "<link href='/css/style-9f2a1c04b7e3d5a1.css'>"
+        )
+    }
+
+    func testFindsTagEndPastAGreaterThanInAQuotedAttributeValue() {
+        // `title` の値の中の `>` をタグの終わりと誤認すると、その後ろの `href` は
+        // タグの外の地の文として扱われ、書き換えられないまま残る。
+        XCTAssertEqual(
+            AssetReferenceRewriter.rewriteHTML(
+                "<a title=\"1 > 2\" href=\"/css/style.css\">",
+                manifest: manifest,
+                inDirectory: ""
+            ),
+            "<a title=\"1 > 2\" href=\"/css/style-9f2a1c04b7e3d5a1.css\">"
+        )
+    }
+
     func testRewritesRelativeReferenceFromNestedPage() {
         XCTAssertEqual(
             AssetReferenceRewriter.rewriteHTML(

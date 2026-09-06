@@ -304,6 +304,50 @@ final class AssetPipelineTests: XCTestCase {
         )
     }
 
+    func testJSFingerprintCoversTheMinifiedBytesNotTheSource() throws {
+        // CSS 側は `testFingerprintCoversTheProcessedBytesNotTheSource` で固定済み。JS も同じ
+        // 性質（ハッシュは最小化後のバイト列に対して取られる）を持つはずだが、そちらは
+        // 未検証だった。同じソースを最小化あり・なしで処理し、出力名のハッシュが違うことと、
+        // そのハッシュが実際にディスクへ書いたバイト列と一致することの両方を確かめる。
+        let sourceDir = tempDir.appendingPathComponent("source")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        let jsContent = """
+        function greet() {
+            console.log("hello");
+        }
+        """
+        try jsContent.write(
+            to: sourceDir.appendingPathComponent("app.js"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let plain = AssetPipeline()
+        plain.enableFingerprinting = true
+        let plainDest = tempDir.appendingPathComponent("dest-plain-js")
+        let plainManifest = try plain.processAssets(from: sourceDir.path, to: plainDest.path)
+
+        let minified = AssetPipeline()
+        minified.enableFingerprinting = true
+        minified.jsOptions.minify = true
+        let minifiedDest = tempDir.appendingPathComponent("dest-minified-js")
+        let minifiedManifest = try minified.processAssets(from: sourceDir.path, to: minifiedDest.path)
+
+        XCTAssertNotEqual(
+            plainManifest["app.js"],
+            minifiedManifest["app.js"],
+            "最小化でバイト列が変わったのにハッシュが同じなのは、ソースをハッシュしている証拠"
+        )
+
+        let minifiedPath = try XCTUnwrap(minifiedManifest["app.js"])
+        let bytesOnDisk = try Data(contentsOf: minifiedDest.appendingPathComponent(minifiedPath))
+        let expectedFingerprint = AssetProcessor().generateFingerprint(for: bytesOnDisk)
+        XCTAssertTrue(
+            minifiedPath.contains(expectedFingerprint),
+            "出力名 \(minifiedPath) が実際に書き込んだバイト列のハッシュ \(expectedFingerprint) を含んでいない"
+        )
+    }
+
     func testCSSHashCoversTheRewrittenBytes() throws {
         // CSS が参照する画像の中身だけを変える。画像のハッシュが変われば、書き換え後の CSS の
         // バイト列も変わり、CSS 自身のハッシュも変わらなければならない。
