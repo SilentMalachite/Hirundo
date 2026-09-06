@@ -185,6 +185,65 @@ final class AssetPrunerTests: XCTestCase {
         XCTAssertTrue(exists("CNAME"))
     }
 
+    // MARK: - 前回のマニフェストからの削除
+
+    func testPrunesAnAssetWhoseWholeDirectoryWasDeletedFromStatic() throws {
+        // static/images ごと消したあとの非cleanビルド。現在の static のトップレベル一覧には
+        // images が無いので、前回のマニフェストだけが古い出力を知っている。
+        try write("secret", to: "images/secret-0000000000000000.pdf", under: outputDir)
+
+        try AssetPruner.prune(
+            outputDirectory: outputDir,
+            staticDirectory: staticDir,
+            keeping: AssetManifest(),
+            previous: AssetManifest(["images/secret.pdf": "images/secret-0000000000000000.pdf"])
+        )
+
+        XCTAssertFalse(exists("images/secret-0000000000000000.pdf"))
+    }
+
+    func testKeepsAPreviousOutputThatIsStillCurrent() throws {
+        try write("current", to: "images/logo-0000000000000000.png", under: outputDir)
+
+        try AssetPruner.prune(
+            outputDirectory: outputDir,
+            staticDirectory: staticDir,
+            keeping: AssetManifest(["images/logo.png": "images/logo-0000000000000000.png"]),
+            previous: AssetManifest(["images/logo.png": "images/logo-0000000000000000.png"])
+        )
+
+        XCTAssertTrue(exists("images/logo-0000000000000000.png"))
+    }
+
+    func testIgnoresAPreviousEntryThatPointsOutsideTheOutputDirectory() throws {
+        let outside = tempDir.appendingPathComponent("outside-0000000000000000.css")
+        try "keep".write(to: outside, atomically: true, encoding: .utf8)
+
+        try AssetPruner.prune(
+            outputDirectory: outputDir,
+            staticDirectory: staticDir,
+            keeping: AssetManifest(),
+            previous: AssetManifest(["x.css": "../outside-0000000000000000.css"])
+        )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outside.path))
+    }
+
+    func testIgnoresAPreviousEntryWhoseNameIsNotFingerprinted() throws {
+        // フィンガープリントが付かないアセット（robots.txt など）は、前回の値がキーと等しい。
+        // 消してよいのはこのビルドが作り直せるものだけなので、名前で選り分ける。
+        try write("User-agent: *", to: "robots.txt", under: outputDir)
+
+        try AssetPruner.prune(
+            outputDirectory: outputDir,
+            staticDirectory: staticDir,
+            keeping: AssetManifest(),
+            previous: AssetManifest(["robots.txt": "robots.txt"])
+        )
+
+        XCTAssertTrue(exists("robots.txt"))
+    }
+
     func testKeepsADirectoryWhoseNameLooksLikeAFingerprintedFile() throws {
         try "User-agent: *".write(to: staticDir.appendingPathComponent("robots.txt"), atomically: true, encoding: .utf8)
         try FileManager.default.createDirectory(

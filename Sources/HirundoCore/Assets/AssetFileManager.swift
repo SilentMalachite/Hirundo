@@ -20,26 +20,68 @@ public class AssetFileManager {
         return try JSONDecoder().decode(AssetManifest.self, from: data)
     }
     
-    /// Processes a directory recursively
+    /// Processes a directory recursively.
+    ///
+    /// シンボリックリンクは**解決先がソースディレクトリの中に収まる場合だけ**たどる。外を指す
+    /// リンクは警告を出して読まずに飛ばす。`static/leak.txt -> /etc/passwd` のようなリンクを
+    /// 含むツリーをビルドしても、リンク先の中身が公開成果物へ出ていかないようにするため。
     public func processDirectory(
         _ directoryURL: URL,
         sourcePath: String,
         excludePatterns: [String],
         onFile: (URL, String) throws -> Void
     ) throws {
+        let rootPath = URL(fileURLWithPath: sourcePath).resolvingSymlinksInPath().path
+        var visitedDirectories: Set<String> = []
+        try processDirectory(
+            directoryURL,
+            sourcePath: sourcePath,
+            rootPath: rootPath,
+            excludePatterns: excludePatterns,
+            visitedDirectories: &visitedDirectories,
+            onFile: onFile
+        )
+    }
+
+    private func processDirectory(
+        _ directoryURL: URL,
+        sourcePath: String,
+        rootPath: String,
+        excludePatterns: [String],
+        visitedDirectories: inout Set<String>,
+        onFile: (URL, String) throws -> Void
+    ) throws {
+        // リンクがソース内の祖先ディレクトリを指している場合の無限再帰を止める。
+        guard visitedDirectories.insert(directoryURL.resolvingSymlinksInPath().path).inserted else { return }
+
         let contents = try fileManager.contentsOfDirectory(
             at: directoryURL,
-            includingPropertiesForKeys: [.isDirectoryKey]
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]
         )
 
         for itemURL in contents {
-            let isDirectory = (try? itemURL.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            let values = try? itemURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            let isSymbolicLink = values?.isSymbolicLink ?? false
+
+            if isSymbolicLink && !isContained(itemURL, in: rootPath) {
+                warn("\(itemURL.lastPathComponent): symbolic link resolves outside "
+                     + "\(rootPath); skipped")
+                continue
+            }
+
+            // リンク自身の `.isDirectoryKey` は環境によって解決されないため、リンクのときは
+            // 解決先で種別を判定する。
+            let isDirectory = isSymbolicLink
+                ? (try? itemURL.resolvingSymlinksInPath().resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+                : values?.isDirectory ?? false
 
             if isDirectory {
                 try processDirectory(
                     itemURL,
                     sourcePath: sourcePath,
+                    rootPath: rootPath,
                     excludePatterns: excludePatterns,
+                    visitedDirectories: &visitedDirectories,
                     onFile: onFile
                 )
             } else {
@@ -54,6 +96,18 @@ public class AssetFileManager {
                 try onFile(itemURL, relativePath)
             }
         }
+    }
+
+    /// 解決先が `rootPath` の中（またはそれ自身）か。
+    private func isContained(_ url: URL, in rootPath: String) -> Bool {
+        let resolved = url.resolvingSymlinksInPath().path
+        if resolved == rootPath { return true }
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        return resolved.hasPrefix(prefix)
+    }
+
+    private func warn(_ message: String) {
+        try? FileHandle.standardError.write(contentsOf: Data("⚠️  \(message)\n".utf8))
     }
 
     /// Checks if path should be excluded.

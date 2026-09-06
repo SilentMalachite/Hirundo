@@ -40,22 +40,30 @@ public struct AssetManifest: Equatable, Codable {
     /// マニフェストに無い参照、値がキーと等しい参照はすべて `nil` になる。
     public func rewrite(reference: String, inDirectory directory: String) -> String? {
         let (path, suffix) = Self.splitSuffix(reference)
-        guard !path.isEmpty else { return nil }
-        guard !path.hasPrefix("//"), !Self.hasScheme(path) else { return nil }
-
-        let isRootRelative = path.hasPrefix("/")
-        let candidate = isRootRelative
-            ? String(path.dropFirst())
-            : (directory.isEmpty ? path : directory + "/" + path)
-
-        guard let key = Self.normalize(candidate),
+        guard let key = Self.resolveKey(reference: reference, inDirectory: directory),
               let value = entries[key],
               value != key else { return nil }
 
-        if isRootRelative {
+        if path.hasPrefix("/") {
             return "/" + value + suffix
         }
         return Self.relativePath(from: directory, to: value) + suffix
+    }
+
+    /// `directory` にあるファイルの中の参照を、マニフェストのキー（static からの相対パス）に
+    /// 解決する。外部 URL や出力ルートの外に出る参照は `nil`。
+    ///
+    /// 書き換え（`rewrite`）と、スタイルシート同士の依存関係の解決が同じ規則を使うように、
+    /// キーの求め方はここ1箇所に置く。
+    internal static func resolveKey(reference: String, inDirectory directory: String) -> String? {
+        let (path, _) = splitSuffix(reference)
+        guard !path.isEmpty else { return nil }
+        guard !path.hasPrefix("//"), !hasScheme(path) else { return nil }
+
+        let candidate = path.hasPrefix("/")
+            ? String(path.dropFirst())
+            : (directory.isEmpty ? path : directory + "/" + path)
+        return normalize(candidate)
     }
 
     /// 相対パスの親ディレクトリ。ルート直下なら空文字列。

@@ -307,11 +307,8 @@ final class AssetPipelineTests: XCTestCase {
         )
     }
 
-    func testCSSToCSSReferenceIsLeftUnresolved() throws {
-        // パス2は全 CSS を同時に扱うため、CSS が別の CSS を url(...) / @import で参照していても
-        // 参照先のハッシュ名はまだ決まっていない。ファイルシステムの列挙順に関わらず、常に
-        // 無変更で残らなければならない（パス1完了時点のマニフェストには CSS のエントリが
-        // 一つも無いので、この振る舞いは処理順に依存しない）。
+    func testResolvesACSSToCSSReferenceByProcessingDependenciesFirst() throws {
+        // 参照される側のスタイルシートを先に処理すれば、参照する側はそのハッシュ名を書ける。
         let sourceDir = tempDir.appendingPathComponent("source")
         let destDir = tempDir.appendingPathComponent("dest")
         try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
@@ -331,12 +328,249 @@ final class AssetPipelineTests: XCTestCase {
 
         let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
 
-        let outputPath = try XCTUnwrap(manifest["style.css"])
-        let outputContent = try String(contentsOf: destDir.appendingPathComponent(outputPath), encoding: .utf8)
+        let themeOutput = try XCTUnwrap(manifest["theme.css"])
+        XCTAssertNotEqual(themeOutput, "theme.css", "前提: theme.css はハッシュ名になる")
 
+        let styleOutput = try XCTUnwrap(manifest["style.css"])
+        let content = try String(contentsOf: destDir.appendingPathComponent(styleOutput), encoding: .utf8)
         XCTAssertTrue(
-            outputContent.contains("url(\"theme.css\")"),
-            "CSS→CSS参照はハッシュ名を解決できないため無変更で残るべき。実際: \(outputContent)"
+            content.contains("url(\"\(themeOutput)\")"),
+            "CSS→CSS参照は書き換えられるべき。実際: \(content)"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destDir.appendingPathComponent(themeOutput).path))
+    }
+
+    func testResolvesABareCSSImport() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        pipeline.enableFingerprinting = true
+
+        try "@import \"theme.css\";\nbody { color: red; }".write(
+            to: sourceDir.appendingPathComponent("style.css"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "body { margin: 0; }".write(
+            to: sourceDir.appendingPathComponent("theme.css"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        let themeOutput = try XCTUnwrap(manifest["theme.css"])
+        let styleOutput = try XCTUnwrap(manifest["style.css"])
+        let content = try String(contentsOf: destDir.appendingPathComponent(styleOutput), encoding: .utf8)
+        XCTAssertTrue(content.contains("\"\(themeOutput)\""), "実際: \(content)")
+    }
+
+    func testCyclicCSSImportsKeepTheirOriginalNames() throws {
+        // 互いに参照しあう CSS はどちらを先に処理してもハッシュ名を確定できない。参照が壊れる
+        // くらいならフィンガープリントを諦めて、元の名前のまま出力する。
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        pipeline.enableFingerprinting = true
+
+        try "@import \"b.css\";\na { color: red; }".write(
+            to: sourceDir.appendingPathComponent("a.css"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "@import \"a.css\";\nb { color: blue; }".write(
+            to: sourceDir.appendingPathComponent("b.css"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        XCTAssertEqual(manifest["a.css"], "a.css")
+        XCTAssertEqual(manifest["b.css"], "b.css")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destDir.appendingPathComponent("a.css").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destDir.appendingPathComponent("b.css").path))
+
+        let a = try String(contentsOf: destDir.appendingPathComponent("a.css"), encoding: .utf8)
+        XCTAssertTrue(a.contains("\"b.css\""), "参照は元の名前のまま残るべき。実際: \(a)")
+    }
+
+    func testACSSFileThatImportsItselfKeepsItsOriginalName() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        pipeline.enableFingerprinting = true
+        try "@import \"loop.css\";\nbody{}".write(
+            to: sourceDir.appendingPathComponent("loop.css"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        XCTAssertEqual(manifest["loop.css"], "loop.css")
+    }
+
+    func testManifestPointsAtTheFileThatWasActuallyWritten() throws {
+        // 出力ツリーの中にシンボリックリンクがあると、書き込み先はソースの相対パスからは
+        // 導けない。マニフェストの値は実際に書いた場所でなければ、書き換えた参照が 404 になる。
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(
+            at: sourceDir.appendingPathComponent("images"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: destDir.appendingPathComponent("cache"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: destDir.appendingPathComponent("images"),
+            withIntermediateDirectories: true
+        )
+        try Data("icon".utf8).write(to: destDir.appendingPathComponent("cache/icon.png"))
+        try FileManager.default.createSymbolicLink(
+            at: destDir.appendingPathComponent("images/logo.png"),
+            withDestinationURL: destDir.appendingPathComponent("cache/icon.png")
+        )
+
+        pipeline.enableFingerprinting = true
+        try Data("logo".utf8).write(to: sourceDir.appendingPathComponent("images/logo.png"))
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        let value = try XCTUnwrap(manifest["images/logo.png"])
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: destDir.appendingPathComponent(value).path),
+            "マニフェストの値が実在しない: \(value)"
+        )
+    }
+
+    // MARK: - 固定 URL のアセット
+
+    func testKeepsFixedUrlAssetsUnfingerprinted() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(
+            at: sourceDir.appendingPathComponent(".well-known/acme-challenge"),
+            withIntermediateDirectories: true
+        )
+        pipeline.enableFingerprinting = true
+
+        try "User-agent: *".write(
+            to: sourceDir.appendingPathComponent("robots.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "example.com".write(
+            to: sourceDir.appendingPathComponent("CNAME"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "token".write(
+            to: sourceDir.appendingPathComponent(".well-known/acme-challenge/abc123"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        for path in ["robots.txt", "CNAME", ".well-known/acme-challenge/abc123"] {
+            XCTAssertEqual(manifest[path], path, "\(path) は元の名前で出力されるべき")
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: destDir.appendingPathComponent(path).path),
+                "\(path) が元の名前で存在しない"
+            )
+        }
+    }
+
+    func testFingerprintsAFixedUrlNameThatIsNotAtTheRoot() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(
+            at: sourceDir.appendingPathComponent("docs"),
+            withIntermediateDirectories: true
+        )
+        pipeline.enableFingerprinting = true
+        try "User-agent: *".write(
+            to: sourceDir.appendingPathComponent("docs/robots.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        let value = try XCTUnwrap(manifest["docs/robots.txt"])
+        XCTAssertNotEqual(value, "docs/robots.txt", "ルート直下でなければ固定URLの契約は無い")
+    }
+
+    // MARK: - シンボリックリンク
+
+    func testSkipsAFileSymlinkPointingOutsideTheSourceDirectory() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        let outside = tempDir.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+
+        let secret = outside.appendingPathComponent("secret.txt")
+        try "SECRET".write(to: secret, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(
+            at: sourceDir.appendingPathComponent("leak.txt"),
+            withDestinationURL: secret
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        XCTAssertNil(manifest["leak.txt"], "外を指すリンクはマニフェストに載せない")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: destDir.appendingPathComponent("leak.txt").path),
+            "リンク先の中身が出力へコピーされてはならない"
+        )
+    }
+
+    func testSkipsADirectorySymlinkPointingOutsideTheSourceDirectory() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        let outside = tempDir.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try "SECRET".write(to: outside.appendingPathComponent("secret.txt"), atomically: true, encoding: .utf8)
+
+        try FileManager.default.createSymbolicLink(
+            at: sourceDir.appendingPathComponent("vendor"),
+            withDestinationURL: outside
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        XCTAssertNil(manifest["vendor/secret.txt"])
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: destDir.appendingPathComponent("vendor/secret.txt").path)
+        )
+    }
+
+    func testFollowsASymlinkThatStaysInsideTheSourceDirectory() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let real = sourceDir.appendingPathComponent("real.txt")
+        try "inside".write(to: real, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(
+            at: sourceDir.appendingPathComponent("alias.txt"),
+            withDestinationURL: real
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        XCTAssertEqual(manifest["alias.txt"], "alias.txt")
+        XCTAssertEqual(
+            try String(contentsOf: destDir.appendingPathComponent("alias.txt"), encoding: .utf8),
+            "inside"
         )
     }
 }

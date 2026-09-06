@@ -9,6 +9,11 @@ import Foundation
 /// ハッシュはそのファイルの**最終的な出力バイト列**に対して取られる。CSS の最終バイト列は
 /// `url(...)` を書き換えた後にしか確定しないため、処理は「CSS 以外 → CSS」の2パスに分かれる。
 /// 生成された HTML の書き換えは `SiteGenerator` の `asset references` ステップが行う。
+///
+/// 例外が2つある。どちらも「参照を書き換えられないので名前を変えると壊れる」ものに限る。
+///
+/// - `AssetNamePolicy` が挙げる固定 URL のアセット（`robots.txt`、`.well-known/**` など）
+/// - 互いに（あるいは自分自身を）参照しあうスタイルシート
 public class AssetPipeline {
     private let fileManager = FileManager.default
 
@@ -33,7 +38,8 @@ public class AssetPipeline {
     /// その書き換えには参照先のハッシュ名が既に決まっている必要があるため、順序に依存がある。
     ///
     /// 1. CSS 以外（画像・JS・その他）を処理し、ハッシュして書き出す
-    /// 2. CSS を処理し、1で確定したマニフェストで `url(...)` を書き換えてからハッシュする
+    /// 2. CSS を依存順（参照される側が先）に処理し、`url(...)` と `@import` を書き換えてから
+    ///    ハッシュする
     /// 3. HTML の書き換え。これはこのクラスの外、`SiteGenerator` の finalization ステップ
     ///
     /// - Returns: キーが static からの相対パス、値が出力ディレクトリからの相対パスのマニフェスト。
@@ -67,20 +73,9 @@ public class AssetPipeline {
             )
         }
 
-        // パス2: CSS。全 CSS を同時に扱うため、あるスタイルシートが処理順で先に来た別の
-        // スタイルシートを `url(...)` で参照していても、そのハッシュ名はまだ決まっていない
-        // （CSS→CSS参照は解決しない、が仕様）。パス1完了時点のマニフェストを固定して使うことで、
-        // 列挙順に処理結果が左右されないようにする。
-        let pass1Manifest = manifest
-        for stylesheet in stylesheets {
-            try processStylesheet(
-                stylesheet.url,
-                relativePath: stylesheet.relativePath,
-                destinationPath: destinationPath,
-                pass1Manifest: pass1Manifest,
-                manifest: &manifest
-            )
-        }
+        // パス2: CSS。参照先のハッシュ名が先に決まっている必要があるため、スタイルシート同士の
+        // 依存関係をたどって参照される側から順に処理する。
+        try processStylesheets(stylesheets, destinationPath: destinationPath, manifest: &manifest)
 
         return manifest
     }
@@ -121,45 +116,138 @@ public class AssetPipeline {
         try write(data, relativePath: relativePath, destinationPath: destinationPath, manifest: &manifest)
     }
 
-    /// CSS。最小化してから `url(...)` を書き換え、**その結果**をハッシュする。
+    /// CSS を依存順に処理する。
+    ///
+    /// あるスタイルシートの `url(...)` / `@import` を書き換えるには、参照先のスタイルシートの
+    /// ハッシュ名が既に決まっていなければならない。参照される側から順に処理すればそれが満たせる。
+    ///
+    /// 互いに参照しあう（あるいは自分自身を参照する）スタイルシートだけは、どう並べても満たせない。
+    /// そこだけはフィンガープリントを諦めて元の名前で出力する。参照は書き換えられないまま残るが、
+    /// 参照先も元の名前で出力されるので壊れない。
+    private func processStylesheets(
+        _ stylesheets: [(url: URL, relativePath: String)],
+        destinationPath: String,
+        manifest: inout AssetManifest
+    ) throws {
+        // 最小化まで済ませた内容を持ち回る。依存関係の抽出と書き換えが同じバイト列を見るため。
+        var contents: [String: String] = [:]
+        var keys: [String] = []
+        for stylesheet in stylesheets {
+            let raw = try String(contentsOf: stylesheet.url, encoding: .utf8)
+            contents[stylesheet.relativePath] = processor.processCSS(raw, options: cssOptions)
+            keys.append(stylesheet.relativePath)
+        }
+
+        var dependencies: [String: [String]] = [:]
+        for key in keys {
+            let directory = AssetManifest.parentDirectory(of: key)
+            dependencies[key] = AssetReferenceRewriter.cssReferences(in: contents[key] ?? "")
+                .compactMap { AssetManifest.resolveKey(reference: $0, inDirectory: directory) }
+                .filter { contents[$0] != nil }
+        }
+
+        let (order, cyclic) = Self.dependencyOrder(of: keys, dependencies: dependencies)
+        if enableFingerprinting && !cyclic.isEmpty {
+            warn("stylesheets import each other (\(cyclic.sorted().joined(separator: ", "))); "
+                 + "they keep their original names")
+        }
+
+        let knownStylesheets = Set(keys)
+        for key in order {
+            guard let content = contents[key] else { continue }
+            try processStylesheet(
+                content,
+                relativePath: key,
+                destinationPath: destinationPath,
+                allowFingerprint: !cyclic.contains(key),
+                knownStylesheets: knownStylesheets,
+                manifest: &manifest
+            )
+        }
+    }
+
+    /// 参照される側が先に来る順序と、順序では解決できない（閉路にいる）キーの集合。
+    private static func dependencyOrder(
+        of keys: [String],
+        dependencies: [String: [String]]
+    ) -> (order: [String], cyclic: Set<String>) {
+        enum Mark { case visiting, done }
+        var marks: [String: Mark] = [:]
+        var order: [String] = []
+        var cyclic: Set<String> = []
+        var stack: [String] = []
+
+        func visit(_ key: String) {
+            switch marks[key] {
+            case .done:
+                return
+            case .visiting:
+                // 後退辺。スタックの key 以降がまるごと閉路。
+                if let start = stack.firstIndex(of: key) {
+                    cyclic.formUnion(stack[start...])
+                }
+                return
+            case nil:
+                break
+            }
+
+            marks[key] = .visiting
+            stack.append(key)
+            for dependency in dependencies[key] ?? [] {
+                visit(dependency)
+            }
+            stack.removeLast()
+            marks[key] = .done
+            order.append(key)
+        }
+
+        for key in keys { visit(key) }
+        return (order, cyclic)
+    }
+
+    /// 最小化済みの CSS の参照を書き換え、**その結果**をハッシュして書き出す。
     ///
     /// `url(...)` の書き換えは、フィンガープリントが無効なときは必ず no-op（マニフェストの
     /// 値はすべてキーと等しいので `AssetManifest.rewrite` は常に `nil` を返す）。それにも
     /// 関わらず書き換えと警告を無条件に走らせると、フィンガープリントを有効にしていない
-    /// 既定のビルドでも「CSS→CSS 参照は解決できない」という無関係な警告が出てしまうため、
-    /// ここで `enableFingerprinting` を見て丸ごとスキップする。
+    /// 既定のビルドでも無関係な警告が出てしまうため、ここで `enableFingerprinting` を見て
+    /// 丸ごとスキップする。
     private func processStylesheet(
-        _ fileURL: URL,
+        _ content: String,
         relativePath: String,
         destinationPath: String,
-        pass1Manifest: AssetManifest,
+        allowFingerprint: Bool,
+        knownStylesheets: Set<String>,
         manifest: inout AssetManifest
     ) throws {
-        let content = try String(contentsOf: fileURL, encoding: .utf8)
-        let processed = processor.processCSS(content, options: cssOptions)
-
         let finalContent: String
         if enableFingerprinting {
+            let directory = AssetManifest.parentDirectory(of: relativePath)
             let result = AssetReferenceRewriter.rewriteCSS(
-                processed,
-                manifest: pass1Manifest,
-                inDirectory: AssetManifest.parentDirectory(of: relativePath)
+                content,
+                manifest: manifest,
+                inDirectory: directory
             )
 
+            // 閉路にいるスタイルシートへの参照もここに現れるが、それは上で1度報告済みで、かつ
+            // 参照先も元の名前で出るので壊れていない。報告するのは行き先が無い参照だけ。
             for reference in result.unresolvedStylesheetReferences {
-                warn("\(relativePath): url(\(reference)) points at another stylesheet; "
-                     + "fingerprinting does not rewrite CSS-to-CSS references")
+                let key = AssetManifest.resolveKey(reference: reference, inDirectory: directory)
+                guard key == nil || !knownStylesheets.contains(key!) else { continue }
+                warn("\(relativePath): \(reference) does not resolve to a stylesheet in "
+                     + "the static directory; left unchanged")
             }
 
             finalContent = result.content
         } else {
-            finalContent = processed
+            finalContent = content
         }
 
         try write(
             Data(finalContent.utf8),
             relativePath: relativePath,
             destinationPath: destinationPath,
+            allowFingerprint: allowFingerprint,
             manifest: &manifest
         )
     }
@@ -169,6 +257,7 @@ public class AssetPipeline {
         _ data: Data,
         relativePath: String,
         destinationPath: String,
+        allowFingerprint: Bool = true,
         manifest: inout AssetManifest
     ) throws {
         let destinationRootURL = URL(fileURLWithPath: destinationPath).resolvingSymlinksInPath()
@@ -176,24 +265,25 @@ public class AssetPipeline {
             .appendingPathComponent(relativePath)
             .resolvingSymlinksInPath()
 
-        let rootPath = destinationRootURL.path.hasSuffix("/")
-            ? destinationRootURL.path
-            : destinationRootURL.path + "/"
-        guard candidateURL.path == destinationRootURL.path || candidateURL.path.hasPrefix(rootPath) else {
+        guard AssetPruner.relativePath(of: candidateURL, under: destinationRootURL) != nil else {
             throw AssetPipelineError.processingFailed(
                 "Output path escapes destination directory: \(candidateURL.path)"
             )
         }
 
         var outputURL = candidateURL
-        var outputRelativePath = relativePath
-        if enableFingerprinting {
+        if enableFingerprinting && allowFingerprint && !AssetNamePolicy.requiresStableName(relativePath) {
             let fingerprint = processor.generateFingerprint(for: data)
             outputURL = URL(fileURLWithPath: processor.addFingerprint(to: candidateURL.path, fingerprint: fingerprint))
-            let directory = AssetManifest.parentDirectory(of: relativePath)
-            outputRelativePath = directory.isEmpty
-                ? outputURL.lastPathComponent
-                : directory + "/" + outputURL.lastPathComponent
+        }
+
+        // マニフェストの値は「実際に書いた場所」でなければならない。出力ツリーの中に
+        // シンボリックリンクがあると書き込み先はソースの相対パスからは導けないので、
+        // 確定した書き込み先から逆算する。
+        guard let outputRelativePath = AssetPruner.relativePath(of: outputURL, under: destinationRootURL) else {
+            throw AssetPipelineError.processingFailed(
+                "Output path escapes destination directory: \(outputURL.path)"
+            )
         }
 
         try fileManager.createDirectory(

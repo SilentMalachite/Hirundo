@@ -549,6 +549,11 @@ external code is not supported, for security and simplicity.
 
 Note that `minify` applies to **CSS and JS assets only** — generated HTML is not minified.
 
+The asset pipeline reads from `static/` and follows a symbolic link only while it resolves
+*inside* `static/`. A link that points outside is skipped with a warning on stderr, so
+`static/vendor -> ../node_modules/pkg/dist` publishes nothing and `static/leak.txt -> /etc/passwd`
+cannot copy its target into the built site. Copy or vendor the files you want published.
+
 Enabling `fingerprint` writes `static/` assets under content-hashed names, such as
 `style-9f2a1c04b7e3d5a1.css`, and rewrites the generated HTML's `href` / `src` / `srcset`,
 CSS `url(...)`, `<style>` bodies, and `style` attributes to point at those names. The mapping
@@ -570,20 +575,25 @@ There are several limitations:
   an asset stored as `images/my photo.jpg`; it is left unchanged and, once the target has
   been renamed to its hashed form, becomes a dead link. This is one instance of a general
   rule: a reference that fails to resolve against the manifest is passed through silently by
-  design. The build does not warn about it — the CSS-to-CSS case below is the one exception
-  that does.
+  design. The build does not warn about it — a stylesheet reference that resolves to nothing,
+  described below, is the one exception that does.
 - **References inside JavaScript are not rewritten.** Whether a string like
   `fetch("/images/logo.png")` is a reference cannot be determined statically. Read
   `asset-manifest.json` if you need to reference an asset from JavaScript.
-- **A CSS-to-CSS `@import url(...)` is not rewritten**, because the referenced file's hash
-  is not yet known. Finding one prints a warning.
-- **Fingerprinting renames every file under `static/`, including ones fetched by a fixed,
-  well-known name that no page references** — `robots.txt`, `favicon.ico`, `CNAME`,
-  `_headers`, `_redirects`, and anything under `.well-known/`. Nothing rewrites a reference
-  to one of these because no such reference exists in any page; once the flag is on, each is
-  served only under its hashed name, and a request for the well-known name 404s. Do not
-  enable `features.fingerprint` if your site depends on any of them — a browser's implicit
-  `/favicon.ico` probe is the easiest way to notice this.
+- **Stylesheets that import each other keep their original names.** A CSS-to-CSS reference
+  — `@import url("other.css")` or the bare `@import "other.css"` — is rewritten normally,
+  because stylesheets are processed in dependency order, so a stylesheet's hashed name is
+  already known by the time another one references it. Stylesheets that import each other,
+  or themselves, admit no such order: those keep their original names and their references
+  are left alone, which keeps them resolving. A reference that resolves to no stylesheet at
+  all prints a warning.
+- **Files fetched by a fixed, well-known name are not renamed.** At the output root:
+  `robots.txt`, `sitemap.xml`, `favicon.ico`, `CNAME`, `_headers`, `_redirects`, `ads.txt`,
+  `app-ads.txt`, `sw.js`, and `service-worker.js`; at any depth: everything under
+  `.well-known/`. These are fetched by URL rather than through a reference a build could
+  rewrite, so each is copied under the name it already has and its manifest entry maps the
+  name to itself. The same name inside a subdirectory (`docs/robots.txt`, `js/sw.js`) is
+  fingerprinted like any other asset.
 
 Archive, category, and tag pages are controlled separately, by the `blog` block.
 
