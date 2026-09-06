@@ -47,14 +47,28 @@ public struct AssetFingerprintExclusions: Equatable, Sendable {
         guard !pattern.isEmpty else { return false }
 
         if pattern.contains("/") {
+            let patternSegments = collapsingConsecutiveDoubleStars(
+                pattern.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+            )
             return matchSegments(
-                pattern: pattern.split(separator: "/", omittingEmptySubsequences: false).map(String.init),
+                pattern: patternSegments,
                 path: path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
             )
         }
 
         let lastComponent = path.split(separator: "/", omittingEmptySubsequences: false).last.map(String.init) ?? path
         return matchSegment(pattern: pattern, text: lastComponent)
+    }
+
+    /// 連続する `**` セグメントを1つに畳む。`a/**/**/b` は `a/**/b` と意味的に同じなので、
+    /// これは近似ではなく厳密な書き換え ── `matchSegments` の `**` 分岐が
+    /// 「隣接する `**` の数だけ組み合わせを試す」形で指数的に遅くなるのを、原因ごと取り除く。
+    private static func collapsingConsecutiveDoubleStars(_ segments: [String]) -> [String] {
+        var result: [String] = []
+        for segment in segments where !(segment == "**" && result.last == "**") {
+            result.append(segment)
+        }
+        return result
     }
 
     /// パターンのセグメント列とパスのセグメント列を先頭から再帰的に比較する。
@@ -84,7 +98,12 @@ public struct AssetFingerprintExclusions: Equatable, Sendable {
 
     /// 1セグメント内での `*` ワイルドカード比較（`*` は空文字列にも一致する）。
     private static func matchSegment(pattern: String, text: String) -> Bool {
-        let parts = pattern.split(separator: "*", omittingEmptySubsequences: false).map(String.init)
+        // 隣接する `*` を1つに畳んでおく。畳まないと `**` や `a**b` を `*` で分割したとき
+        // 空文字列のパートができ、`String.range(of: "")` が `nil` を返すせいで
+        // 常に不一致になってしまう（バラの `**` が何にも一致しなくなる、という形で顕在化する）。
+        let parts = collapsingConsecutiveStars(pattern)
+            .split(separator: "*", omittingEmptySubsequences: false)
+            .map(String.init)
 
         // `*` を含まないパターンは完全一致のみ。
         if parts.count == 1 { return text == pattern }
@@ -104,5 +123,20 @@ public struct AssetFingerprintExclusions: Equatable, Sendable {
             remaining = remaining[range.upperBound...]
         }
         return true
+    }
+
+    /// 連続する `*` を1つに畳む。`**` は単体の `*` と同じ（＝すべてに一致する）ものとして
+    /// 扱いたいが、畳まずに `*` で分割すると隣接する `*` の間に空文字列のパートができ、
+    /// `String.range(of: "")` が `nil` を返すために不一致になってしまう。
+    private static func collapsingConsecutiveStars(_ pattern: String) -> String {
+        var result = ""
+        var previousWasStar = false
+        for character in pattern {
+            let isStar = character == "*"
+            if isStar && previousWasStar { continue }
+            result.append(character)
+            previousWasStar = isStar
+        }
+        return result
     }
 }

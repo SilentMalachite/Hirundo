@@ -102,9 +102,10 @@ final class AssetFingerprintExclusionsTests: XCTestCase {
     // MARK: - builtIn の内容そのもの
 
     func testBuiltInListIsExactlyTheSpecifiedSet() {
+        // 配列そのものを比較する（Set 比較だと重複エントリを見逃す）。
         XCTAssertEqual(
-            Set(AssetFingerprintExclusions.builtIn),
-            Set([
+            AssetFingerprintExclusions.builtIn,
+            [
                 "robots.txt",
                 "favicon.ico",
                 "CNAME",
@@ -112,7 +113,7 @@ final class AssetFingerprintExclusionsTests: XCTestCase {
                 "_redirects",
                 ".htaccess",
                 ".well-known/**",
-            ])
+            ]
         )
     }
 
@@ -149,6 +150,52 @@ final class AssetFingerprintExclusionsTests: XCTestCase {
     func testMatchesDirectlyOnSlashPattern() {
         XCTAssertTrue(AssetFingerprintExclusions.matches(pattern: "a/**/b.txt", path: "a/x/b.txt"))
         XCTAssertFalse(AssetFingerprintExclusions.matches(pattern: "css/style.css", path: "deep/css/style.css"))
+    }
+
+    // MARK: - 隣接する `*` / `**` (レビューで見つかった回帰)
+
+    func testBareDoubleStarMatchesEveryPath() {
+        // "**" はスラッシュを含まないのでファイル名一致に回されるが、意味としては
+        // 「static 以下すべてを除外する」であるべき ── バラの "*" と同じ挙動になる。
+        let exclusions = AssetFingerprintExclusions(additional: ["**"])
+        XCTAssertTrue(exclusions.excludes("css/style.css"))
+        XCTAssertTrue(exclusions.excludes("robots.txt"))
+        XCTAssertTrue(exclusions.excludes("a/b/c.txt"))
+    }
+
+    func testLeadingDoubleStarSegmentMatchesAnyDepth() {
+        let exclusions = AssetFingerprintExclusions(additional: ["**/x.txt"])
+        XCTAssertTrue(exclusions.excludes("x.txt"), "** は先頭でもゼロ個のセグメントに一致する")
+        XCTAssertTrue(exclusions.excludes("a/b/x.txt"))
+    }
+
+    func testMultipleNonAdjacentDoubleStarSegments() {
+        let exclusions = AssetFingerprintExclusions(additional: ["a/**/b/**/c"])
+        XCTAssertTrue(exclusions.excludes("a/b/c"), "両方の ** が同時にゼロ個のセグメントに一致できる")
+        XCTAssertTrue(exclusions.excludes("a/x/b/y/z/c"))
+        XCTAssertFalse(exclusions.excludes("a/b/d"))
+    }
+
+    func testBareStarMatchesEveryFileName() {
+        let exclusions = AssetFingerprintExclusions(additional: ["*"])
+        XCTAssertTrue(exclusions.excludes("style.css"))
+        XCTAssertTrue(exclusions.excludes("css/style.css"), "* は最後の要素だけを見るので深さは無関係")
+    }
+
+    func testStarSlashStarMatchesExactlyTwoSegments() {
+        let exclusions = AssetFingerprintExclusions(additional: ["*/*"])
+        XCTAssertTrue(exclusions.excludes("css/style.css"))
+        XCTAssertFalse(exclusions.excludes("style.css"), "セグメントが1つしかない")
+        XCTAssertFalse(exclusions.excludes("a/b/c"), "セグメントが3つある")
+    }
+
+    func testAdjacentStarsInFilenamePatternBehaveAsASingleStar() {
+        // "a**b.log" は隣接する `*` を含む。分割すると空の中間パートができるので、
+        // 単純な実装だと `range(of: "")` が nil を返して常に不一致になってしまう。
+        let exclusions = AssetFingerprintExclusions(additional: ["a**b.log"])
+        XCTAssertTrue(exclusions.excludes("ab.log"))
+        XCTAssertTrue(exclusions.excludes("aXYZb.log"))
+        XCTAssertFalse(exclusions.excludes("ab.logx"))
     }
 
     func testEquatable() {
