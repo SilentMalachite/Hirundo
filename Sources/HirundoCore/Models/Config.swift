@@ -22,20 +22,22 @@ public struct HirundoConfig: Codable, Sendable {
     public let blog: Blog
     public let features: Features
     public let limits: Limits
-    
+    public let assets: Assets
+
     /// `CaseIterable` so that `ConfigDiagnostics` can report keys the decoder ignores without
     /// keeping a second copy of this list that could drift out of sync.
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case site, build, server, blog, features, limits
+        case site, build, server, blog, features, limits, assets
     }
-    
+
     public init(
         site: Site,
         build: Build = Build.defaultBuild(),
         server: Server = Server.defaultServer(),
         blog: Blog = Blog.defaultBlog(),
         features: Features = Features(),
-        limits: Limits = Limits()
+        limits: Limits = Limits(),
+        assets: Assets = Assets()
     ) {
         self.site = site
         self.build = build
@@ -43,8 +45,9 @@ public struct HirundoConfig: Codable, Sendable {
         self.blog = blog
         self.features = features
         self.limits = limits
+        self.assets = assets
     }
-    
+
     /// Create a default configuration for testing and development
     public static func createDefault() -> HirundoConfig {
         let defaultSite = try! Site(
@@ -54,17 +57,18 @@ public struct HirundoConfig: Codable, Sendable {
             language: "en-US",
             author: try! Author(name: "Test Author", email: "test@example.com")
         )
-        
+
         return HirundoConfig(
             site: defaultSite,
             build: Build.defaultBuild(),
             server: Server.defaultServer(),
             blog: Blog.defaultBlog(),
             features: Features(),
-            limits: Limits()
+            limits: Limits(),
+            assets: Assets()
         )
     }
-    
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
@@ -82,6 +86,7 @@ public struct HirundoConfig: Codable, Sendable {
         self.blog = try container.decodeIfPresent(Blog.self, forKey: .blog) ?? Blog.defaultBlog()
         // Features only (Stage 2)
         self.features = try container.decodeIfPresent(Features.self, forKey: .features) ?? Features()
+        self.assets = try container.decodeIfPresent(Assets.self, forKey: .assets) ?? Assets()
     }
     
     public static func parse(from yaml: String) throws -> HirundoConfig {

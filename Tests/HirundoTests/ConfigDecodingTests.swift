@@ -163,4 +163,74 @@ final class ConfigDecodingTests: XCTestCase {
             "既知のキーなので警告してはならない: \(report.warnings)"
         )
     }
+
+    func testAssetsDefaultsToNoExclusionsWhenBlockIsAbsent() throws {
+        let yaml = """
+        site:
+          title: "Test"
+          url: "https://example.com"
+        """
+        let config = try HirundoConfig.parse(from: yaml)
+        XCTAssertEqual(config.assets.fingerprintExclude, [])
+    }
+
+    func testAssetsFingerprintExcludeDecodesTheGivenPatterns() throws {
+        let yaml = """
+        site:
+          title: "Test"
+          url: "https://example.com"
+
+        assets:
+          fingerprintExclude:
+            - "apple-touch-icon*.png"
+            - "ads.txt"
+        """
+        let config = try HirundoConfig.parse(from: yaml)
+        XCTAssertEqual(config.assets.fingerprintExclude, ["apple-touch-icon*.png", "ads.txt"])
+    }
+
+    func testEmptyAssetsBlockDecodesToNoExclusions() throws {
+        // The synthesized decoder would require `fingerprintExclude` to be present; an
+        // `assets: {}` block with no keys at all must still decode, matching `features: {}`.
+        let yaml = """
+        site:
+          title: "Test"
+          url: "https://example.com"
+
+        assets: {}
+        """
+        let config = try HirundoConfig.parse(from: yaml)
+        XCTAssertEqual(config.assets.fingerprintExclude, [])
+    }
+
+    func testValidateDoesNotWarnAboutAssets() throws {
+        let yaml = """
+        site:
+          title: "Test"
+          url: "https://example.com"
+
+        assets:
+          fingerprintExclude:
+            - "ads.txt"
+        """
+        let report = try ConfigDiagnostics.inspect(yaml: yaml)
+        XCTAssertTrue(report.warnings.isEmpty, "既知のブロックなので警告してはならない: \(report.warnings)")
+    }
+
+    func testValidateWarnsAboutAnUnknownKeyInsideAssets() throws {
+        let yaml = """
+        site:
+          title: "Test"
+          url: "https://example.com"
+
+        assets:
+          fingerprintExclud:
+            - "ads.txt"
+        """
+        let report = try ConfigDiagnostics.inspect(yaml: yaml)
+        XCTAssertTrue(
+            report.warnings.contains { $0.contains("assets.fingerprintExclud") },
+            "Got: \(report.warnings)"
+        )
+    }
 }
