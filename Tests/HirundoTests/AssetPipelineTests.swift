@@ -188,6 +188,42 @@ final class AssetPipelineTests: XCTestCase {
         XCTAssertEqual(processedContent, cssContent)
     }
 
+    /// パススルーアセット（画像など）の書き出しが `Data` 経由の全バイト書き換えに戻っていないか。
+    /// `FileManager.copyItem` を使えば、ソースの POSIX パーミッションを引き継ぐはず。通常の
+    /// umask では新規書き込みが 0644 になりがちな値をあえて避けて 0640 にすることで、
+    /// 「たまたま一致した」を排除する。ハッシュ名も、書き込んだバイト列（＝ソースのバイト列、
+    /// パススルーなので変化しない）から計算した値と一致するべき。
+    func testPassThroughAssetPreservesSourcePermissionsAndHashesTheBytesWritten() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let logoFile = sourceDir.appendingPathComponent("logo.png")
+        let logoContent = Data("not really a png, just some bytes to hash".utf8)
+        try logoContent.write(to: logoFile)
+        try FileManager.default.setAttributes([.posixPermissions: 0o640], ofItemAtPath: logoFile.path)
+
+        pipeline.enableFingerprinting = true
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        let fingerprintedPath = try XCTUnwrap(manifest["logo.png"])
+        let expectedFingerprint = AssetProcessor().generateFingerprint(for: logoContent)
+        XCTAssertTrue(
+            fingerprintedPath.contains(expectedFingerprint),
+            "出力名 \(fingerprintedPath) が書き込んだバイト列のハッシュ \(expectedFingerprint) を含んでいない"
+        )
+
+        let outputURL = destDir.appendingPathComponent(fingerprintedPath)
+        XCTAssertEqual(try Data(contentsOf: outputURL), logoContent)
+
+        let outputAttributes = try FileManager.default.attributesOfItem(atPath: outputURL.path)
+        let outputPermissions = try XCTUnwrap(outputAttributes[.posixPermissions] as? Int)
+        XCTAssertEqual(
+            outputPermissions, 0o640,
+            "コピーがソースのパーミッションを引き継いでいない（Data 経由の書き込みに戻っている）"
+        )
+    }
+
     func testManifestValueKeepsItsDirectory() throws {
         let sourceDir = tempDir.appendingPathComponent("source")
         let destDir = tempDir.appendingPathComponent("dest")

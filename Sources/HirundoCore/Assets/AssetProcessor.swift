@@ -21,23 +21,33 @@ public class AssetProcessor {
         }
     }
     
-    /// Generates fingerprint for file
+    /// Generates a fingerprint for a file by streaming it through the hasher in chunks, so a
+    /// large asset is never fully materialized in memory just to be hashed.
     public func generateFingerprint(for fileURL: URL) throws -> String {
-        let data = try Data(contentsOf: fileURL)
-        return generateFingerprint(for: data)
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hexPrefix(of: hasher.finalize())
     }
-    
+
     /// Generates fingerprint for content
     public func generateFingerprint(for content: String) -> String {
         let data = content.data(using: .utf8) ?? Data()
         return generateFingerprint(for: data)
     }
-    
+
     /// Generates fingerprint for data
     public func generateFingerprint(for data: Data) -> String {
-        let hash = SHA256.hash(data: data)
-        // Use 16 characters (64-bit) instead of 8 for better collision resistance
-        return hash.compactMap { String(format: "%02x", $0) }.joined().prefix(16).lowercased()
+        return hexPrefix(of: SHA256.hash(data: data))
+    }
+
+    /// Use 16 characters (64-bit) instead of 8 for better collision resistance.
+    private func hexPrefix(of digest: SHA256.Digest) -> String {
+        return digest.compactMap { String(format: "%02x", $0) }.joined().prefix(16).lowercased()
     }
     
     /// Adds fingerprint to filename

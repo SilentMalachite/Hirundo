@@ -112,23 +112,35 @@ public class AssetPipeline {
 
     // MARK: - Private
 
-    /// 画像・JS・その他。画像とその他はコピーのみなのでソースバイト = 出力バイト。
-    /// メモリマップで読むので、大きな画像でも常駐メモリを食わない。
+    /// `write` に渡す元データ。インメモリの `Data` か、コピー元を指す `URL` のどちらか。
+    ///
+    /// 2つに分けているのは、画像などのパススルーアセットで `FileManager.copyItem` を使うため。
+    /// `copyItem` はパーミッションや拡張属性を保ったまま、APFS では実体コピーすらせずクローンする。
+    /// バイト列を経由すると両方失うので、この場合は `Data` を作らない。
+    private enum AssetContent {
+        case data(Data)
+        case file(URL)
+    }
+
+    /// 画像・その他。コピーのみなのでソースバイト＝出力バイト。
+    ///
+    /// `FileManager.copyItem` でコピーする（パーミッション・拡張属性を保ち、APFS ではクローンに
+    /// なる）。ハッシュが要る場合も、コピー元をストリーミングで読んで計算するので、まるごと
+    /// メモリに載せることはない。JS だけは中身を書き換える必要があるためテキストとして読む。
     private func processNonStylesheet(
         _ fileURL: URL,
         relativePath: String,
         destinationPath: String,
         manifest: inout AssetManifest
     ) throws {
-        let data: Data
         switch processor.detectAssetType(for: fileURL.lastPathComponent) {
         case .javascript:
             let content = try String(contentsOf: fileURL, encoding: .utf8)
-            data = Data(processor.processJS(content, options: jsOptions).utf8)
+            let data = Data(processor.processJS(content, options: jsOptions).utf8)
+            try write(.data(data), relativePath: relativePath, destinationPath: destinationPath, manifest: &manifest)
         default:
-            data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+            try write(.file(fileURL), relativePath: relativePath, destinationPath: destinationPath, manifest: &manifest)
         }
-        try write(data, relativePath: relativePath, destinationPath: destinationPath, manifest: &manifest)
     }
 
     /// CSS。最小化してから `url(...)` を書き換え、**その結果**をハッシュする。
@@ -167,7 +179,7 @@ public class AssetPipeline {
         }
 
         try write(
-            Data(finalContent.utf8),
+            .data(Data(finalContent.utf8)),
             relativePath: relativePath,
             destinationPath: destinationPath,
             manifest: &manifest
@@ -175,8 +187,13 @@ public class AssetPipeline {
     }
 
     /// 出力先の閉じ込め、ハッシュ、書き込み、マニフェストへの登録。
+    ///
+    /// ハッシュ・書き込み・マニフェスト登録が1箇所に集まっているのが不変条件。「書き込んだバイト
+    /// 以外の何か」をハッシュすることが構造的にできないのはこれのおかげなので、`AssetContent`
+    /// で入力の形（メモリ上のデータか、コピー元ファイルか）を分けても、ハッシュ計算・書き込み・
+    /// 登録という処理そのものは分岐させず、ここに置いたままにする。
     private func write(
-        _ data: Data,
+        _ content: AssetContent,
         relativePath: String,
         destinationPath: String,
         manifest: inout AssetManifest
@@ -198,7 +215,14 @@ public class AssetPipeline {
         var outputURL = candidateURL
         var outputRelativePath = relativePath
         if enableFingerprinting && !fingerprintExclusions.excludes(relativePath) {
-            let fingerprint = processor.generateFingerprint(for: data)
+            let fingerprint: String
+            switch content {
+            case .data(let data):
+                fingerprint = processor.generateFingerprint(for: data)
+            case .file(let fileURL):
+                // ソースをストリーミングで読んでハッシュする。まるごとメモリに載せない。
+                fingerprint = try processor.generateFingerprint(for: fileURL)
+            }
             outputURL = URL(fileURLWithPath: processor.addFingerprint(to: candidateURL.path, fingerprint: fingerprint))
             let directory = AssetManifest.parentDirectory(of: relativePath)
             outputRelativePath = directory.isEmpty
@@ -210,7 +234,18 @@ public class AssetPipeline {
             at: outputURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        try data.write(to: outputURL, options: .atomic)
+
+        switch content {
+        case .data(let data):
+            try data.write(to: outputURL, options: .atomic)
+        case .file(let fileURL):
+            // `copyItem` はパーミッションと拡張属性を保ち、APFS では実体コピーせずクローンする。
+            // ただし宛先が既にあると失敗するので（`serve` は clean せず再ビルドする）、先に消す。
+            if fileManager.fileExists(atPath: outputURL.path) {
+                try fileManager.removeItem(at: outputURL)
+            }
+            try fileManager.copyItem(at: fileURL, to: outputURL)
+        }
 
         manifest[relativePath] = outputRelativePath
     }
