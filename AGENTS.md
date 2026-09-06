@@ -34,12 +34,12 @@
 - 変更は小さく、メッセージは命令形で Issue を参照（例: `Fixes #123`）。
 - PR には説明、関連 Issue、テスト結果（`swift test`）、破壊的変更の明記を含める。
 - 事前チェック: テスト成功、ドキュメント更新（README/ARCHITECTURE/CHANGELOG）、規約準拠。
-- `swift test` には既知の失敗（`HotReloadManagerTests` の 6 件）がある。詳細は `TESTING.md` を参照し、それ以外の新規失敗を出さないこと。
+- `swift test` は全件成功が期待値。新規失敗を出さないこと。詳細は `TESTING.md` を参照。
 
 ## セキュリティと設定
 - 秘密情報はコミットしない。サイト設定は `config.yaml` を利用し入力値を検証。
 - `config.yaml` のトップレベルキーは `site` / `build` / `server` / `blog` / `features` / `limits` / `assets` の7つのみ。未知のキーは黙って無視される。`assets.fingerprintExclude` はフィンガープリント除外パターンの追加用（組み込みの `robots.txt` 等は常に除外される）。
-- 設定の各種制限は `limits`（ファイルサイズ・文字数の10項目）で指定する。タイムアウト設定・CORS 設定・WebSocket 認証設定は存在しない。詳細は `SECURITY.md` を参照。
+- 設定の各種制限は `limits`（ファイルサイズ・文字数の9項目）で指定する。タイムアウト設定・CORS 設定・WebSocket 認証設定は存在しない。詳細は `SECURITY.md` を参照。
 - `/livereload` のハンドシェイクは `WebSocketOriginGuard` が `Origin` と `Host` で検証する（一致しなければ 403）。設定項目もトークンも無く、認証ではない。
 
 ## アーキテクチャ注意点

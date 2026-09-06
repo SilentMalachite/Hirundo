@@ -10,13 +10,9 @@ This guide outlines how to run, structure, and extend tests in Hirundo.
 
 ### Current State of the Suite
 
-`swift test` currently runs **210 tests with 6 failures**, all in
-`HotReloadManagerTests`. These 6 are pre-existing — they fail on unmodified
-`HEAD` too — and stem from FSEvents timing plus sandbox `.sb-` temporary-file
-artifacts that break the tests' exact-path assertions. They are not yet fixed.
-
-Treat them as the known baseline: a change is clean when it introduces no
-failures beyond those 6.
+`swift test` is expected to pass in full, with zero failures. Treat any
+failure as a regression to investigate, not a pre-existing baseline to work
+around.
 
 ## Naming and Structure
 

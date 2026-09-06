@@ -423,15 +423,17 @@ site:
 
 - **Every optional block takes a subset of its keys.** `features`, `limits`, `assets`,
   `build`, `server` and `blog` each default the keys you leave out, so raising one limit means
-  writing one line, not restating the other nine. `hirundo validate` reports keys that are not
+  writing one line, not restating the other eight. `hirundo validate` reports keys that are not
   recognized.
 - **Values are validated, not just decoded.** `site.url` must be a URL with a scheme and a
   host, `site.language` must be a well-formed BCP 47 tag (`en`, `en-US`, `zh-Hans`),
   `site.author.email` must be an e-mail address, and every `limits` value must be a positive
   integer. A configuration that breaks one of these fails the build rather than being
-  accepted and quietly ignored. Note that the `site.*` length caps are fixed constants
-  (title 200, description 500, URL 2000, author name 100, e-mail 254) — they are **not**
-  taken from the `limits` block.
+  accepted and quietly ignored. Note that the `site.*` length caps (title, description,
+  URL, author name, e-mail, and language code) **are** taken from the `limits` block —
+  `maxTitleLength`, `maxDescriptionLength`, `maxUrlLength`, `maxAuthorNameLength`,
+  `maxEmailLength` and `maxLanguageCodeLength` — with the defaults shown above (200, 500,
+  2000, 100, 254, 35) applying when `limits` is omitted.
 - **`features` is a mapping, not a list.** The legacy plugin form is no longer accepted and
   is a hard parse error:
   ```yaml
@@ -616,7 +618,9 @@ itself, so any reference to it keeps working and the pruner does not treat it as
 output from a previous build.
 
 Patterns are matched against the asset's path relative to the `static/` directory, with `/`
-as the separator:
+as the separator; that path never starts with a `/`, so patterns carry no leading slash —
+a leading `/` or `./` you write is stripped before matching (`/robots.txt` and `robots.txt`
+behave the same):
 
 - a pattern with no `/` matches the file name at any depth (`ads.txt` matches both `ads.txt`
   and `vendor/ads.txt`)
