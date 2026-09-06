@@ -339,6 +339,11 @@ public class AssetPipeline {
     /// 以外の何か」をハッシュすることが構造的にできないのはこれのおかげなので、`AssetContent`
     /// で入力の形（メモリ上のデータか、コピー元ファイルか）を分けても、ハッシュ計算・書き込み・
     /// 登録という処理そのものは分岐させず、ここに置いたままにする。
+    ///
+    /// パススルー（`.file`）では、ハッシュを**ステージングファイル**から取る。ソースからハッシュを
+    /// 取ってから別途コピーすると、その間にソースが変わったとき出力名のハッシュと実データが
+    /// 食い違う（`serve` 中の編集で起きる）。ステージングは差し替えるバイト列そのものなので、
+    /// そこから取れば不変条件が構造的に守られる。
     private func write(
         _ content: AssetContent,
         relativePath: String,
@@ -365,45 +370,23 @@ public class AssetPipeline {
             )
         }
 
-        var outputURL = candidateURL
-        if enableFingerprinting && allowFingerprint && !fingerprintExclusions.excludes(relativePath) {
-            let fingerprint: String
-            switch content {
-            case .data(let data):
-                fingerprint = processor.generateFingerprint(for: data)
-            case .file(let source):
-                // ソースをストリーミングで読んでハッシュする。まるごとメモリに載せない。
-                fingerprint = try processor.generateFingerprint(for: source.url)
-            }
-            outputURL = URL(fileURLWithPath: processor.addFingerprint(to: candidateURL.path, fingerprint: fingerprint))
-        }
+        try fileManager.createDirectory(at: parentURL, withIntermediateDirectories: true)
 
-        // マニフェストの値は「実際に書いた場所」でなければならない。途中のディレクトリが
-        // 出力ツリー内のシンボリックリンクなら、値は解決先（実体）の側になる ── 掃除
-        // （`AssetPruner`）も同じく実体側の相対パスで「残すもの」を判定するため、ここで
-        // 食い違うと書いたばかりのファイルが掃除で消える。
-        let outputRelativePath = outputDirectory.isEmpty
-            ? outputURL.lastPathComponent
-            : outputDirectory + "/" + outputURL.lastPathComponent
+        let shouldFingerprint = enableFingerprinting && allowFingerprint
+            && !fingerprintExclusions.excludes(relativePath)
 
-        try fileManager.createDirectory(
-            at: outputURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-
-        // 出力先にシンボリックリンクが残っていると（以前のバージョンが書き出した `_site` が
-        // まさにそれ）、`replaceItemAt` は "file doesn't exist" で失敗する。最後の要素は
-        // 置き換える対象であって辿る対象ではないので、どちらの書き込み経路でも先に取り除いて
-        // おき、非クリーン再ビルドで自己修復させる。`attributesOfItem` は `lstat` 相当で
-        // リンクを辿らないため、壊れたリンクも判定できる。
-        if let attributes = try? fileManager.attributesOfItem(atPath: outputURL.path),
-           attributes[.type] as? FileAttributeType == .typeSymbolicLink {
-            try fileManager.removeItem(at: outputURL)
-        }
-
+        let outputURL: URL
         switch content {
         case .data(let data):
+            outputURL = shouldFingerprint
+                ? URL(fileURLWithPath: processor.addFingerprint(
+                    to: candidateURL.path,
+                    fingerprint: processor.generateFingerprint(for: data)
+                ))
+                : candidateURL
+            try removeStaleSymlink(at: outputURL)
             try data.write(to: outputURL, options: .atomic)
+
         case .file(let source):
             // `copyItem` はパーミッションと拡張属性を保ち、APFS では実体コピーせずクローンする。
             // ただし `copyItem` はシンボリックリンクをリンクのままコピーする。`static/` の中で
@@ -412,20 +395,18 @@ public class AssetPipeline {
             //
             // - `_site` を単体で持ち出す（アーカイブ・アップロードなど）と、リンクの解決先が
             //   出力ツリーの中にあるとは限らず、ファイルが失われる。
-            // - フィンガープリント有効時、上のハッシュは `FileHandle` 経由でリンク先の
-            //   実体を読んで計算する一方、書き込まれるのはリンクそのものなので、
-            //   「ハッシュは書き込んだバイト列を覆う」という不変条件が壊れる。
+            // - フィンガープリント有効時、ハッシュはリンク先の実体を読んで計算する一方、
+            //   書き込まれるのはリンクそのものになり、「ハッシュは書き込んだバイト列を覆う」
+            //   という不変条件が壊れる。
             //
             // そのため `source.url` は `resolveConfinedSource` が解決し、壊れたリンクと
             // `static/` の外へ抜けるリンクはそこで弾いてある。
             //
-            // 加えて、`removeItem` の後に `copyItem` する2段階だと、コピーが失敗した時点で
-            // 直前の良い出力を失い、`serve` から見ればファイルが存在しない瞬間ができる
-            // （パイプライン内の他の書き込みはすべて `.atomic` なのに、ここだけそうでない）。
-            // 一時名へコピーしてから `replaceItemAt` で原子的に差し替えることで、パーミッション・
-            // 拡張属性を保つという `copyItem` を選んだ理由を残したまま、両方を直す。
-            let staging = outputURL.deletingLastPathComponent()
-                .appendingPathComponent(".hirundo-\(UUID().uuidString)")
+            // `removeItem` の後に `copyItem` する2段階だと、コピーが失敗した時点で直前の良い
+            // 出力を失い、`serve` から見ればファイルが存在しない瞬間ができる（パイプライン内の
+            // 他の書き込みはすべて `.atomic` なのに、ここだけそうでない）。一時名へコピーして
+            // から `replaceItemAt` で原子的に差し替える。
+            let staging = parentURL.appendingPathComponent(".hirundo-\(UUID().uuidString)")
             defer {
                 // 成功時は `replaceItemAt` が消費して既に存在しない。throw で抜けた場合だけ
                 // 残っているので、原子的な差し替えの体裁を保つために掃除する。
@@ -434,6 +415,26 @@ public class AssetPipeline {
                 }
             }
             try fileManager.copyItem(at: source.url, to: staging)
+
+            // 閉じ込め判定の直後に取った識別情報と、コピー直後の識別情報を比べる。違っていれば
+            // 判定からコピーまでの間にソースが差し替えられたか書き換えられたということで、
+            // コピーしたバイト列は判定したファイルのものではない。黙って出さずに失敗させる
+            // （`serve` なら次の変更検知で再ビルドされる）。
+            let identityAfterCopy = try FileIdentity(ofItemAtPath: source.url.path)
+            guard identityAfterCopy == source.identity else {
+                throw AssetPipelineError.processingFailed(
+                    "Asset source changed while it was being copied: \(source.url.path)"
+                )
+            }
+
+            // ハッシュはステージングファイルから取る。これから差し替えるバイト列そのもの。
+            outputURL = shouldFingerprint
+                ? URL(fileURLWithPath: processor.addFingerprint(
+                    to: candidateURL.path,
+                    fingerprint: try processor.generateFingerprint(for: staging)
+                ))
+                : candidateURL
+            try removeStaleSymlink(at: outputURL)
             // 既定では差し替え先（＝前回の出力）のメタデータが引き継がれるため、`static/` 側で
             // パーミッションを変えても非クリーン再ビルドに反映されない。`copyItem` が運んできた
             // ソース由来のメタデータを使う。
@@ -444,7 +445,25 @@ public class AssetPipeline {
             )
         }
 
-        manifest[relativePath] = outputRelativePath
+        // マニフェストの値は「実際に書いた場所」でなければならない。途中のディレクトリが
+        // 出力ツリー内のシンボリックリンクなら、値は解決先（実体）の側になる ── 掃除
+        // （`AssetPruner`）も同じく実体側の相対パスで「残すもの」を判定するため、ここで
+        // 食い違うと書いたばかりのファイルが掃除で消える。
+        manifest[relativePath] = outputDirectory.isEmpty
+            ? outputURL.lastPathComponent
+            : outputDirectory + "/" + outputURL.lastPathComponent
+    }
+
+    /// 出力先にシンボリックリンクが残っていると（以前のバージョンが書き出した `_site` が
+    /// まさにそれ）、`replaceItemAt` は "file doesn't exist" で失敗する。最後の要素は
+    /// 置き換える対象であって辿る対象ではないので、どちらの書き込み経路でも先に取り除いて
+    /// おき、非クリーン再ビルドで自己修復させる。`attributesOfItem` は `lstat` 相当で
+    /// リンクを辿らないため、壊れたリンクも判定できる。
+    private func removeStaleSymlink(at outputURL: URL) throws {
+        if let attributes = try? fileManager.attributesOfItem(atPath: outputURL.path),
+           attributes[.type] as? FileAttributeType == .typeSymbolicLink {
+            try fileManager.removeItem(at: outputURL)
+        }
     }
 
     /// 解決済みの親ディレクトリの、出力ルートからの相対パス。ルート直下なら空文字列、

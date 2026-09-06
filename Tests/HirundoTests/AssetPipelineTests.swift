@@ -963,6 +963,64 @@ final class AssetPipelineTests: XCTestCase {
         }
     }
 
+    /// 閉じ込め判定は通ったが、コピーの前にソースが書き換えられた。ハッシュ計算とコピーが
+    /// 別々にソースを読む構造だと、出力名のハッシュと実データが食い違う。判定直後の識別情報と
+    /// コピー直後の識別情報を比べて、変わっていたら失敗させる。
+    func testASourceModifiedAfterItsContainmentCheckFailsTheCopy() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let sourceFile = sourceDir.appendingPathComponent("logo.png")
+        try Data("original".utf8).write(to: sourceFile)
+
+        let hooked = HookedAssetPipeline()
+        hooked.enableFingerprinting = true
+        hooked.afterResolving = { fileURL in
+            guard fileURL.lastPathComponent == "logo.png" else { return }
+            let handle = try FileHandle(forWritingTo: sourceFile)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data(" + appended".utf8))
+            try handle.close()
+        }
+
+        XCTAssertThrowsError(
+            try hooked.processAssets(from: sourceDir.path, to: destDir.path),
+            "判定後に書き換えられたソースがそのままコピーされている"
+        ) { error in
+            XCTAssertTrue(
+                "\(error)".contains("changed while it was being copied"),
+                "想定外のエラー: \(error)"
+            )
+        }
+
+        // 失敗したときにステージングファイルが残っていないこと。
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: destDir.path)
+            .filter { $0.hasPrefix(".hirundo-") }
+        XCTAssertTrue(leftovers.isEmpty, "ステージングファイルが残っている: \(leftovers)")
+    }
+
+    /// ハッシュはステージングファイル（差し替えるバイト列そのもの）から取る。ソースを2回読む
+    /// 構造ではないことを、出力名のハッシュ＝出力バイト列のハッシュで固定する。
+    func testPassThroughFingerprintCoversTheBytesActuallyWritten() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        let content = Data("pass-through bytes".utf8)
+        try content.write(to: sourceDir.appendingPathComponent("logo.png"))
+
+        pipeline.enableFingerprinting = true
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        let outputRelativePath = try XCTUnwrap(manifest["logo.png"])
+        let written = try Data(contentsOf: destDir.appendingPathComponent(outputRelativePath))
+        XCTAssertEqual(
+            outputRelativePath,
+            "logo-\(AssetProcessor().generateFingerprint(for: written)).png",
+            "出力名のハッシュが出力バイト列のハッシュと一致しない"
+        )
+    }
+
     func testSkipsAFileSymlinkPointingOutsideTheSourceDirectory() throws {
         let sourceDir = tempDir.appendingPathComponent("source")
         let destDir = tempDir.appendingPathComponent("dest")
