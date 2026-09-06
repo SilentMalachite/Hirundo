@@ -225,6 +225,27 @@ final class AssetFingerprintExclusionsTests: XCTestCase {
         XCTAssertFalse(exclusions.excludes("ab.logx"))
     }
 
+    // MARK: - 計算量
+
+    /// 非連続の `**` を複数含むパターンは、素朴な再帰だとパス長に対して指数的に遅くなる
+    /// （`**` ごとに「残りのどこから再開するか」を全部試し、同じ状態を何度も探索するため）。
+    /// `assets.fingerprintExclude` はユーザーが自由に書けるので、これは設定ミス1つでビルドが
+    /// 止まる経路だった。一致しない入力（＝全候補を試し切る最悪ケース）で時間を測る。
+    ///
+    /// メモ化前はこのサイズで数十秒かかる（デバッグビルド）。メモ化後は状態数が
+    /// 13 × 41 に収まり、ミリ秒未満で終わる。
+    func testManyNonAdjacentDoubleStarsAgainstADeepPathFinishesQuickly() {
+        let pattern = String(repeating: "**/x/", count: 6) + "z"
+        let path = String(repeating: "x/", count: 40) + "y"
+
+        let start = Date()
+        let matched = AssetFingerprintExclusions.matches(pattern: pattern, path: path)
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertFalse(matched)
+        XCTAssertLessThan(elapsed, 1.0, "\(elapsed)s かかった。`**` の照合が指数的になっている")
+    }
+
     func testEquatable() {
         let a = AssetFingerprintExclusions(additional: ["ads.txt"])
         let b = AssetFingerprintExclusions(additional: ["ads.txt"])
