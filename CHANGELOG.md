@@ -43,11 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs: README/README.ja no longer claim `limits` is all-or-nothing, and CLAUDE.md no longer describes `minify` as minifying HTML (it covers CSS and JS assets only)
 - docs: README/README.ja/ARCHITECTURE/CLAUDE describe the symlink containment rule for `static/`, the built-in fingerprint exclusions and the `assets.fingerprintExclude` block that extends them, the dependency ordering that makes CSS-to-CSS references resolve, and what pruning does and does not remove
 
+### Deprecated
+- `AssetItem` is deprecated and will be removed in the next major version. Nothing in the codebase constructed it — its stored properties (`sourcePath`, `outputPath`, `processed`, `metadata`) were unreachable dead weight — so only its nested `AssetType` enum was ever actually used, and only as a return type. `AssetType` is now a top-level `public enum` in `ContentModels.swift`; `AssetItem.AssetType` remains as a `typealias` so existing code keeps compiling with a deprecation warning
+
 ### Removed
 - **BREAKING**: removed `AssetConcatenator` and `AssetConcatenationRule`, along with `AssetPipeline.concatenationRules` and `enableSourceMaps`, `CSSProcessingOptions.sourceMap`, `JSProcessingOptions.sourceMap` / `transpile` / `target`, and `AssetFileManager.findFiles`. All of these were library-level surface unreachable from `config.yaml`: concatenation's rule matching disagreed with its own file finder (a `js/*.js` rule bundled the files *and* still emitted the originals, while a bare `*.js` rule dropped the originals entirely), no source map was ever produced by any code path, and `transpileJS` printed a warning and returned its input unchanged. Use Babel or esbuild for ES6+ transforms
 - **BREAKING**: `AssetPipeline.processAssets` / `saveManifest` / `loadManifest` now work with `AssetManifest` instead of `[String: String]`. `AssetProcessor.processAssetContent` (process-and-write) was removed; writing is now `AssetPipeline`'s responsibility
 - **BREAKING**: removed the unused `destinationPath` and `concatenationRules` parameters from `AssetFileManager.processDirectory`
-- **BREAKING**: removed `AssetItem`. Nothing in the codebase constructed it — its stored properties (`sourcePath`, `outputPath`, `processed`, `metadata`) were unreachable dead weight — so only its nested `AssetType` enum was ever actually used, and only as a return type. `AssetType` is now a top-level `public enum` in `ContentModels.swift`; every reference to `AssetItem.AssetType` becomes `AssetType`
 
 ## [1.1.4] - 2025-10-28
 
