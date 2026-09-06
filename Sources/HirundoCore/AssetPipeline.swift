@@ -214,14 +214,22 @@ public class AssetPipeline {
         manifest: inout AssetManifest
     ) throws {
         let destinationRootURL = URL(fileURLWithPath: destinationPath).resolvingSymlinksInPath()
-        let candidateURL = destinationRootURL
-            .appendingPathComponent(relativePath)
-            .resolvingSymlinksInPath()
+        let rawCandidateURL = destinationRootURL.appendingPathComponent(relativePath)
+
+        // 閉じ込めの判定は親ディレクトリまでを解決して行い、最後の要素は解決しない。最後の要素は
+        // これから置き換える対象であって辿る対象ではないためで、辿ってしまうと前回のビルドが
+        // 残したシンボリックリンク（このブランチの修正前ビルドの `_site` がまさにそれ）の
+        // 解決先が出力先の外だという理由でビルドが落ち、自己修復できなくなる。
+        // 途中のディレクトリが出力先の外を指すリンクだった場合は、親の解決で今までどおり弾かれる。
+        let lastComponent = rawCandidateURL.lastPathComponent
+        let parentURL = rawCandidateURL.deletingLastPathComponent().resolvingSymlinksInPath()
+        let candidateURL = parentURL.appendingPathComponent(lastComponent)
 
         let rootPath = destinationRootURL.path.hasSuffix("/")
             ? destinationRootURL.path
             : destinationRootURL.path + "/"
-        guard candidateURL.path == destinationRootURL.path || candidateURL.path.hasPrefix(rootPath) else {
+        guard lastComponent != "." && lastComponent != "..",
+              parentURL.path == destinationRootURL.path || parentURL.path.hasPrefix(rootPath) else {
             throw AssetPipelineError.processingFailed(
                 "Output path escapes destination directory: \(candidateURL.path)"
             )
@@ -277,6 +285,14 @@ public class AssetPipeline {
             // 一時名へコピーしてから `replaceItemAt` で原子的に差し替えることで、パーミッション・
             // 拡張属性を保つという `copyItem` を選んだ理由を残したまま、両方を直す。
             let source = fileURL.resolvingSymlinksInPath()
+            // `resolvingSymlinksInPath` は最後の要素が解決できない壊れたリンクには何もしない。
+            // そのまま `copyItem` するとリンクのままコピーされ、上の問題がそっくり再現する。
+            // 修正前の `Data(contentsOf:)` はここで失敗していたので、同じく失敗させる。
+            guard fileManager.fileExists(atPath: source.path) else {
+                throw AssetPipelineError.processingFailed(
+                    "Asset source is not readable (broken symlink?): \(fileURL.path)"
+                )
+            }
             let staging = outputURL.deletingLastPathComponent()
                 .appendingPathComponent(".hirundo-\(UUID().uuidString)")
             defer {
@@ -287,7 +303,22 @@ public class AssetPipeline {
                 }
             }
             try fileManager.copyItem(at: source, to: staging)
-            _ = try fileManager.replaceItemAt(outputURL, withItemAt: staging)
+            // 出力先にシンボリックリンクが残っていると（このブランチの修正前ビルドが残した
+            // `_site` がまさにそれ）、`replaceItemAt` は "file doesn't exist" で失敗する。
+            // `attributesOfItem` は `lstat` 相当でリンクを辿らないので、壊れたリンクも含めて
+            // 判定できる。先に取り除いてから差し替え、非クリーン再ビルドで自己修復させる。
+            if let attributes = try? fileManager.attributesOfItem(atPath: outputURL.path),
+               attributes[.type] as? FileAttributeType == .typeSymbolicLink {
+                try fileManager.removeItem(at: outputURL)
+            }
+            // 既定では差し替え先（＝前回の出力）のメタデータが引き継がれるため、`static/` 側で
+            // パーミッションを変えても非クリーン再ビルドに反映されない。`copyItem` が運んできた
+            // ソース由来のメタデータを使う。
+            _ = try fileManager.replaceItemAt(
+                outputURL,
+                withItemAt: staging,
+                options: .usingNewMetadataOnly
+            )
         }
 
         manifest[relativePath] = outputRelativePath

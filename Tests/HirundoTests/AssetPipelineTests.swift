@@ -300,6 +300,122 @@ final class AssetPipelineTests: XCTestCase {
         )
     }
 
+    /// 上の修正を入れる前のビルドが残した `_site` には、出力先そのものがシンボリックリンクに
+    /// なっているファイルがある。`replaceItemAt` は差し替え先が実在のファイルでないと
+    /// "file doesn't exist" で失敗するため、そのままでは非クリーン再ビルドが再び詰まる。
+    /// 修正前のコード（`removeItem` してから `copyItem`）はこの状態から自己修復できていたので、
+    /// 回復能力を落とさないことを固定する。
+    func testBuildOverAnOutputLeftAsASymlinkRecovers() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+
+        let sharedDir = tempDir.appendingPathComponent("shared")
+        try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
+        let targetFile = sharedDir.appendingPathComponent("logo-real.png")
+        let targetContent = Data("the real bytes".utf8)
+        try targetContent.write(to: targetFile)
+
+        try Data("fresh bytes".utf8).write(to: sourceDir.appendingPathComponent("logo.png"))
+
+        // 修正前のビルドが残した出力を再現する: 出力先が出力ツリーの外を指すリンクになっている。
+        let staleOutput = destDir.appendingPathComponent("logo.png")
+        try FileManager.default.createSymbolicLink(at: staleOutput, withDestinationURL: targetFile)
+
+        XCTAssertNoThrow(
+            try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
+            "リンクとして残った出力の上に書けず、非クリーン再ビルドが回復できない"
+        )
+
+        let resourceValues = try staleOutput.resourceValues(forKeys: [.isSymbolicLinkKey])
+        XCTAssertNotEqual(resourceValues.isSymbolicLink, true)
+        XCTAssertEqual(try Data(contentsOf: staleOutput), Data("fresh bytes".utf8))
+        // リンク先が書き換えられていないこと（リンク越しに書いてしまうと出力先の外を壊す）。
+        XCTAssertEqual(try Data(contentsOf: targetFile), targetContent)
+    }
+
+    /// 上の自己修復のために閉じ込め判定は最後の要素を解決しなくなったが、途中のディレクトリは
+    /// 引き続き解決して判定する。出力ツリー内のディレクトリが外を指すリンクにすり替えられていたら、
+    /// 書き込みは拒否されなければならない。
+    func testWriteThroughASymlinkedOutputDirectoryIsRefused() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(
+            at: sourceDir.appendingPathComponent("img"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+        try Data("bytes".utf8).write(to: sourceDir.appendingPathComponent("img/logo.png"))
+
+        // 出力先の `img/` が出力ツリーの外を指すリンクになっている。
+        let outsideDir = tempDir.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: destDir.appendingPathComponent("img"),
+            withDestinationURL: outsideDir
+        )
+
+        XCTAssertThrowsError(
+            try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
+            "出力ツリーの外を指すディレクトリリンク越しに書き込んでいる"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: outsideDir.appendingPathComponent("logo.png").path),
+            "出力先の外にファイルが書き出された"
+        )
+    }
+
+    /// `resolvingSymlinksInPath()` は最後の要素が解決できない壊れたリンクには何もしないため、
+    /// 解決したつもりのパスがリンクのままになり、`copyItem` がリンクをコピーしてしまう。
+    /// このブランチ以前の `Data(contentsOf:)` はここで失敗していたので、同じく失敗させる。
+    func testBrokenSymlinkedAssetThrowsInsteadOfCopyingTheLink() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let missingTarget = tempDir.appendingPathComponent("shared/never-created.png")
+        try FileManager.default.createSymbolicLink(
+            at: sourceDir.appendingPathComponent("logo.png"),
+            withDestinationURL: missingTarget
+        )
+
+        XCTAssertThrowsError(
+            try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
+            "壊れたシンボリックリンクが黙ってリンクのままコピーされている"
+        )
+
+        let output = destDir.appendingPathComponent("logo.png")
+        if FileManager.default.fileExists(atPath: output.path) {
+            let resourceValues = try output.resourceValues(forKeys: [.isSymbolicLinkKey])
+            XCTAssertNotEqual(resourceValues.isSymbolicLink, true)
+        }
+    }
+
+    /// `replaceItemAt` は既定で差し替え先（＝前回の出力）のメタデータを引き継ぐ。それだと
+    /// `static/` 側でパーミッションを変えても非クリーン再ビルドに反映されない。修正前の
+    /// `copyItem` はソース由来のパーミッションで書いていたので、同じ結果になることを固定する。
+    func testPassThroughPermissionChangeReachesANonCleanRebuild() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let sourceFile = sourceDir.appendingPathComponent("logo.png")
+        try Data("bytes".utf8).write(to: sourceFile)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: sourceFile.path)
+        _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: sourceFile.path)
+        _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        let output = destDir.appendingPathComponent("logo.png")
+        let permissions = try FileManager.default.attributesOfItem(atPath: output.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(
+            permissions?.int16Value, 0o644,
+            "再ビルドの出力が前回の出力のパーミッションを引きずっている"
+        )
+    }
+
     func testManifestValueKeepsItsDirectory() throws {
         let sourceDir = tempDir.appendingPathComponent("source")
         let destDir = tempDir.appendingPathComponent("dest")
