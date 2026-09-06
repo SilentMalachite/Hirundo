@@ -307,6 +307,79 @@ final class AssetPipelineTests: XCTestCase {
         )
     }
 
+    func testExcludedAssetIsWrittenUnderItsOriginalNameAndMapsToItself() throws {
+        // robots.txt はどのページからも参照されないため、フィンガープリントすると404になる。
+        // `AssetFingerprintExclusions` の組み込みパターンで常に除外されるべき。
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        pipeline.enableFingerprinting = true
+        try "User-agent: *\n".write(
+            to: sourceDir.appendingPathComponent("robots.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        XCTAssertEqual(manifest["robots.txt"], "robots.txt", "除外されたアセットはキー == 値のままであるべき")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: destDir.appendingPathComponent("robots.txt").path),
+            "除外されたアセットは元の名前で書き出されるべき"
+        )
+    }
+
+    func testExcludedAssetDoesNotPreventOrdinaryAssetsFromBeingFingerprinted() throws {
+        // 同じビルドの中で、除外されないアセット（css/style.css）は通常どおりハッシュされる。
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(
+            at: sourceDir.appendingPathComponent("css"),
+            withIntermediateDirectories: true
+        )
+
+        pipeline.enableFingerprinting = true
+        try "User-agent: *\n".write(
+            to: sourceDir.appendingPathComponent("robots.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "body{}".write(
+            to: sourceDir.appendingPathComponent("css/style.css"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        XCTAssertEqual(manifest["robots.txt"], "robots.txt")
+        let hashedStylesheet = try XCTUnwrap(manifest["css/style.css"])
+        XCTAssertNotEqual(hashedStylesheet, "css/style.css", "除外対象ではないアセットはハッシュされるべき")
+    }
+
+    func testUserSuppliedFingerprintExcludePatternExemptsAFile() throws {
+        // `assets.fingerprintExclude` で追加したパターンも、組み込みパターンと同様に効くべき。
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        pipeline.enableFingerprinting = true
+        pipeline.fingerprintExclusions = AssetFingerprintExclusions(additional: ["keep-name.txt"])
+        try "pinned".write(
+            to: sourceDir.appendingPathComponent("keep-name.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        XCTAssertEqual(manifest["keep-name.txt"], "keep-name.txt")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: destDir.appendingPathComponent("keep-name.txt").path)
+        )
+    }
+
     func testCSSToCSSReferenceIsLeftUnresolved() throws {
         // パス2は全 CSS を同時に扱うため、CSS が別の CSS を url(...) / @import で参照していても
         // 参照先のハッシュ名はまだ決まっていない。ファイルシステムの列挙順に関わらず、常に

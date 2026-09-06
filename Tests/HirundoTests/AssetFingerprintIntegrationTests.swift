@@ -46,6 +46,7 @@ final class AssetFingerprintIntegrationTests: XCTestCase {
         try write("body{background:url(../images/logo.png)}", to: "static/css/style.css")
         try write("console.log('hi');", to: "static/js/app.js")
         try write("not really a png", to: "static/images/logo.png")
+        try write("User-agent: *\n", to: "static/robots.txt")
     }
 
     override func tearDown() async throws {
@@ -129,6 +130,20 @@ final class AssetFingerprintIntegrationTests: XCTestCase {
     /// ことを確かめる。世代をまたいだ古いハッシュ付き出力の掃除（`AssetPruner`）は別の性質で、
     /// こちらは `BuildWithRecoveryCompletenessTests.testRepeatedRebuildKeepsOnlyOneGenerationOfEachAsset`
     /// が担保している。
+    /// `robots.txt` はどのページからも参照されないため、フィンガープリントすると404になる。
+    /// `AssetFingerprintExclusions` の組み込みパターンにより、フィンガープリント有効時でも
+    /// 元の名前のまま出力されるべき。
+    func testFingerprintExcludedAssetKeepsItsOriginalName() async throws {
+        let generator = try SiteGenerator(projectPath: projectPath)
+        try await generator.build()
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: outputURL.appendingPathComponent("robots.txt").path),
+            "robots.txt が元の名前で出力されていない"
+        )
+        XCTAssertEqual(try manifest()["robots.txt"], "robots.txt")
+    }
+
     func testCleanBuildNeverWritesTheUnhashedFilename() async throws {
         let generator = try SiteGenerator(projectPath: projectPath)
         try await generator.build(clean: true)

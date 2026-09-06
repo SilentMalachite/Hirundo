@@ -19,6 +19,11 @@ public class AssetPipeline {
     // Configuration
     public var enableFingerprinting: Bool = false
     public var excludePatterns: [String] = []
+
+    /// フィンガープリントの対象から外すファイル。`enableFingerprinting` が true でも、
+    /// ここに一致するファイルは元の名前のまま書き出す（`write` 内の唯一のハッシュ判定箇所で
+    /// 参照する）。
+    public var fingerprintExclusions: AssetFingerprintExclusions = AssetFingerprintExclusions()
     public var cssOptions: CSSProcessingOptions = CSSProcessingOptions()
     public var jsOptions: JSProcessingOptions = JSProcessingOptions()
 
@@ -187,7 +192,7 @@ public class AssetPipeline {
 
         var outputURL = candidateURL
         var outputRelativePath = relativePath
-        if enableFingerprinting {
+        if enableFingerprinting && !fingerprintExclusions.excludes(relativePath) {
             let fingerprint = processor.generateFingerprint(for: data)
             outputURL = URL(fileURLWithPath: processor.addFingerprint(to: candidateURL.path, fingerprint: fingerprint))
             let directory = AssetManifest.parentDirectory(of: relativePath)

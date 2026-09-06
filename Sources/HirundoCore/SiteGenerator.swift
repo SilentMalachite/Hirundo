@@ -427,6 +427,9 @@ public class SiteGenerator {
             assetPipeline.jsOptions.minify = true
         }
         assetPipeline.enableFingerprinting = config.features.fingerprint
+        assetPipeline.fingerprintExclusions = AssetFingerprintExclusions(
+            additional: config.assets.fingerprintExclude
+        )
     }
 
     /// 出力ツリーの HTML（と、パイプラインが作ったのではない CSS）の参照を、フィンガープリント
