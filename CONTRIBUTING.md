@@ -183,8 +183,7 @@ Use imperative tone and scope when helpful, and reference issues when applicable
 
 ## Pre-PR Checklist
 
-- `swift test` shows no failures beyond the known baseline (6 pre-existing
-  failures in `HotReloadManagerTests` — see `TESTING.md`)
+- `swift test` passes with no failures (see `TESTING.md`)
 - Documentation updated as needed (README/ARCHITECTURE/SECURITY/CHANGELOG)
 - Public APIs include `///` docs for new/changed symbols
 - Breaking changes clearly called out in the PR description

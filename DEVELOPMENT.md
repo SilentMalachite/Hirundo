@@ -49,8 +49,7 @@ swift run --package-path .. hirundo serve
 - Use Conventional Commits, e.g. `feat: merge existing .gitignore on init`, `fix: prevent path traversal`.
 - Keep changes focused and documented.
 - Before opening a PR:
-  - Run `swift test`. See `TESTING.md` for the known pre-existing failures in
-    `HotReloadManagerTests`; no *new* failures should appear.
+  - Run `swift test`. The suite should pass with no failures; see `TESTING.md`.
   - Update docs (README/ARCHITECTURE/SECURITY/CHANGELOG) if behavior changes.
   - Note breaking changes explicitly.
 
