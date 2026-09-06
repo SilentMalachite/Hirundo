@@ -203,6 +203,11 @@ final class ConfigDecodingTests: XCTestCase {
         XCTAssertEqual(config.assets.fingerprintExclude, [])
     }
 
+    // This pins that a correctly-spelled `assets` block and its `fingerprintExclude` key draw
+    // no warning; it does not by itself prove `assets` is registered in `recognizedKeysByBlock`
+    // — `unrecognizedKeyWarnings` silently skips child-key checking for any block missing a row
+    // there, so this test would keep passing even if that row were deleted. The row's presence
+    // is what `testValidateWarnsAboutAnUnknownKeyInsideAssets` below pins.
     func testValidateDoesNotWarnAboutAssets() throws {
         let yaml = """
         site:
