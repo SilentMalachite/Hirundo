@@ -68,17 +68,23 @@ jobs:
   build-macos:
     name: Build macOS binary
     needs: generate-release
-    runs-on: macos-latest
+    runs-on: macos-14
     permissions:
       contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Swift
-        uses: swift-actions/setup-swift@v1
+      # Same toolchain selection CI uses. swift-actions/setup-swift has no
+      # entry for the Swift version this package needs on macOS runners, and
+      # the runner ships the toolchain inside Xcode anyway.
+      - name: Select Xcode 16.1
+        uses: maxim-lobanov/setup-xcode@v1
         with:
-          swift-version: '6.0'
+          xcode-version: "16.1"
+
+      - name: Show Swift version
+        run: swift --version
 
       - name: Build (release)
         id: build
@@ -114,10 +120,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # v1 rejects the runner outright ("Version 24.04 of Ubuntu is not
+      # supported") now that ubuntu-latest is 24.04.
       - name: Setup Swift
-        uses: swift-actions/setup-swift@v1
+        uses: swift-actions/setup-swift@v2
         with:
           swift-version: '6.0'
+
+      - name: Show Swift version
+        run: swift --version
 
       - name: Build (release)
         id: build
