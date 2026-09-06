@@ -1,6 +1,22 @@
 import XCTest
 @testable import HirundoCore
 
+/// `AssetFileManager` の閉じ込め判定（列挙時）とソースの読み込みの間に起きる変化を、
+/// 決定的に再現するためのフック。`resolveConfinedSource` は読み込みの直前に呼ばれるので、
+/// `beforeResolving` は「列挙は通ったが読む前に差し替えられた」、`afterResolving` は
+/// 「判定は通ったがコピーの前に書き換えられた」を表す。
+final class HookedAssetPipeline: AssetPipeline {
+    var beforeResolving: ((URL) throws -> Void)?
+    var afterResolving: ((URL) throws -> Void)?
+
+    override func resolveConfinedSource(_ fileURL: URL, sourceRoot: String) throws -> ConfinedSource {
+        try beforeResolving?(fileURL)
+        let resolved = try super.resolveConfinedSource(fileURL, sourceRoot: sourceRoot)
+        try afterResolving?(fileURL)
+        return resolved
+    }
+}
+
 final class AssetPipelineTests: XCTestCase {
     
     var tempDir: URL!
@@ -878,6 +894,74 @@ final class AssetPipelineTests: XCTestCase {
     }
 
     // MARK: - シンボリックリンク
+
+    /// 列挙時の閉じ込め判定を通ったリンクが、読まれる前に `static/` の外へ向け直される
+    /// check-to-use 競合。パススルーアセットの経路。
+    func testALinkRetargetedOutsideAfterEnumerationIsRefusedAtReadTime() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let insideTarget = sourceDir.appendingPathComponent("inside.png")
+        try Data("inside".utf8).write(to: insideTarget)
+        let outsideTarget = tempDir.appendingPathComponent("secret.png")
+        try Data("secret".utf8).write(to: outsideTarget)
+
+        let link = sourceDir.appendingPathComponent("logo.png")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: insideTarget)
+
+        let hooked = HookedAssetPipeline()
+        hooked.beforeResolving = { fileURL in
+            guard fileURL.lastPathComponent == "logo.png" else { return }
+            try FileManager.default.removeItem(at: link)
+            try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outsideTarget)
+        }
+
+        XCTAssertThrowsError(
+            try hooked.processAssets(from: sourceDir.path, to: destDir.path),
+            "列挙後に外へ向け直されたリンクが読まれている"
+        ) { error in
+            guard case AssetPipelineError.pathTraversalAttempt = error else {
+                return XCTFail("pathTraversalAttempt 以外のエラー: \(error)")
+            }
+        }
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: destDir.appendingPathComponent("logo.png").path),
+            "static/ の外の中身が出力に書き出された"
+        )
+    }
+
+    /// 同じ競合の CSS 経路。CSS は列挙（パス1）と読み込み（パス2）が離れているので、
+    /// この窓は実際に広い。
+    func testAStylesheetLinkRetargetedOutsideBetweenPassesIsRefused() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let insideTarget = sourceDir.appendingPathComponent("inside.css")
+        try "body{}".write(to: insideTarget, atomically: true, encoding: .utf8)
+        let outsideTarget = tempDir.appendingPathComponent("secret.css")
+        try "/* secret */".write(to: outsideTarget, atomically: true, encoding: .utf8)
+
+        let link = sourceDir.appendingPathComponent("style.css")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: insideTarget)
+
+        let hooked = HookedAssetPipeline()
+        hooked.beforeResolving = { fileURL in
+            guard fileURL.lastPathComponent == "style.css" else { return }
+            try FileManager.default.removeItem(at: link)
+            try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outsideTarget)
+        }
+
+        XCTAssertThrowsError(try hooked.processAssets(from: sourceDir.path, to: destDir.path))
+        let output = destDir.appendingPathComponent("style.css")
+        if FileManager.default.fileExists(atPath: output.path) {
+            XCTAssertNotEqual(
+                try String(contentsOf: output, encoding: .utf8), "/* secret */",
+                "static/ の外の中身が出力に書き出された"
+            )
+        }
+    }
 
     func testSkipsAFileSymlinkPointingOutsideTheSourceDirectory() throws {
         let sourceDir = tempDir.appendingPathComponent("source")

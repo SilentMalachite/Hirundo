@@ -79,6 +79,8 @@ public class AssetPipeline {
         )
 
         let sourceURL = URL(fileURLWithPath: sourcePath)
+        // `AssetFileManager` が列挙時の判定に使うのと同じ値。読む直前の再判定でも同じ基準を使う。
+        let sourceRoot = sourceURL.resolvingSymlinksInPath().path
         var stylesheets: [(url: URL, relativePath: String)] = []
 
         // パス1: CSS 以外。
@@ -94,6 +96,7 @@ public class AssetPipeline {
             try self.processNonStylesheet(
                 fileURL,
                 relativePath: relativePath,
+                sourceRoot: sourceRoot,
                 destinationPath: destinationPath,
                 manifest: &manifest
             )
@@ -101,7 +104,7 @@ public class AssetPipeline {
 
         // パス2: CSS。参照先のハッシュ名が先に決まっている必要があるため、スタイルシート同士の
         // 依存関係をたどって参照される側から順に処理する。
-        try processStylesheets(stylesheets, destinationPath: destinationPath, manifest: &manifest)
+        try processStylesheets(stylesheets, sourceRoot: sourceRoot, destinationPath: destinationPath, manifest: &manifest)
 
         return manifest
     }
@@ -121,36 +124,73 @@ public class AssetPipeline {
         return try fileManagerHelper.loadManifest(from: path)
     }
 
+    // MARK: - ソースの閉じ込め
+
+    /// 読む直前に閉じ込めを判定し直したソース。`url` は解決済み、`identity` は判定直後の
+    /// 識別情報（`write` がコピー後に照合する）。
+    struct ConfinedSource {
+        let url: URL
+        let identity: FileIdentity
+    }
+
+    /// ソースを読む**直前**に解決し、解決先が `sourceRoot` の中に収まることを改めて確かめる。
+    ///
+    /// `AssetFileManager` は列挙の時点で同じ判定をしているが、判定から読み込みまでの間に
+    /// リンクが差し替えられると、`static/` の外の中身を読んでしまう（check-to-use 競合）。
+    /// CSS は列挙（パス1）と読み込み（パス2）が離れているので、この窓は特に広い。読む側で
+    /// 判定し直せば、どの経路でも「判定した直後のパス」を読む。
+    ///
+    /// 解決できない（壊れた）リンクもここで止める。`resolvingSymlinksInPath` は最後の要素が
+    /// 解決できないと何もしないので、そのまま `copyItem` するとリンクのままコピーされてしまう。
+    /// 修正前の `Data(contentsOf:)` はここで失敗していたので、同じく失敗させる。
+    ///
+    /// テストが競合の窓を再現できるよう `internal` で、`final` を付けない。
+    func resolveConfinedSource(_ fileURL: URL, sourceRoot: String) throws -> ConfinedSource {
+        let resolved = fileURL.resolvingSymlinksInPath()
+        guard fileManager.fileExists(atPath: resolved.path) else {
+            throw AssetPipelineError.processingFailed(
+                "Asset source is not readable (broken symlink?): \(fileURL.path)"
+            )
+        }
+        let prefix = sourceRoot.hasSuffix("/") ? sourceRoot : sourceRoot + "/"
+        guard resolved.path == sourceRoot || resolved.path.hasPrefix(prefix) else {
+            throw AssetPipelineError.pathTraversalAttempt(fileURL.path)
+        }
+        return ConfinedSource(url: resolved, identity: try FileIdentity(ofItemAtPath: resolved.path))
+    }
+
     // MARK: - Private
 
-    /// `write` に渡す元データ。インメモリの `Data` か、コピー元を指す `URL` のどちらか。
+    /// `write` に渡す元データ。インメモリの `Data` か、コピー元（解決・判定済み）のどちらか。
     ///
     /// 2つに分けているのは、画像などのパススルーアセットで `FileManager.copyItem` を使うため。
     /// `copyItem` はパーミッションや拡張属性を保ったまま、APFS では実体コピーすらせずクローンする。
     /// バイト列を経由すると両方失うので、この場合は `Data` を作らない。
     private enum AssetContent {
         case data(Data)
-        case file(URL)
+        case file(ConfinedSource)
     }
 
     /// 画像・その他。コピーのみなのでソースバイト＝出力バイト。
     ///
     /// `FileManager.copyItem` でコピーする（パーミッション・拡張属性を保ち、APFS ではクローンに
-    /// なる）。ハッシュが要る場合も、コピー元をストリーミングで読んで計算するので、まるごと
-    /// メモリに載せることはない。JS だけは中身を書き換える必要があるためテキストとして読む。
+    /// なる）。JS だけは中身を書き換える必要があるためテキストとして読む。どちらも読む直前に
+    /// `resolveConfinedSource` で閉じ込めを判定し直す。
     private func processNonStylesheet(
         _ fileURL: URL,
         relativePath: String,
+        sourceRoot: String,
         destinationPath: String,
         manifest: inout AssetManifest
     ) throws {
+        let source = try resolveConfinedSource(fileURL, sourceRoot: sourceRoot)
         switch processor.detectAssetType(for: fileURL.lastPathComponent) {
         case .javascript:
-            let content = try String(contentsOf: fileURL, encoding: .utf8)
+            let content = try String(contentsOf: source.url, encoding: .utf8)
             let data = Data(processor.processJS(content, options: jsOptions).utf8)
             try write(.data(data), relativePath: relativePath, destinationPath: destinationPath, manifest: &manifest)
         default:
-            try write(.file(fileURL), relativePath: relativePath, destinationPath: destinationPath, manifest: &manifest)
+            try write(.file(source), relativePath: relativePath, destinationPath: destinationPath, manifest: &manifest)
         }
     }
 
@@ -164,14 +204,17 @@ public class AssetPipeline {
     /// 参照先も元の名前で出力されるので壊れない。
     private func processStylesheets(
         _ stylesheets: [(url: URL, relativePath: String)],
+        sourceRoot: String,
         destinationPath: String,
         manifest: inout AssetManifest
     ) throws {
         // 最小化まで済ませた内容を持ち回る。依存関係の抽出と書き換えが同じバイト列を見るため。
+        // パス1の列挙からここまでの間にリンクが差し替えられていないか、読む直前に判定し直す。
         var contents: [String: String] = [:]
         var keys: [String] = []
         for stylesheet in stylesheets {
-            let raw = try String(contentsOf: stylesheet.url, encoding: .utf8)
+            let source = try resolveConfinedSource(stylesheet.url, sourceRoot: sourceRoot)
+            let raw = try String(contentsOf: source.url, encoding: .utf8)
             contents[stylesheet.relativePath] = processor.processCSS(raw, options: cssOptions)
             keys.append(stylesheet.relativePath)
         }
@@ -328,9 +371,9 @@ public class AssetPipeline {
             switch content {
             case .data(let data):
                 fingerprint = processor.generateFingerprint(for: data)
-            case .file(let fileURL):
+            case .file(let source):
                 // ソースをストリーミングで読んでハッシュする。まるごとメモリに載せない。
-                fingerprint = try processor.generateFingerprint(for: fileURL)
+                fingerprint = try processor.generateFingerprint(for: source.url)
             }
             outputURL = URL(fileURLWithPath: processor.addFingerprint(to: candidateURL.path, fingerprint: fingerprint))
         }
@@ -361,7 +404,7 @@ public class AssetPipeline {
         switch content {
         case .data(let data):
             try data.write(to: outputURL, options: .atomic)
-        case .file(let fileURL):
+        case .file(let source):
             // `copyItem` はパーミッションと拡張属性を保ち、APFS では実体コピーせずクローンする。
             // ただし `copyItem` はシンボリックリンクをリンクのままコピーする。`static/` の中で
             // 完結するリンク（`AssetFileManager` が通すのはこれだけ）でも、出力側がリンクに
@@ -373,22 +416,14 @@ public class AssetPipeline {
             //   実体を読んで計算する一方、書き込まれるのはリンクそのものなので、
             //   「ハッシュは書き込んだバイト列を覆う」という不変条件が壊れる。
             //
-            // そのためコピー元は必ず解決してから読む。
+            // そのため `source.url` は `resolveConfinedSource` が解決し、壊れたリンクと
+            // `static/` の外へ抜けるリンクはそこで弾いてある。
             //
             // 加えて、`removeItem` の後に `copyItem` する2段階だと、コピーが失敗した時点で
             // 直前の良い出力を失い、`serve` から見ればファイルが存在しない瞬間ができる
             // （パイプライン内の他の書き込みはすべて `.atomic` なのに、ここだけそうでない）。
             // 一時名へコピーしてから `replaceItemAt` で原子的に差し替えることで、パーミッション・
             // 拡張属性を保つという `copyItem` を選んだ理由を残したまま、両方を直す。
-            let source = fileURL.resolvingSymlinksInPath()
-            // `resolvingSymlinksInPath` は最後の要素が解決できない壊れたリンクには何もしない。
-            // そのまま `copyItem` するとリンクのままコピーされ、上の問題がそっくり再現する。
-            // 修正前の `Data(contentsOf:)` はここで失敗していたので、同じく失敗させる。
-            guard fileManager.fileExists(atPath: source.path) else {
-                throw AssetPipelineError.processingFailed(
-                    "Asset source is not readable (broken symlink?): \(fileURL.path)"
-                )
-            }
             let staging = outputURL.deletingLastPathComponent()
                 .appendingPathComponent(".hirundo-\(UUID().uuidString)")
             defer {
@@ -398,7 +433,7 @@ public class AssetPipeline {
                     try? fileManager.removeItem(at: staging)
                 }
             }
-            try fileManager.copyItem(at: source, to: staging)
+            try fileManager.copyItem(at: source.url, to: staging)
             // 既定では差し替え先（＝前回の出力）のメタデータが引き継がれるため、`static/` 側で
             // パーミッションを変えても非クリーン再ビルドに反映されない。`copyItem` が運んできた
             // ソース由来のメタデータを使う。
