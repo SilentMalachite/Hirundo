@@ -83,3 +83,27 @@ public enum AssetType: Equatable, Sendable {
     case image(String)
     case other(String)
 }
+
+/// 1.1.x までの公開 API との互換のためだけに残している。次のメジャーバージョンで削除する。
+///
+/// 1.1.4 以前は `AssetType` がこの構造体のネスト型で、`AssetPipeline.detectAssetType` の
+/// 戻り値も `AssetItem.AssetType` だった。この構造体自体はリポジトリ内のどこからも生成されて
+/// おらず（`sourcePath` / `outputPath` / `processed` / `metadata` は誰も読まない）、ネスト型
+/// だけが使われていたので、`AssetType` をトップレベルへ出した。外部の利用者が
+/// `AssetItem.AssetType` と書いていてもコンパイルが通るよう、`typealias` で橋渡しする。
+@available(*, deprecated, message: "Use the top-level AssetType. AssetItem will be removed in the next major version.")
+public struct AssetItem: Sendable {
+    public typealias AssetType = HirundoCore.AssetType
+
+    public let sourcePath: String
+    public let outputPath: String
+    public let type: AssetType
+    public var processed: Bool = false
+    public var metadata: [String: AnyCodable] = [:]
+
+    public init(sourcePath: String, outputPath: String, type: AssetType) {
+        self.sourcePath = sourcePath
+        self.outputPath = outputPath
+        self.type = type
+    }
+}

@@ -192,10 +192,13 @@ final class AssetFingerprintIntegrationTests: XCTestCase {
     }
 
     /// `config.assets.fingerprintExclude` から `assetPipeline.fingerprintExclusions` への配線
-    /// （`SiteGenerator.configureAssetPipeline`、`SiteGenerator.swift:430-432`）を、実際に
-    /// `config.yaml` を経由して検証する。`ads.txt` は組み込みパターンのどれにも一致しないので、
-    /// これが除外されるのは配線が効いている場合に限られる ── その配線を消せばこのテストは
-    /// 落ちる（RED として確認済み。詳細は task-3-report.md のフィックスラウンド参照）。
+    /// （`SiteGenerator.configureAssetPipeline`）を、実際に `config.yaml` を経由して検証する。
+    /// `keep-stable.custom` は組み込みパターン（`AssetFingerprintExclusions.builtIn`）のどれにも
+    /// 一致しないので、これが除外されるのは配線が効いている場合に限られる ── その配線を消せば
+    /// このテストは落ちる。
+    ///
+    /// 以前は `ads.txt` を使っていたが、`ads.txt` は組み込みに含まれるため、配線を消しても
+    /// 通ってしまっていた。
     func testConfigSuppliedFingerprintExcludePatternExemptsAFileEndToEnd() async throws {
         try write("""
         site:
@@ -208,25 +211,39 @@ final class AssetFingerprintIntegrationTests: XCTestCase {
 
         assets:
           fingerprintExclude:
-            - "ads.txt"
+            - "keep-stable.custom"
         """, to: "config.yaml")
-        try write("place: /ads.txt\n", to: "static/ads.txt")
+        try write("stable\n", to: "static/keep-stable.custom")
 
         let generator = try SiteGenerator(projectPath: projectPath)
         try await generator.build()
 
         XCTAssertTrue(
-            FileManager.default.fileExists(atPath: outputURL.appendingPathComponent("ads.txt").path),
-            "ads.txt が元の名前で出力されていない"
+            FileManager.default.fileExists(atPath: outputURL.appendingPathComponent("keep-stable.custom").path),
+            "keep-stable.custom が元の名前で出力されていない"
         )
         let builtManifest = try manifest()
-        XCTAssertEqual(builtManifest["ads.txt"], "ads.txt")
+        XCTAssertEqual(builtManifest["keep-stable.custom"], "keep-stable.custom")
 
         // 同じビルドの中で、除外対象ではない通常のアセットは変わらずハッシュされるべき。
         // (この後半のアサーションが無いと、フィンガープリント自体が丸ごと無効化されていても
         // このテストは通ってしまう。)
         let hashedStylesheet = try XCTUnwrap(builtManifest["css/style.css"])
         XCTAssertNotEqual(hashedStylesheet, "css/style.css", "除外対象ではないアセットはハッシュされるべき")
+    }
+
+    /// 上の対照: 同じファイルを `assets.fingerprintExclude` 無しでビルドするとハッシュされる。
+    /// これが無いと、上のテストは「`keep-stable.custom` が何らかの理由で常に除外される」場合にも
+    /// 通ってしまう。
+    func testAFileNotListedInFingerprintExcludeIsHashed() async throws {
+        try write("stable\n", to: "static/keep-stable.custom")
+
+        let generator = try SiteGenerator(projectPath: projectPath)
+        try await generator.build()
+
+        let value = try XCTUnwrap(manifest()["keep-stable.custom"])
+        XCTAssertNotEqual(value, "keep-stable.custom", "設定に無いファイルがハッシュされていない")
+        XCTAssertTrue(AssetPruner.isFingerprintedName(URL(fileURLWithPath: value).lastPathComponent))
     }
 
     func testCleanBuildNeverWritesTheUnhashedFilename() async throws {

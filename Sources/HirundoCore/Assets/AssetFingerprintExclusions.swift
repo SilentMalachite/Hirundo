@@ -91,8 +91,8 @@ public struct AssetFingerprintExclusions: Equatable, Sendable {
     }
 
     /// 連続する `**` セグメントを1つに畳む。`a/**/**/b` は `a/**/b` と意味的に同じなので、
-    /// これは近似ではなく厳密な書き換え ── `matchSegments` の `**` 分岐が
-    /// 「隣接する `**` の数だけ組み合わせを試す」形で指数的に遅くなるのを、原因ごと取り除く。
+    /// これは近似ではなく厳密な書き換え。計算量は `matchSegments` のメモ化が抑えるので、
+    /// これは正規化にすぎない（メモの行数を減らす程度の効果）。
     private static func collapsingConsecutiveDoubleStars(_ segments: [String]) -> [String] {
         var result: [String] = []
         for segment in segments where !(segment == "**" && result.last == "**") {
@@ -101,29 +101,47 @@ public struct AssetFingerprintExclusions: Equatable, Sendable {
         return result
     }
 
-    /// パターンのセグメント列とパスのセグメント列を先頭から再帰的に比較する。
+    /// パターンのセグメント列とパスのセグメント列を比較する。
     ///
     /// `**` はセグメントそのもの（例えば `a/**/b` の真ん中）としてのみ意味を持ち、その場合は
-    /// 残りのパスのどの位置からでも再開できる ── ゼロ個のセグメントの読み飛ばしも許すことで、
-    /// `a/**/b.txt` が `a/b.txt` に一致するようにする。それ以外のセグメントは `matchSegment` で
-    /// `*` を1セグメント内のワイルドカードとして比較する。
+    /// ゼロ個以上のセグメントを読み飛ばせる ── ゼロ個も許すことで `a/**/b.txt` が `a/b.txt` に
+    /// 一致する。それ以外のセグメントは `matchSegment` で `*` を1セグメント内のワイルドカード
+    /// として比較する。
+    ///
+    /// 状態は `(パターンの添字, パスの添字)` の組で、各状態の結果をメモ化する。`**` が複数ある
+    /// パターンでは同じ状態に何度も到達するため、メモ化しないと「`**` ごとに再開位置を全部
+    /// 試す」探索がパス長に対して指数的になる（`assets.fingerprintExclude` はユーザー入力なので、
+    /// 設定ミス1つでビルドが止まる経路だった）。メモ化すれば状態数はパターン長 × パス長で
+    /// 抑えられる。配列を切り出さず添字だけを進めるのも同じ理由（切り出しごとの確保を無くす）。
     private static func matchSegments(pattern: [String], path: [String]) -> Bool {
-        guard let first = pattern.first else { return path.isEmpty }
-        let restPattern = Array(pattern.dropFirst())
+        // memo[patternIndex][pathIndex]。nil は未計算。
+        var memo = [[Bool?]](
+            repeating: [Bool?](repeating: nil, count: path.count + 1),
+            count: pattern.count + 1
+        )
 
-        if first == "**" {
-            // ゼロ個から全部までのセグメントを読み飛ばして、残りのパターンが続きに一致するか試す。
-            for count in 0...path.count {
-                if matchSegments(pattern: restPattern, path: Array(path.dropFirst(count))) {
-                    return true
-                }
+        func match(_ patternIndex: Int, _ pathIndex: Int) -> Bool {
+            if let cached = memo[patternIndex][pathIndex] { return cached }
+
+            let result: Bool
+            if patternIndex == pattern.count {
+                result = pathIndex == path.count
+            } else if pattern[patternIndex] == "**" {
+                // ゼロ個読み飛ばして次のパターンへ進むか、パスを1つ読み飛ばして `**` に留まるか。
+                result = match(patternIndex + 1, pathIndex)
+                    || (pathIndex < path.count && match(patternIndex, pathIndex + 1))
+            } else if pathIndex < path.count,
+                      matchSegment(pattern: pattern[patternIndex], text: path[pathIndex]) {
+                result = match(patternIndex + 1, pathIndex + 1)
+            } else {
+                result = false
             }
-            return false
+
+            memo[patternIndex][pathIndex] = result
+            return result
         }
 
-        guard let firstPathSegment = path.first else { return false }
-        guard matchSegment(pattern: first, text: firstPathSegment) else { return false }
-        return matchSegments(pattern: restPattern, path: Array(path.dropFirst()))
+        return match(0, 0)
     }
 
     /// 1セグメント内での `*` ワイルドカード比較（`*` は空文字列にも一致する）。

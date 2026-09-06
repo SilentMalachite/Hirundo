@@ -1,6 +1,22 @@
 import XCTest
 @testable import HirundoCore
 
+/// `AssetFileManager` の閉じ込め判定（列挙時）とソースの読み込みの間に起きる変化を、
+/// 決定的に再現するためのフック。`resolveConfinedSource` は読み込みの直前に呼ばれるので、
+/// `beforeResolving` は「列挙は通ったが読む前に差し替えられた」、`afterResolving` は
+/// 「判定は通ったがコピーの前に書き換えられた」を表す。
+final class HookedAssetPipeline: AssetPipeline {
+    var beforeResolving: ((URL) throws -> Void)?
+    var afterResolving: ((URL) throws -> Void)?
+
+    override func resolveConfinedSource(_ fileURL: URL, sourceRoot: String) throws -> ConfinedSource {
+        try beforeResolving?(fileURL)
+        let resolved = try super.resolveConfinedSource(fileURL, sourceRoot: sourceRoot)
+        try afterResolving?(fileURL)
+        return resolved
+    }
+}
+
 final class AssetPipelineTests: XCTestCase {
     
     var tempDir: URL!
@@ -274,7 +290,11 @@ final class AssetPipelineTests: XCTestCase {
     /// `write` 冒頭の閉じ込め判定は候補パスを `resolvingSymlinksInPath()` で解決するため、
     /// 次の非クリーンビルド（`hirundo serve` の再ビルド相当）でそのリンクの解決先が出力先の
     /// 外だと判定され、ビルドが `Output path escapes destination directory` で落ちる。
-    /// このテストは2回目の `processAssets` が例外を投げないことでその回帰を固定する。
+    ///
+    /// リンク先は **static の中** に置く。外を指すリンクは `AssetFileManager` が列挙の時点で
+    /// 飛ばすので、外に置くと両方のビルドで `write` に届かず、このテストは何も検証しない
+    /// （以前はそうなっていた）。`XCTUnwrap(first["img/logo.png"])` が、リンクが実際に処理
+    /// されたことの証拠になる。
     func testSecondBuildAfterASymlinkedAssetDoesNotThrow() throws {
         let sourceDir = tempDir.appendingPathComponent("source")
         let destDir = tempDir.appendingPathComponent("dest")
@@ -283,20 +303,34 @@ final class AssetPipelineTests: XCTestCase {
             withIntermediateDirectories: true
         )
 
-        let sharedDir = tempDir.appendingPathComponent("shared")
+        let sharedDir = sourceDir.appendingPathComponent("shared")
         try FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
+        let targetContent = Data("this is the real image bytes".utf8)
         let targetFile = sharedDir.appendingPathComponent("logo-real.png")
-        try Data("this is the real image bytes".utf8).write(to: targetFile)
+        try targetContent.write(to: targetFile)
 
         let logoLink = sourceDir.appendingPathComponent("img/logo.png")
         try FileManager.default.createSymbolicLink(at: logoLink, withDestinationURL: targetFile)
 
-        // `hirundo serve` はクリーンせずに同じ出力先へ再ビルドする。フィンガープリント無効でも
-        // 壊れる（ブリーフ item 1 の主張どおり）ことを確かめるため、ここでは無効のままにする。
-        _ = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+        // 1回目: リンクが実体として書き出されていること。リンクのまま出ると、2回目の閉じ込め
+        // 判定がその解決先を見て落ちる。フィンガープリント無効でも壊れる経路なので無効のまま。
+        let first = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+        let firstOutput = destDir.appendingPathComponent(try XCTUnwrap(first["img/logo.png"]))
+        XCTAssertNotEqual(
+            try firstOutput.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink, true,
+            "1回目のビルドがシンボリックリンクのまま書き出している: \(firstOutput.path)"
+        )
+
+        // 2回目: `hirundo serve` はクリーンせずに同じ出力先へ再ビルドする。
+        var second = AssetManifest()
         XCTAssertNoThrow(
-            try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
-            "1回目のビルドが残したシンボリックリンクにより、2回目のビルドが閉じ込め判定で落ちてはいけない"
+            second = try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
+            "1回目のビルドが残した出力の上に2回目のビルドが書けない"
+        )
+        XCTAssertEqual(second["img/logo.png"], "img/logo.png")
+        XCTAssertEqual(
+            try Data(contentsOf: firstOutput), targetContent,
+            "2回目のビルド後の出力がリンク先の実体と一致しない"
         )
     }
 
@@ -860,6 +894,136 @@ final class AssetPipelineTests: XCTestCase {
     }
 
     // MARK: - シンボリックリンク
+
+    /// 列挙時の閉じ込め判定を通ったリンクが、読まれる前に `static/` の外へ向け直される
+    /// check-to-use 競合。パススルーアセットの経路。
+    func testALinkRetargetedOutsideAfterEnumerationIsRefusedAtReadTime() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let insideTarget = sourceDir.appendingPathComponent("inside.png")
+        try Data("inside".utf8).write(to: insideTarget)
+        let outsideTarget = tempDir.appendingPathComponent("secret.png")
+        try Data("secret".utf8).write(to: outsideTarget)
+
+        let link = sourceDir.appendingPathComponent("logo.png")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: insideTarget)
+
+        let hooked = HookedAssetPipeline()
+        hooked.beforeResolving = { fileURL in
+            guard fileURL.lastPathComponent == "logo.png" else { return }
+            try FileManager.default.removeItem(at: link)
+            try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outsideTarget)
+        }
+
+        XCTAssertThrowsError(
+            try hooked.processAssets(from: sourceDir.path, to: destDir.path),
+            "列挙後に外へ向け直されたリンクが読まれている"
+        ) { error in
+            guard case AssetPipelineError.pathTraversalAttempt = error else {
+                return XCTFail("pathTraversalAttempt 以外のエラー: \(error)")
+            }
+        }
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: destDir.appendingPathComponent("logo.png").path),
+            "static/ の外の中身が出力に書き出された"
+        )
+    }
+
+    /// 同じ競合の CSS 経路。CSS は列挙（パス1）と読み込み（パス2）が離れているので、
+    /// この窓は実際に広い。
+    func testAStylesheetLinkRetargetedOutsideBetweenPassesIsRefused() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let insideTarget = sourceDir.appendingPathComponent("inside.css")
+        try "body{}".write(to: insideTarget, atomically: true, encoding: .utf8)
+        let outsideTarget = tempDir.appendingPathComponent("secret.css")
+        try "/* secret */".write(to: outsideTarget, atomically: true, encoding: .utf8)
+
+        let link = sourceDir.appendingPathComponent("style.css")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: insideTarget)
+
+        let hooked = HookedAssetPipeline()
+        hooked.beforeResolving = { fileURL in
+            guard fileURL.lastPathComponent == "style.css" else { return }
+            try FileManager.default.removeItem(at: link)
+            try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outsideTarget)
+        }
+
+        XCTAssertThrowsError(
+            try hooked.processAssets(from: sourceDir.path, to: destDir.path),
+            "パス1の後に外へ向け直されたリンクが読まれている"
+        ) { error in
+            guard case AssetPipelineError.pathTraversalAttempt = error else {
+                return XCTFail("pathTraversalAttempt 以外のエラー: \(error)")
+            }
+        }
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: destDir.appendingPathComponent("style.css").path),
+            "static/ の外の中身が出力に書き出された"
+        )
+    }
+
+    /// 閉じ込め判定は通ったが、コピーの前にソースが書き換えられた。ハッシュ計算とコピーが
+    /// 別々にソースを読む構造だと、出力名のハッシュと実データが食い違う。判定直後の識別情報と
+    /// コピー直後の識別情報を比べて、変わっていたら失敗させる。
+    func testASourceModifiedAfterItsContainmentCheckFailsTheCopy() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let sourceFile = sourceDir.appendingPathComponent("logo.png")
+        try Data("original".utf8).write(to: sourceFile)
+
+        let hooked = HookedAssetPipeline()
+        hooked.enableFingerprinting = true
+        hooked.afterResolving = { fileURL in
+            guard fileURL.lastPathComponent == "logo.png" else { return }
+            let handle = try FileHandle(forWritingTo: sourceFile)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data(" + appended".utf8))
+            try handle.close()
+        }
+
+        XCTAssertThrowsError(
+            try hooked.processAssets(from: sourceDir.path, to: destDir.path),
+            "判定後に書き換えられたソースがそのままコピーされている"
+        ) { error in
+            XCTAssertTrue(
+                "\(error)".contains("changed while it was being copied"),
+                "想定外のエラー: \(error)"
+            )
+        }
+
+        // 失敗したときにステージングファイルが残っていないこと。
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: destDir.path)
+            .filter { $0.hasPrefix(".hirundo-") }
+        XCTAssertTrue(leftovers.isEmpty, "ステージングファイルが残っている: \(leftovers)")
+    }
+
+    /// ハッシュはステージングファイル（差し替えるバイト列そのもの）から取る。ソースを2回読む
+    /// 構造ではないことを、出力名のハッシュ＝出力バイト列のハッシュで固定する。
+    func testPassThroughFingerprintCoversTheBytesActuallyWritten() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        let content = Data("pass-through bytes".utf8)
+        try content.write(to: sourceDir.appendingPathComponent("logo.png"))
+
+        pipeline.enableFingerprinting = true
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        let outputRelativePath = try XCTUnwrap(manifest["logo.png"])
+        let written = try Data(contentsOf: destDir.appendingPathComponent(outputRelativePath))
+        XCTAssertEqual(
+            outputRelativePath,
+            "logo-\(AssetProcessor().generateFingerprint(for: written)).png",
+            "出力名のハッシュが出力バイト列のハッシュと一致しない"
+        )
+    }
 
     func testSkipsAFileSymlinkPointingOutsideTheSourceDirectory() throws {
         let sourceDir = tempDir.appendingPathComponent("source")
