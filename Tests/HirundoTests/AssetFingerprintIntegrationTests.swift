@@ -191,4 +191,82 @@ final class AssetFingerprintIntegrationTests: XCTestCase {
             "ハッシュ無しの名前でも出力されている"
         )
     }
+
+    /// パス3（`SiteGenerator.rewriteAssetReferences`）が UTF-8 として読めないファイルに出会った
+    /// ときの挙動。スキップ自体は仕様どおり（バイナリを壊さない）だが、無言でスキップすると
+    /// ページに未解決の参照が残ったまま気づけない。1行の警告を出すべき。
+    func testNonUTF8FileInOutputTreeIsSkippedAndWarnedAbout() async throws {
+        let generator = try SiteGenerator(projectPath: projectPath)
+
+        // `build()` は clean しない限り既存の出力を消さないので、事前に置いたファイルは
+        // パス3の巡回対象として残る。
+        try FileManager.default.createDirectory(
+            at: outputURL.appendingPathComponent("legacy"),
+            withIntermediateDirectories: true
+        )
+        let brokenFile = outputURL.appendingPathComponent("legacy/mystery.html")
+        let invalidUTF8 = Data([0xFF, 0xFE, 0x00, 0x01])
+        try invalidUTF8.write(to: brokenFile)
+
+        let stderrOutput = try await capturingStandardError {
+            try await generator.build()
+        }
+
+        XCTAssertEqual(
+            try Data(contentsOf: brokenFile), invalidUTF8,
+            "UTF-8 として読めないファイルの中身を書き換えてはいけない"
+        )
+        XCTAssertTrue(
+            stderrOutput.contains("legacy/mystery.html"),
+            "警告がファイルを名指ししていない: \(stderrOutput)"
+        )
+        XCTAssertTrue(stderrOutput.contains("UTF-8"), "警告が理由を説明していない: \(stderrOutput)")
+    }
+
+    /// `.htm` は Hirundo がどこでも書き出さない拡張子なので、パス3が触ってよい理由が無い。
+    /// `generateSitemap` と同じく `html` だけに一致させる。
+    func testHtmFileInOutputTreeIsNoLongerRewritten() async throws {
+        let generator = try SiteGenerator(projectPath: projectPath)
+
+        try FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
+        let htmFile = outputURL.appendingPathComponent("legacy.htm")
+        let original = "<img src=\"/images/logo.png\">"
+        try original.write(to: htmFile, atomically: true, encoding: .utf8)
+
+        try await generator.build()
+
+        let content = try String(contentsOf: htmFile, encoding: .utf8)
+        XCTAssertEqual(content, original, ".htm ファイルは書き換え対象から外れているべき")
+    }
+
+    // MARK: - stderr capture
+
+    /// `body` の実行中だけ stderr をパイプにつなぎ替えて、そこに書かれたものを文字列で返す。
+    /// `SiteGenerator`/`AssetPipeline` の警告は stderr への直接書き込みなので、これが確かめる
+    /// 唯一の方法。パイプの書き込み端を閉じてから読むので、詰まって待ち続けることはない。
+    private func capturingStandardError(_ body: () async throws -> Void) async throws -> String {
+        let pipe = Pipe()
+        fflush(stderr)
+        let saved = dup(STDERR_FILENO)
+        dup2(pipe.fileHandleForWriting.fileDescriptor, STDERR_FILENO)
+
+        var restored = false
+        func restore() {
+            guard !restored else { return }
+            restored = true
+            fflush(stderr)
+            dup2(saved, STDERR_FILENO)
+            close(saved)
+            try? pipe.fileHandleForWriting.close()
+        }
+
+        do {
+            try await body()
+        } catch {
+            restore()
+            throw error
+        }
+        restore()
+        return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    }
 }

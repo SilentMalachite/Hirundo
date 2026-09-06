@@ -185,6 +185,22 @@ final class AssetPrunerTests: XCTestCase {
         XCTAssertTrue(exists("CNAME"))
     }
 
+    func testPropagatesADirectoryReadFailureInsteadOfPruningNothing() throws {
+        // static/ のトップレベルが読めない場合（権限エラーなど）に「削除対象なし」として黙って
+        // 戻ってしまうと、I/O エラーが握りつぶされて古い出力が積み上がっても気づけない。
+        // エラーとして呼び出し元（`SiteGenerator` の `static assets` ステップ）に伝えるべき。
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: staticDir.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staticDir.path)
+        }
+
+        XCTAssertThrowsError(try AssetPruner.prune(
+            outputDirectory: outputDir,
+            staticDirectory: staticDir,
+            keeping: AssetManifest()
+        ))
+    }
+
     func testKeepsADirectoryWhoseNameLooksLikeAFingerprintedFile() throws {
         try "User-agent: *".write(to: staticDir.appendingPathComponent("robots.txt"), atomically: true, encoding: .utf8)
         try FileManager.default.createDirectory(

@@ -451,16 +451,29 @@ public class SiteGenerator {
 
         for case let fileURL as URL in walker {
             try Task.checkCancellation()
-            guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
-            else { continue }
+
+            let isRegularFile: Bool
+            do {
+                isRegularFile = try fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile ?? false
+            } catch {
+                warn("\(fileURL.path): could not read file attributes; skipping asset reference rewrite")
+                continue
+            }
+            guard isRegularFile else { continue }
 
             let ext = fileURL.pathExtension.lowercased()
-            guard ext == "html" || ext == "htm" || ext == "css" else { continue }
+            guard ext == "html" || ext == "css" else { continue }
 
             guard let relativePath = AssetPruner.relativePath(of: fileURL, under: outputURL),
                   !generated.contains(relativePath) else { continue }
 
-            guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else { continue }
+            let content: String
+            do {
+                content = try String(contentsOf: fileURL, encoding: .utf8)
+            } catch {
+                warn("\(relativePath): not valid UTF-8; skipping asset reference rewrite")
+                continue
+            }
 
             let directory = AssetManifest.parentDirectory(of: relativePath)
             let rewritten = ext == "css"
@@ -470,6 +483,11 @@ public class SiteGenerator {
             guard rewritten != content else { continue }
             try siteFileManager.writeFile(content: rewritten, to: fileURL)
         }
+    }
+
+    /// `AssetPipeline` の同名メソッドと同じ見た目・文面にそろえた stderr への警告出力。
+    private func warn(_ message: String) {
+        try? FileHandle.standardError.write(contentsOf: Data("⚠️  \(message)\n".utf8))
     }
 
     // MARK: - Built-in feature generators (sitemap, RSS, search index)

@@ -41,6 +41,11 @@ public class AssetPipeline {
     /// 2. CSS を処理し、1で確定したマニフェストで `url(...)` を書き換えてからハッシュする
     /// 3. HTML の書き換え。これはこのクラスの外、`SiteGenerator` の finalization ステップ
     ///
+    /// この処理にロールバックは無い。途中で throw すると、その時点までに処理し終えたアセットは
+    /// 既に（フィンガープリント有効時はハッシュ付きの名前で）出力ディレクトリに書き出されており、
+    /// 呼び出し側はマニフェストを受け取れない。中途半端な出力ツリーが残るということであり、
+    /// 直し方はクリーンビルド（`--clean`）のやり直しになる。
+    ///
     /// - Returns: キーが static からの相対パス、値が出力ディレクトリからの相対パスのマニフェスト。
     ///   フィンガープリントが無効なときも全アセットを載せる。
     public func processAssets(from sourcePath: String, to destinationPath: String) throws -> AssetManifest {
