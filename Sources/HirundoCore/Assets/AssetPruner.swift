@@ -17,6 +17,10 @@ import Foundation
 /// 条件2があるため、`content/css/foo.md` が `_site/css/foo/index.html` を生むようなパスの
 /// 衝突があってもページ出力を消すことは構造上あり得ない。固定 URL のアセット（`robots.txt`
 /// など、`AssetFingerprintExclusions` を参照）もハッシュ名にならないので、同じ条件で守られる。
+///
+/// 閉じ込めの判定は `OutputPathGuard` に通す。書き込みと同じ規則で、同じ理由である ── 親は
+/// 解決するので出力の外へ出るリンクを経由した削除は届かず、最後の要素は解決しないので
+/// `removeItem` が消すのはそこにある実体そのもの（リンクならリンク）になる。
 public enum AssetPruner {
 
     /// `<name>-<16桁の小文字16進数>.<ext>` か、拡張子の無いアセット（`CNAME` など）由来の
@@ -39,6 +43,12 @@ public enum AssetPruner {
         fileManager: FileManager = .default
     ) throws {
         let keep = manifest.outputPaths
+        // 削除も書き込みと同じ判定を通す。かつてはここだけが自前の包含判定（両辺を解決する
+        // `relativePath`）を持っていて、規則が2系統あることをドキュメントに書き残していた。
+        let guardian = OutputPathGuard(
+            root: outputDirectory.standardizedFileURL.resolvingSymlinksInPath(),
+            fileManager: fileManager
+        )
 
         // 出力が無ければ掃除するものも無い。
         guard fileManager.fileExists(atPath: outputDirectory.path) else { return }
@@ -67,9 +77,8 @@ public enum AssetPruner {
                       ) else { continue }
 
                 for case let fileURL as URL in walker {
-                    guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
-                    else { continue }
-                    try pruneIfStale(fileURL, outputDirectory: outputDirectory, keep: keep, fileManager: fileManager)
+                    guard isPrunableEntry(fileURL) else { continue }
+                    try pruneIfStale(fileURL, guardian: guardian, keep: keep)
                 }
             } else {
                 // トップレベルのファイルは出力でハッシュ名になっているので、名前の完全一致では
@@ -77,14 +86,8 @@ public enum AssetPruner {
                 let stem = URL(fileURLWithPath: entry).deletingPathExtension().lastPathComponent
                 for sibling in outputDirectoryContents where sibling.hasPrefix(stem + "-") {
                     let siblingURL = outputDirectory.appendingPathComponent(sibling)
-                    guard (try? siblingURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
-                    else { continue }
-                    try pruneIfStale(
-                        siblingURL,
-                        outputDirectory: outputDirectory,
-                        keep: keep,
-                        fileManager: fileManager
-                    )
+                    guard isPrunableEntry(siblingURL) else { continue }
+                    try pruneIfStale(siblingURL, guardian: guardian, keep: keep)
                 }
             }
         }
@@ -93,35 +96,31 @@ public enum AssetPruner {
         // トップレベル一覧からは届かない範囲は、前回のマニフェストだけが知っている。
         for outputPath in previous.outputPaths.subtracting(keep) {
             let fileURL = outputDirectory.appendingPathComponent(outputPath)
-            guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
-            else { continue }
-            try pruneIfStale(fileURL, outputDirectory: outputDirectory, keep: keep, fileManager: fileManager)
+            guard isPrunableEntry(fileURL) else { continue }
+            try pruneIfStale(fileURL, guardian: guardian, keep: keep)
         }
+    }
+
+    /// 掃除の対象になりうる種類か ── 通常ファイルか、シンボリックリンクそのもの。
+    ///
+    /// リンクを含めるのは、書き込み側が生成物の位置に残ったリンクを取り除くのと同じ理由。
+    /// `URLResourceValues` はリンクを辿らないので `isRegularFile` はリンクに対して false
+    /// になり、ここを通さないとハッシュ名のリンクは一度も判定に届かず残り続ける。
+    /// ディレクトリは（リンクでない限り）ここで落ちるので、実体のディレクトリを消すことはない。
+    private static func isPrunableEntry(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        else { return false }
+        return values.isRegularFile == true || values.isSymbolicLink == true
     }
 
     private static func pruneIfStale(
         _ fileURL: URL,
-        outputDirectory: URL,
-        keep: Set<String>,
-        fileManager: FileManager
+        guardian: OutputPathGuard,
+        keep: Set<String>
     ) throws {
         guard isFingerprintedName(fileURL.lastPathComponent) else { return }
-        guard let relativePath = relativePath(of: fileURL, under: outputDirectory) else { return }
-        guard !keep.contains(relativePath) else { return }
-        try fileManager.removeItem(at: fileURL)
-    }
-
-    /// 出力ディレクトリからの相対パス。出力の外なら `nil`。
-    ///
-    /// シンボリックリンクは両辺とも解決してから前方一致を取る。これにより macOS の
-    /// `/var` → `/private/var` のようなテンポラリディレクトリの下でも正しく判定でき、
-    /// 出力ルートの外を指すシンボリックリンクは前方一致に失敗してスキップされる。
-    ///
-    /// `SiteGenerator`（書き込みの許可判定）と `AssetPruner`（削除の対象判定）の両方が
-    /// この関数に依存している。どちらか一方だけを直すことがないよう、実装は1箇所に保つ。
-    internal static func relativePath(of fileURL: URL, under root: URL) -> String? {
-        let filePath = fileURL.standardizedFileURL.resolvingSymlinksInPath().path
-        let rootPath = root.standardizedFileURL.resolvingSymlinksInPath().path
-        return PathBoundary.descendantRelativePath(of: filePath, under: rootPath)
+        guard let destination = guardian.destination(for: fileURL) else { return }
+        guard !keep.contains(guardian.relativePath(of: destination)) else { return }
+        try guardian.remove(at: fileURL)
     }
 }

@@ -367,12 +367,10 @@ public class AssetPipeline {
         let rawCandidateURL = destinationRootURL.appendingPathComponent(relativePath)
 
         // 閉じ込めの判定は親ディレクトリまでを解決して行い、最後の要素は解決しない。理由は
-        // `OutputPathGuard` の doc コメントにまとめてある。
-        guard let destination = guardian.destination(for: rawCandidateURL) else {
-            throw AssetPipelineError.processingFailed(
-                "Output path escapes destination directory: \(rawCandidateURL.path)"
-            )
-        }
+        // `OutputPathGuard` の doc コメントにまとめてある。refusal は `FileManagerError` で、
+        // `SiteFileManager` が投げるものと同じ ── 同じ規則を同じように破ったときに、たどり着いた
+        // 呼び出し元によって文面が変わらないように。
+        let destination = try guardian.requireDestination(for: rawCandidateURL)
         let candidateURL = destination.url
         let parentURL = destination.parent
         let outputDirectory = destination.relativeDirectory
@@ -383,11 +381,7 @@ public class AssetPipeline {
         // `_site/a -> /outside` in place and `/outside/b` missing, writing `a/b/x.css` created
         // `/outside/b` and wrote there. `createDirectories` re-checks every existing link
         // against the root as it reaches it. See `OutputPathGuard.createDirectories`.
-        guard try guardian.createDirectories(upTo: parentURL) else {
-            throw AssetPipelineError.processingFailed(
-                "Output path escapes destination directory: \(rawCandidateURL.path)"
-            )
-        }
+        try guardian.requireDirectories(upTo: parentURL, reporting: rawCandidateURL.path)
 
         let shouldFingerprint = enableFingerprinting && allowFingerprint
             && !fingerprintExclusions.excludes(relativePath)

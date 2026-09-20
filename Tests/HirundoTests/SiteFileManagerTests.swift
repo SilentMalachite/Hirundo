@@ -294,6 +294,54 @@ final class SiteFileManagerTests: XCTestCase {
         }
     }
 
+    // MARK: - emptyOutputDirectory (shared by `build --clean` and `clean --force`)
+
+    func testEmptyOutputDirectoryLeavesTheDirectoryItself() throws {
+        try manager.writeFile(content: "old", to: outputDir.appendingPathComponent("a.html"))
+        try manager.writeFile(content: "", to: outputDir.appendingPathComponent(".nojekyll"))
+
+        try SiteFileManager.emptyOutputDirectory(at: outputDir)
+
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: outputDir.path, isDirectory: &isDirectory),
+            "the directory itself is not what `clean` names"
+        )
+        XCTAssertTrue(isDirectory.boolValue)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: outputDir.path), [])
+    }
+
+    func testEmptyOutputDirectoryKeepsALinkedRootAndEmptiesItsTarget() throws {
+        // `hirundo clean --force` used to `removeItem` the root, so on this layout it took the
+        // link out and the next build wrote to a fresh directory beside the volume.
+        let real = tempDir.appendingPathComponent("build-target")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        try "old".write(to: real.appendingPathComponent("a.html"), atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(at: outputDir, withDestinationURL: real)
+
+        try SiteFileManager.emptyOutputDirectory(at: outputDir)
+
+        XCTAssertTrue(isSymlink(outputDir), "the link is the layout, not stale output")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: real.path), [])
+    }
+
+    func testEmptyOutputDirectoryDoesNothingWhenThereIsNothingThere() throws {
+        XCTAssertNoThrow(try SiteFileManager.emptyOutputDirectory(at: outputDir))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outputDir.path),
+                       "emptying must not create what it did not find")
+    }
+
+    func testEmptyOutputDirectoryRefusesARootThatIsAFile() throws {
+        try "not a directory".write(to: outputDir, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try SiteFileManager.emptyOutputDirectory(at: outputDir)) { error in
+            guard case FileManagerError.outputRootIsNotADirectory = error else {
+                return XCTFail("expected outputRootIsNotADirectory, got \(error)")
+            }
+        }
+        XCTAssertEqual(try String(contentsOf: outputDir, encoding: .utf8), "not a directory")
+    }
+
     // MARK: - fileExists
 
     func testFileExistsAnswersForPathsOutsideTheOutputDirectory() throws {

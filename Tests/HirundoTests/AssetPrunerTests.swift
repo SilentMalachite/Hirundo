@@ -73,6 +73,60 @@ final class AssetPrunerTests: XCTestCase {
         XCTAssertTrue(exists("css/style-9f2a1c04b7e3d5a1.css"))
     }
 
+    /// 以前はここが自前の包含判定を持っていて、両辺を解決していた。ハッシュ名のリンクは
+    /// 解決先が出力の外に出るので前方一致に失敗し、**永久に掃除されなかった**。書き込み側は
+    /// 閉じ込めが入った時点からリンクを取り除いているので、削除側をそれに合わせる。
+    func testRemovesAStaleSymlinkLeftAtAFingerprintedName() throws {
+        let victim = tempDir.appendingPathComponent("victim.txt")
+        try "do not touch".write(to: victim, atomically: true, encoding: .utf8)
+
+        let stale = outputDir.appendingPathComponent("css/style-0000000000000000.css")
+        try FileManager.default.createSymbolicLink(at: stale, withDestinationURL: victim)
+        try write("new", to: "css/style-9f2a1c04b7e3d5a1.css", under: outputDir)
+
+        try AssetPruner.prune(
+            outputDirectory: outputDir,
+            staticDirectory: staticDir,
+            keeping: AssetManifest(["css/style.css": "css/style-9f2a1c04b7e3d5a1.css"])
+        )
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: stale.path),
+            "古いリンクが残り続けている"
+        )
+        XCTAssertEqual(
+            try String(contentsOf: victim, encoding: .utf8), "do not touch",
+            "リンクではなくリンク先を消している"
+        )
+    }
+
+    /// 途中のディレクトリが出力の外を指すリンクの場合は、その先にあるハッシュ名のファイルには
+    /// 手を出さない。最後の要素は解決しないが、親は解決するので届かない。
+    func testDoesNotReachThroughAnEscapingIntermediateLink() throws {
+        let outside = tempDir.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let victim = outside.appendingPathComponent("logo-0000000000000000.png")
+        try "do not touch".write(to: victim, atomically: true, encoding: .utf8)
+
+        try FileManager.default.createDirectory(
+            at: staticDir.appendingPathComponent("img"), withIntermediateDirectories: true
+        )
+        try FileManager.default.createSymbolicLink(
+            at: outputDir.appendingPathComponent("img"), withDestinationURL: outside
+        )
+
+        try AssetPruner.prune(
+            outputDirectory: outputDir,
+            staticDirectory: staticDir,
+            keeping: AssetManifest()
+        )
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: victim.path),
+            "出力の外を指すリンク越しに消している"
+        )
+    }
+
     func testKeepsNonFingerprintedFilesInScope() throws {
         try write("keep", to: "css/README.txt", under: outputDir)
 

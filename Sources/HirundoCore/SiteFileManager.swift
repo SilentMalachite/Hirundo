@@ -57,46 +57,77 @@ public class SiteFileManager {
 
     /// Creates the configured output directory, optionally emptying it first.
     ///
-    /// `clean` empties the directory; it does not remove it. Removing it would resolve the link
-    /// when the root is one — `_site -> /Volumes/build/site` is a layout the asset pipeline
-    /// already supports — and delete whatever it points at, which for `_site -> $HOME` is exactly
-    /// as bad as it sounds. Emptying keeps the damage inside the output directory, which is what
-    /// `--clean` means.
+    /// `clean` empties the directory; it does not remove it. See ``emptyOutputDirectory(at:fileManager:)``
+    /// for why.
     public func prepareOutputDirectory(clean: Bool) throws {
         let roots = outputRoots()
-        let rawPath = roots.raw.path
 
-        if let attributes = try? fileManager.attributesOfItem(atPath: rawPath) {
-            let type = attributes[.type] as? FileAttributeType
-            let isLink = type == .typeSymbolicLink
-            let target = isLink ? roots.raw.resolvingSymlinksInPath() : roots.raw
-            var isDirectory: ObjCBool = false
-            let exists = fileManager.fileExists(atPath: target.path, isDirectory: &isDirectory)
-
-            guard !exists || isDirectory.boolValue else {
-                throw FileManagerError.outputRootIsNotADirectory(rawPath)
-            }
-            if clean && exists {
-                if isLink {
-                    warn("\(rawPath) is a symbolic link; emptying \(target.path) instead of removing the link")
-                }
-                try emptyDirectory(at: target)
-            }
+        if clean {
+            try Self.emptyOutputDirectory(at: roots.raw, fileManager: fileManager)
+        } else {
+            // Nothing to empty, but a root that is a file rather than a directory is still worth
+            // reporting here rather than deep inside the first write.
+            _ = try Self.outputRoot(at: roots.raw, fileManager: fileManager)
         }
 
         try fileManager.createDirectory(at: roots.raw, withIntermediateDirectories: true)
     }
 
-    /// Removes everything in `directory`, hidden entries included — `.nojekyll` and friends are
-    /// generated output like anything else.
-    private func emptyDirectory(at directory: URL) throws {
+    /// Empties an output directory, leaving the directory itself in place.
+    ///
+    /// It does not remove the directory, and that is the whole point. `removeItem` on a root that
+    /// is a symbolic link takes out the link — `_site -> /Volumes/build/site` is a layout the
+    /// asset pipeline supports, and the next build would write to a fresh `_site` beside it
+    /// instead of the volume the author pointed at. An older spelling was worse: it resolved the
+    /// root first, so `_site -> $HOME` deleted the home directory. Emptying keeps the damage
+    /// inside the output directory, which is what "clean" means.
+    ///
+    /// `hirundo build --clean` and `hirundo clean --force` both come through here, so the two
+    /// cannot drift apart.
+    ///
+    /// Hidden entries are emptied too: `.nojekyll` and friends are generated output like anything
+    /// else. Does nothing when there is no output directory to empty.
+    public static func emptyOutputDirectory(at root: URL, fileManager: FileManager = .default) throws {
+        guard let found = try outputRoot(at: root, fileManager: fileManager) else { return }
+        let target = found.target
+
+        if found.isLink {
+            eprintWarning(
+                "\(root.path) is a symbolic link; emptying \(target.path) instead of removing the link"
+            )
+        }
         let contents = try fileManager.contentsOfDirectory(
-            at: directory,
+            at: target,
             includingPropertiesForKeys: nil
         )
         for entry in contents {
             try fileManager.removeItem(at: entry)
         }
+    }
+
+    /// The directory an output root names, following a link at the root itself, or `nil` when
+    /// nothing is there. Throws when something is there and is not a directory.
+    private static func outputRoot(
+        at root: URL, fileManager: FileManager
+    ) throws -> (target: URL, isLink: Bool)? {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: root.path) else {
+            return nil
+        }
+        let isLink = attributes[.type] as? FileAttributeType == .typeSymbolicLink
+        let target = isLink ? root.resolvingSymlinksInPath() : root
+
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: target.path, isDirectory: &isDirectory) else {
+            return nil
+        }
+        guard isDirectory.boolValue else {
+            throw FileManagerError.outputRootIsNotADirectory(root.path)
+        }
+        return (target, isLink)
+    }
+
+    private static func eprintWarning(_ message: String) {
+        try? FileHandle.standardError.write(contentsOf: Data("⚠️  \(message)\n".utf8))
     }
 
     // MARK: - Writing
@@ -114,9 +145,7 @@ public class SiteFileManager {
            !PathBoundary.contains(destination.url.resolvingSymlinksInPath(), in: guardian.root) {
             try fileManager.removeItem(at: destination.url)
         }
-        guard try guardian.createDirectories(upTo: destination.url) else {
-            throw FileManagerError.outputPathEscapes(url.path)
-        }
+        try guardian.requireDirectories(upTo: destination.url, reporting: url.path)
     }
 
     /// Writes a generated file into the output tree, atomically.
@@ -134,9 +163,7 @@ public class SiteFileManager {
         guard let (guardian, destination) = confinedDestination(for: url) else {
             throw FileManagerError.outputPathEscapes(url.path)
         }
-        guard try guardian.createDirectories(upTo: destination.parent) else {
-            throw FileManagerError.outputPathEscapes(url.path)
-        }
+        try guardian.requireDirectories(upTo: destination.parent, reporting: url.path)
         try guardian.removeStaleSymlink(at: destination.url)
         try data.write(to: destination.url, options: .atomic)
     }
@@ -153,21 +180,5 @@ public class SiteFileManager {
 
     private func warn(_ message: String) {
         try? FileHandle.standardError.write(contentsOf: Data("⚠️  \(message)\n".utf8))
-    }
-}
-
-/// Failures the confinement raises. Anything the filesystem itself refuses is rethrown as the
-/// `FileManager` error it came with, which carries a reason worth reading.
-public enum FileManagerError: LocalizedError {
-    case outputPathEscapes(String)
-    case outputRootIsNotADirectory(String)
-
-    public var errorDescription: String? {
-        switch self {
-        case .outputPathEscapes(let path):
-            return "Output path escapes the output directory: \(path)"
-        case .outputRootIsNotADirectory(let path):
-            return "Output path exists and is not a directory: \(path)"
-        }
     }
 }
