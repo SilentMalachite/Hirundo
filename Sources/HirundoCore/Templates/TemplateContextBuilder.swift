@@ -9,9 +9,14 @@ public class TemplateContextBuilder {
     }
     
     /// Builds context for content rendering
+    ///
+    /// `siteURL` is the URL this page is published under. It has to be passed in: it is derived
+    /// from where the page will be *written*, which is `SiteGenerator`'s to decide, and deriving
+    /// it a second time here would duplicate the `index.md` rule and drift from it.
     public func buildContext(
         for content: ProcessedContent,
         htmlContent: String,
+        siteURL: String,
         allPages: [Page],
         allPosts: [Post]
     ) -> [String: Any] {
@@ -25,9 +30,9 @@ public class TemplateContextBuilder {
         // Add page/post specific context
         switch content.type {
         case .page:
-            context["page"] = preparePageContext(from: content)
+            context["page"] = preparePageContext(from: content, siteURL: siteURL)
         case .post:
-            context["page"] = preparePostContext(from: content)
+            context["page"] = preparePostContext(from: content, siteURL: siteURL)
             context["categories"] = prepareCategoriesContext(from: allPosts)
             context["tags"] = prepareTagsContext(from: allPosts)
         }
@@ -92,11 +97,13 @@ public class TemplateContextBuilder {
     }
     
     /// Prepares page context from processed content
-    private func preparePageContext(from content: ProcessedContent) -> [String: Any] {
+    private func preparePageContext(
+        from content: ProcessedContent, siteURL: String
+    ) -> [String: Any] {
         return [
             "title": content.metadata.title,
             "description": content.metadata.description ?? "",
-            "url": content.url.path,
+            "url": siteURL,
             "slug": content.metadata.slug ?? content.url.deletingPathExtension().lastPathComponent
         ]
     }
@@ -112,7 +119,9 @@ public class TemplateContextBuilder {
     }
     
     /// Prepares post context from processed content
-    private func preparePostContext(from content: ProcessedContent) -> [String: Any] {
+    private func preparePostContext(
+        from content: ProcessedContent, siteURL: String
+    ) -> [String: Any] {
         return [
             "title": content.metadata.title,
             "description": content.metadata.description ?? "",
@@ -120,7 +129,7 @@ public class TemplateContextBuilder {
             "author": content.metadata.author ?? "",
             "categories": content.metadata.categories,
             "tags": content.metadata.tags,
-            "url": content.url.path,
+            "url": siteURL,
             "slug": content.metadata.slug ?? content.url.deletingPathExtension().lastPathComponent
         ]
     }

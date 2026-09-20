@@ -47,6 +47,13 @@ final class PublishedURLTests: XCTestCase {
         )
     }
 
+    private func writeTemplate(_ name: String, _ body: String) throws {
+        try body.write(
+            to: projectDir.appendingPathComponent("templates").appendingPathComponent(name),
+            atomically: true, encoding: .utf8
+        )
+    }
+
     private func writeContent(_ relativePath: String, _ body: String) throws {
         let url = projectDir.appendingPathComponent("content").appendingPathComponent(relativePath)
         try FileManager.default.createDirectory(
@@ -149,6 +156,39 @@ final class PublishedURLTests: XCTestCase {
 
         let urls = try searchIndexURLs()
         XCTAssertEqual(urls, ["/", "/about/"])
+    }
+
+    // MARK: - The page's own URL
+
+    func testTheRenderedPageKnowsItsOwnSiteRelativeURL() async throws {
+        try scaffoldSite()
+        try writeTemplate("default.html", "<!DOCTYPE html><html><body>[{{ page.url }}]</body></html>")
+        try writeContent("about.md", "---\ntitle: \"About\"\n---\n\nBody.\n")
+        try await build()
+
+        XCTAssertTrue(try output("about/index.html").contains("[/about/]"))
+    }
+
+    func testTheRenderedPageDoesNotExposeItsSourceMarkdownPath() async throws {
+        // `{{ page.url }}` was handed `content.url.path`: the `.md` file's absolute path.
+        try scaffoldSite()
+        try writeTemplate("default.html", "<!DOCTYPE html><html><body>[{{ page.url }}]</body></html>")
+        try writeContent("about.md", "---\ntitle: \"About\"\n---\n\nBody.\n")
+        try await build()
+
+        let html = try output("about/index.html")
+        XCTAssertFalse(html.contains(".md"))
+        XCTAssertFalse(html.contains(projectDir.path))
+    }
+
+    func testTheRenderedPostAndTheArchiveAgreeOnItsURL() async throws {
+        try scaffoldSite()
+        try writeTemplate("post.html", "<!DOCTYPE html><html><body>[{{ page.url }}]</body></html>")
+        try writeContent("posts/hello.md", post(title: "Hello"))
+        try await build()
+
+        XCTAssertTrue(try output("posts/hello/index.html").contains("[/posts/hello/]"))
+        XCTAssertEqual(hrefs(in: try output("archive/index.html")), ["/posts/hello/"])
     }
 
     // MARK: - No filesystem path reaches the output

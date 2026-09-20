@@ -32,9 +32,13 @@ public class SiteTemplateRenderer {
     }
     
     // Render content with template
+    /// - Parameter siteURL: the URL this page is published under, which the caller derives from
+    ///   the path it is about to write. It is not part of the cache key: the key already carries
+    ///   `content.url`, and `siteURL` is a function of that.
     public func renderContent(
         _ content: ProcessedContent,
         htmlContent: String,
+        siteURL: String,
         allPages: [Page],
         allPosts: [Post]
     ) async throws -> String {
@@ -55,6 +59,7 @@ public class SiteTemplateRenderer {
         let context = contextBuilder.buildContext(
             for: content,
             htmlContent: htmlContent,
+            siteURL: siteURL,
             allPages: allPages,
             allPosts: allPosts
         )

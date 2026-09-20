@@ -295,15 +295,6 @@ public class SiteGenerator {
         // Render markdown to HTML
         let htmlContent = contentProcessor.renderMarkdownContent(content.markdown)
         
-        // Render with template
-        let renderedHTML = try await templateRenderer.renderContent(
-            content,
-            htmlContent: htmlContent,
-            allPages: allPages,
-            allPosts: allPosts
-        )
-        // (debug removed)
-        
         // Determine output path from the *logical* path the content walk reported.
         //
         // Resolving symlinks here would throw that path away: a file found through
@@ -351,13 +342,26 @@ public class SiteGenerator {
                 .appendingPathComponent("index.html")
         }
         
+        // The URL the page is published under, not the path it was written to. Everything that
+        // reads it — the template's own `{{ page.url }}`, the archive, category and tag pages,
+        // the search index — is describing the site, not the filesystem.
+        //
+        // This is why the output path is derived before the page is rendered rather than after:
+        // `{{ page.url }}` used to be handed `content.url.path`, the source Markdown file's
+        // absolute path, which is neither where the page lands nor anything a reader can follow.
+        let publishedURL = siteRelativePath(forOutput: outputPath.path)
+
+        // Render with template
+        let renderedHTML = try await templateRenderer.renderContent(
+            content,
+            htmlContent: htmlContent,
+            siteURL: publishedURL,
+            allPages: allPages,
+            allPosts: allPosts
+        )
+
         // Write output file
         try siteFileManager.writeFile(content: renderedHTML, to: outputPath)
-
-        // The URL the page is published under, not the path it was written to. Everything that
-        // consumes `Page.url` / `Post.url` — the archive, category and tag pages, the search
-        // index — is describing the site, not the filesystem.
-        let publishedURL = siteRelativePath(forOutput: outputPath.path)
 
         // Create page or post model
         switch content.type {
