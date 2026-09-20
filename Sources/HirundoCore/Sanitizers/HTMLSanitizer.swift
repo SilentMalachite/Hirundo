@@ -126,10 +126,16 @@ public final class HTMLSanitizer: Sendable {
     
     /// イベントハンドラーを削除
     ///
-    /// `on` の手前は空白とは限らない。属性値のエスケープ漏れがあると `"` が直前に来るため、
-    /// 引用符も区切りとして受ける（本筋の修正は `HTMLRenderer` 側のエスケープ）。
+    /// 区切りは**空白のみ**。一度 `[\s"']+` に広げたことがあるが、これは誤りだった。
+    /// 広げた目的は「属性値のエスケープ漏れで `"` が `on` の直前に来る」場合の多層防御で、
+    /// その漏れ自体は `HTMLRenderer` 側のエスケープ（94ac565）が既に塞いでいる。一方で代償は
+    /// 実在した：`[x](/a "once = ") [y](/b)` が
+    /// `<p><a href="/a" title=/b">y</a></p>` になる。`title="once = "` の "once" が `on\w+` に
+    /// 一致し、続く `["'][^"']*["']` が次のタグまで飲み込むためで、正常なマークアップが黙って
+    /// 消える。正規表現だけでHTMLの引用符の対応は追えないので、区切りを緩める方向の「強化」は
+    /// ここでは成立しない。
     private func removeEventHandlers(_ html: String) -> String {
-        let eventHandlerPattern = #"[\s"']+on\w+\s*=\s*["'][^"']*["']"#
+        let eventHandlerPattern = #"\s+on\w+\s*=\s*["'][^"']*["']"#
         return html.replacingOccurrences(
             of: eventHandlerPattern,
             with: "",

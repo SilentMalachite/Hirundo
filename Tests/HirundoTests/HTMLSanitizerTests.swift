@@ -24,12 +24,28 @@ final class HTMLSanitizerTests: XCTestCase {
         XCTAssertEqual(html, "<p>a</p>")
     }
 
-    func testEventHandlerWithoutLeadingWhitespaceIsRemoved() {
-        // The shape an attribute-escaping bug produces: the handler butts straight against the
-        // closing quote of the attribute before it.
+    func testDoesNotRemoveAHandlerThatButtsAgainstThePrecedingQuote() {
+        // The shape an attribute-escaping bug produces. This pass once caught it, by accepting
+        // a quote as the delimiter before `on`. That was a mistake: the gap it covered is
+        // closed where it belongs — `HTMLRenderer` escapes the attribute — and the widened
+        // pattern deleted valid markup, which the test below pins. Another reason not to read
+        // this type as a sanitizer for untrusted HTML.
         let html = sanitizer.sanitizeHTML("<code class=\"language-foo\"onmouseover=\"alert(1)\">x</code>")
 
-        XCTAssertFalse(html.contains("onmouseover"), html)
+        XCTAssertTrue(html.contains("onmouseover"), html)
+    }
+
+    func testLeavesALinkWhoseTitleStartsWithAWordBeginningWithOn() {
+        // `<a href="/a" title="once = ">x</a> <a href="/b">y</a>`: with a quote accepted as the
+        // delimiter, `on\w+` matched "once", `=` matched, and `["'][^"']*["']` swallowed
+        // everything to the next attribute's opening quote — taking the first link's text and
+        // the second link's opening tag with it.
+        let html = sanitizer.sanitizeHTML(
+            "<p><a href=\"/a\" title=\"once = \">x</a> <a href=\"/b\">y</a></p>"
+        )
+
+        XCTAssertTrue(html.contains(">x</a>"), html)
+        XCTAssertTrue(html.contains("href=\"/b\""), html)
     }
 
     func testJavaScriptURLsBecomeAFragment() {
