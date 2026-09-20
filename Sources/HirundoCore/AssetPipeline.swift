@@ -152,8 +152,7 @@ public class AssetPipeline {
                 "Asset source is not readable (broken symlink?): \(fileURL.path)"
             )
         }
-        let prefix = sourceRoot.hasSuffix("/") ? sourceRoot : sourceRoot + "/"
-        guard resolved.path == sourceRoot || resolved.path.hasPrefix(prefix) else {
+        guard PathBoundary.contains(resolved.path, in: sourceRoot) else {
             throw AssetPipelineError.pathTraversalAttempt(fileURL.path)
         }
         return ConfinedSource(url: resolved, identity: try FileIdentity(ofItemAtPath: resolved.path))
@@ -481,11 +480,7 @@ public class AssetPipeline {
     /// パス全体を解決してしまうと、置き換える予定の出力側リンクを辿った先を
     /// マニフェストに書いてしまう。
     private static func relativeDirectory(of directory: URL, under root: URL) -> String? {
-        let rootPath = root.path
-        if directory.path == rootPath { return "" }
-        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
-        guard directory.path.hasPrefix(prefix) else { return nil }
-        return String(directory.path.dropFirst(prefix.count))
+        PathBoundary.relativePath(of: directory, under: root)
     }
 
     private func warn(_ message: String) {

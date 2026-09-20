@@ -105,10 +105,7 @@ public class AssetFileManager {
 
     /// 解決先が `rootPath` の中（またはそれ自身）か。
     private func isContained(_ url: URL, in rootPath: String) -> Bool {
-        let resolved = url.resolvingSymlinksInPath().path
-        if resolved == rootPath { return true }
-        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
-        return resolved.hasPrefix(prefix)
+        PathBoundary.contains(url.resolvingSymlinksInPath().path, in: rootPath)
     }
 
     private func warn(_ message: String) {

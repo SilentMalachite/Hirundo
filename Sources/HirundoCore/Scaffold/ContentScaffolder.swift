@@ -389,10 +389,7 @@ public struct ContentScaffolder {
     /// Belt-and-braces check that the resolved destination really sits inside the content
     /// directory, after `standardizedFileURL` has collapsed any remaining `.` components.
     private func validateWithinContentDirectory(_ destination: URL, contentDirectory: URL) throws {
-        let root = contentDirectory.path.hasSuffix("/")
-            ? contentDirectory.path
-            : contentDirectory.path + "/"
-        guard destination.path.hasPrefix(root) else {
+        guard PathBoundary.descendantRelativePath(of: destination, under: contentDirectory) != nil else {
             throw ContentScaffoldError.invalidPath(
                 "Path escapes the content directory: \(destination.path)"
             )

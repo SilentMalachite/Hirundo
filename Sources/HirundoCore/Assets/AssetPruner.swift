@@ -122,8 +122,6 @@ public enum AssetPruner {
     internal static func relativePath(of fileURL: URL, under root: URL) -> String? {
         let filePath = fileURL.standardizedFileURL.resolvingSymlinksInPath().path
         let rootPath = root.standardizedFileURL.resolvingSymlinksInPath().path
-        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
-        guard filePath.hasPrefix(prefix) else { return nil }
-        return String(filePath.dropFirst(prefix.count))
+        return PathBoundary.descendantRelativePath(of: filePath, under: rootPath)
     }
 }

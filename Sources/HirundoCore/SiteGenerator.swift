@@ -320,14 +320,14 @@ public class SiteGenerator {
             .appendingPathComponent(config.build.contentDirectory)
 
         let cleanRelativePath: String
-        if let relativePath = Self.pathRelative(content.url.path, to: contentBase.path) {
+        if let relativePath = PathBoundary.relativePath(of: content.url.path, under: contentBase.path) {
             // The walk reports every file it followed a symlink to at its logical path under
             // the content directory as configured, so this is the spelling that keeps a page
             // at the URL its path under `content/` implies.
             cleanRelativePath = relativePath
-        } else if let relativePath = Self.pathRelative(
-            content.url.resolvingSymlinksInPath().path,
-            to: contentBase.resolvingSymlinksInPath().path
+        } else if let relativePath = PathBoundary.relativePath(
+            of: content.url.resolvingSymlinksInPath().path,
+            under: contentBase.resolvingSymlinksInPath().path
         ) {
             // Not a logical path, so it came straight from `FileManager`'s enumerator, which
             // hands out its own spelling of the directory it walked (`/private/var` where the
@@ -609,19 +609,6 @@ public class SiteGenerator {
         let index = Index(version: "1.0", generated: Date(), entries: entries)
         let data = try JSONEncoder().encode(index)
         try data.write(to: outputURL.appendingPathComponent("search-index.json"))
-    }
-
-    /// Relative path of `path` under `base`, or `nil` when it is not under it.
-    ///
-    /// The boundary is a whole path component, never a bare string prefix: `content-extra`,
-    /// `content-posts`, `contents` and `content2` are ordinary sibling names that all start with
-    /// `content` without being anywhere inside it, and a prefix match would publish their pages
-    /// at a URL made of whatever characters were left over.
-    private static func pathRelative(_ path: String, to base: String) -> String? {
-        let base = base.hasSuffix("/") ? String(base.dropLast()) : base
-        guard path != base else { return "" }
-        guard path.hasPrefix(base + "/") else { return nil }
-        return String(path.dropFirst(base.count + 1))
     }
 
     private func siteRelativePath(forOutput outputPath: String) -> String {
