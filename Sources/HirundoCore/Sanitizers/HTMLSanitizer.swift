@@ -105,22 +105,23 @@ public final class HTMLSanitizer: Sendable {
         }
         
         let ns = html as NSString
-        var result = html
         let matches = regex.matches(in: html, options: [], range: NSRange(location: 0, length: ns.length))
-        
-        // Replace from end to start to avoid range invalidation
+
+        // Everything here stays in UTF-16, because that is the unit `NSRegularExpression`
+        // reports in. Converting a match's location with `String.index(_:offsetBy:)` counts
+        // Characters instead, and the two diverge the moment the page holds anything outside
+        // the BMP: one emoji is a single Character and two UTF-16 units, so a link after twenty
+        // of them was sliced twenty units early, or past the end — `String index is out of
+        // bounds`, on a page whose only sin was an emoji before a link.
+        let result = NSMutableString(string: html)
+        // Replace from end to start so the earlier matches' ranges stay valid.
         for match in matches.reversed() {
             let name = ns.substring(with: match.range(at: 1))
             let url = ns.substring(with: match.range(at: 2))
-            let sanitized = sanitizeURL(url)
-            let replacement = "\(name)=\"\(sanitized)\""
-            let fullRange = match.range
-            let start = result.index(result.startIndex, offsetBy: fullRange.location)
-            let end = result.index(start, offsetBy: fullRange.length)
-            result.replaceSubrange(start..<end, with: replacement)
+            result.replaceCharacters(in: match.range, with: "\(name)=\"\(sanitizeURL(url))\"")
         }
-        
-        return result
+
+        return result as String
     }
     
     /// イベントハンドラーを削除

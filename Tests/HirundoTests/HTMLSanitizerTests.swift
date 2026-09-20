@@ -52,4 +52,30 @@ final class HTMLSanitizerTests: XCTestCase {
 
         XCTAssertTrue(html.contains("<iframe"), html)
     }
+
+    // MARK: - Ranges are UTF-16, not Characters
+
+    func testSanitizesAURLInAPageContainingAstralCharacters() {
+        // `NSRegularExpression` reports UTF-16 offsets. Walking them with
+        // `String.index(_:offsetBy:)` counts Characters, and one emoji is one Character and two
+        // UTF-16 units — so a link far enough past an emoji was sliced short, or past the end,
+        // and the build died with `String index is out of bounds`.
+        let emoji = String(repeating: "\u{1F600}", count: 20)
+        let html = "<p>\(emoji) <a href=\"/ok\">x</a></p>"
+
+        let sanitized = HTMLSanitizer().sanitizeHTML(html)
+
+        XCTAssertEqual(sanitized, html)
+    }
+
+    func testRewritesAJavaScriptURLAfterAstralCharacters() {
+        let emoji = String(repeating: "\u{1F600}", count: 20)
+        let sanitized = HTMLSanitizer().sanitizeHTML(
+            "<p>\(emoji) <a href=\"javascript:alert(1)\">x</a></p>"
+        )
+
+        XCTAssertTrue(sanitized.contains("href=\"#\""))
+        XCTAssertFalse(sanitized.contains("javascript:"))
+        XCTAssertTrue(sanitized.contains(emoji), "the emoji must survive intact")
+    }
 }
