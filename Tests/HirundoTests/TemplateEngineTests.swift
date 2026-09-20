@@ -182,6 +182,24 @@ final class TemplateEngineTests: XCTestCase {
         XCTAssertTrue(rendered.contains("<strong>") || rendered.contains("**太字**"), "Expected markdown rendering, got: \(rendered)")
     }
     
+    func testURLEncodeMakesALinkOutOfASlug() throws {
+        // The pair: `slugify` names the directory, `url_encode` makes the href that reaches it.
+        let template = """
+        <a href="/tags/{{ tag|slugify|url_encode }}/">{{ tag }}</a>
+        """
+        try template.write(
+            to: tempTemplatesDir.appendingPathComponent("urlencode.html"),
+            atomically: true, encoding: .utf8
+        )
+        engine.registerCustomFilters()
+
+        let rendered = try engine.render(template: "urlencode.html", context: ["tag": "テスト"])
+        XCTAssertTrue(
+            rendered.contains("href=\"/tags/%E3%83%86%E3%82%B9%E3%83%88/\""),
+            "got: \(rendered)"
+        )
+    }
+
     func testCollectionLoops() throws {
         let template = """
         <nav>

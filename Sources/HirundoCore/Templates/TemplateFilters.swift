@@ -39,10 +39,19 @@ public class TemplateFilters {
             return formatter.string(from: date)
         }
         
-        // Slugify filter
+        // Slugify filter. The result is a name, not a URL — pipe it through `url_encode` to
+        // put it in an href.
         ext.registerFilter("slugify") { (value: Any?) in
             guard let string = value as? String else { return value }
             return string.slugify()
+        }
+
+        // Percent-encodes one path component. This is the other half of `slugify`: the slug is
+        // the directory that gets created, this is the link that reaches it. Give it a single
+        // component — a `/` in the value is encoded as `%2F` rather than kept as a separator.
+        ext.registerFilter("url_encode") { (value: Any?) in
+            guard let string = value as? String else { return value }
+            return URLUtils.encodedComponent(string)
         }
         
         // Excerpt filter (character-based for language-agnostic behavior)

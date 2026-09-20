@@ -116,7 +116,11 @@ public class ArchiveGenerator {
     }
     
     private func generateCategoryPage(category: String, posts: [Post], categoriesDir: URL) throws {
-        // Create category directory (slugified)
+        // The bare slug, because this is a name on disk. The URL that links it is built from the
+        // same slug in `generateCategoriesIndex`, where it goes through
+        // `URLUtils.encodedComponent`. This is the point the two forms part company: hosting
+        // decodes a request path before it looks for a file, so the directory must be the
+        // decoded form and the link the encoded one.
         let categorySlug = category.slugify()
         let categoryDir = categoriesDir.appendingPathComponent(categorySlug)
         try fileManager.createDirectory(at: categoryDir)
@@ -133,7 +137,7 @@ public class ArchiveGenerator {
     }
     
     private func generateTagPage(tag: String, posts: [Post], tagsDir: URL) throws {
-        // Create tag directory (slugified)
+        // The bare slug. See `generateCategoryPage` for why this is not the encoded form.
         let tagSlug = tag.slugify()
         let tagDir = tagsDir.appendingPathComponent(tagSlug)
         try fileManager.createDirectory(at: tagDir)
@@ -159,8 +163,10 @@ public class ArchiveGenerator {
             "categories": categories.sorted().map { category in
                 [
                     "name": category,
+                    // `slug` is the name on disk, `url` the encoded link to it. A template that
+                    // builds its own href from `slug` wants the `url_encode` filter.
                     "slug": category.slugify(),
-                    "url": "/categories/\(category.slugify())/"
+                    "url": "/categories/\(URLUtils.encodedComponent(category.slugify()))/"
                 ]
             },
             "page": [
@@ -237,8 +243,9 @@ public class ArchiveGenerator {
             "tags": tags.sorted().map { tag in
                 [
                     "name": tag,
+                    // See `generateCategoriesIndex` for why these two differ.
                     "slug": tag.slugify(),
-                    "url": "/tags/\(tag.slugify())/"
+                    "url": "/tags/\(URLUtils.encodedComponent(tag.slugify()))/"
                 ]
             },
             "page": [

@@ -637,9 +637,13 @@ public class SiteGenerator {
     /// `range(of:)` removed the first occurrence wherever it sat, which for a project whose own
     /// path repeats further along cut the wrong piece out.
     ///
+    /// It is also the point a name on disk becomes a URL component, so it is where the encoding
+    /// happens — once. A file called `foo#bar.md` is written to `_site/foo#bar/index.html` and
+    /// published at `/foo%23bar/`; raw, a browser would cut the request at the `#`.
+    ///
     /// Give it an output path, never a URL this function already produced. A second pass is not
     /// idempotent: `/about/` is not under the output root, so it falls through to the last
-    /// branch and comes back as `/about`, and `/` as `//`.
+    /// branch and comes back as `/about`, and `/` as `//` — and the encoding would run twice.
     private func siteRelativePath(forOutput outputPath: String) -> String {
         let outputRoot = URL(fileURLWithPath: projectPath)
             .appendingPathComponent(config.build.outputDirectory).path
@@ -659,7 +663,7 @@ public class SiteGenerator {
         } else if path.hasSuffix("/index.html") {
             path = String(path.dropLast("index.html".count))
         }
-        return "/" + path
+        return URLUtils.encodedPath("/" + path)
     }
 
     private func escapeXML(_ string: String) -> String {

@@ -227,6 +227,93 @@ final class PublishedURLTests: XCTestCase {
         XCTAssertEqual(fromArchive, fromIndex.subtracting(["/"]))
     }
 
+    // MARK: - A name on disk is the decoded form, a URL is the encoded form
+
+    func testAFilenameContainingAHashIsPublishedUnderAnEncodedURL() async throws {
+        // Raw, a browser cuts the request at the `#` and asks for `/foo`.
+        try scaffoldSite()
+        try writeContent("foo#bar.md", "---\ntitle: \"H\"\n---\n\nBody.\n")
+        try await build()
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: projectDir.appendingPathComponent("_site/foo#bar/index.html").path
+            ),
+            "the directory on disk keeps the name the file had"
+        )
+        XCTAssertTrue(try searchIndexURLs().contains("/foo%23bar/"))
+    }
+
+    func testAFilenameContainingAQuestionMarkIsPublishedUnderAnEncodedURL() async throws {
+        try scaffoldSite()
+        try writeContent("foo?bar.md", "---\ntitle: \"Q\"\n---\n\nBody.\n")
+        try await build()
+
+        XCTAssertTrue(try searchIndexURLs().contains("/foo%3Fbar/"))
+    }
+
+    func testANonASCIICategoryPageIsReachableAtTheURLTheIndexLinksTo() async throws {
+        // The bug this whole change exists for: the link said
+        // `/categories/%E3%83%86%E3%82%B9%E3%83%88/` and the directory was named that literally,
+        // so hosting — which decodes before it looks — asked for `categories/テスト/` and 404ed.
+        try scaffoldSite()
+        try writeContent("posts/hello.md", """
+        ---
+        title: "Hello"
+        date: 2026-01-01
+        categories: ["テスト"]
+        ---
+
+        Body.
+        """)
+        try await build()
+
+        let href = try XCTUnwrap(
+            hrefs(in: try output("categories/index.html")).first { $0.hasPrefix("/categories/") }
+        )
+        XCTAssertEqual(href, "/categories/%E3%83%86%E3%82%B9%E3%83%88/")
+
+        let decoded = try XCTUnwrap(href.removingPercentEncoding)
+        XCTAssertEqual(decoded, "/categories/テスト/")
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: projectDir.appendingPathComponent("_site" + decoded + "index.html").path
+            ),
+            "the decoded href is the path on disk"
+        )
+    }
+
+    func testTheDirectoryOnDiskIsTheDecodedFormOfTheURL() async throws {
+        // The rule itself, over a whole build rather than one page. Every href the index pages
+        // emit, decoded once, must name something that exists.
+        try scaffoldSite()
+        try writeContent("posts/hello.md", """
+        ---
+        title: "Hello"
+        date: 2026-01-01
+        categories: ["テスト", "news"]
+        tags: ["タグ", "swift"]
+        ---
+
+        Body.
+        """)
+        try writeContent("foo#bar.md", "---\ntitle: \"H\"\n---\n\nBody.\n")
+        try await build()
+
+        let site = projectDir.appendingPathComponent("_site")
+        for page in ["categories/index.html", "tags/index.html", "archive/index.html"] {
+            for href in hrefs(in: try output(page)) where href.hasPrefix("/") {
+                let decoded = try XCTUnwrap(href.removingPercentEncoding, href)
+                let target = site.appendingPathComponent(decoded)
+                    .appendingPathComponent("index.html")
+                XCTAssertTrue(
+                    FileManager.default.fileExists(atPath: target.path),
+                    "\(page) links \(href), which decodes to a path that does not exist"
+                )
+            }
+        }
+    }
+
     private func searchIndexURLs() throws -> [String] {
         struct Entry: Decodable { let url: String }
         struct Index: Decodable { let entries: [Entry] }
