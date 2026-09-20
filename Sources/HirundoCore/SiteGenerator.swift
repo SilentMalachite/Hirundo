@@ -563,15 +563,17 @@ public class SiteGenerator {
             <title>\(escapeXML(config.site.title))</title>
             <link>\(escapeXML(config.site.url))</link>
             <description>\(escapeXML(config.site.description ?? ""))</description>
-            <language>\(config.site.language ?? "en-US")</language>
+            <language>\(escapeXML(config.site.language ?? "en-US"))</language>
             <lastBuildDate>\(now)</lastBuildDate>
             <atom:link href=\"\(escapeXML(selfHref))\" rel=\"self\" type=\"application/rss+xml\" />
 
         """
         let sorted = posts.sorted { $0.date > $1.date }.prefix(20)
         for p in sorted {
-            let itemPath = "/posts/\(p.slug)/"
-            let link = URLUtils.joinSiteURL(base: config.site.url, path: itemPath)
+            // Where the post is published, not where its slug suggests. The output path comes
+            // from the file's place under `content/`, so a post with a `slug:` of its own, or
+            // one marked `type: post` outside `content/posts/`, had a feed link that 404ed.
+            let link = URLUtils.joinSiteURL(base: config.site.url, path: p.url)
             let desc = p.description ?? String(p.content.prefix(200))
             rss += """
             <item>
