@@ -154,6 +154,29 @@ public class TemplateFilters {
             }
             return value
         }
+
+        // Escape filter, with `e` as an alias.
+        //
+        // Stencil has no automatic escaping — the mechanism does not exist in the library, and
+        // a template's `{{ … }}` is written out as it stands — so a value from a Markdown file's
+        // front matter or from `config.yaml` reaches the page as markup unless a template asks
+        // for it not to. The templates `hirundo init` writes ask for it everywhere except
+        // `{{ content }}`; a template an author wrote before this filter existed does not, and
+        // is not changed by upgrading.
+        //
+        // It is not idempotent: `{{ x|escape|escape }}` double-escapes. Never apply it to
+        // `{{ content }}` or to the output of the `markdown` filter, both of which are already
+        // HTML and would be displayed as their own source.
+        //
+        // A non-string passes through untouched, as `slugify`, `strip` and `replace` do. A
+        // `Date` or an `Int` has nothing to escape; a `date`-formatted date is a string by then
+        // and is escaped like any other.
+        for name in ["escape", "e"] {
+            ext.registerFilter(name) { (value: Any?) in
+                guard let string = value as? String else { return value }
+                return HTMLEscaping.escaped(string)
+            }
+        }
     }
     
     /// Registers dynamic filters that depend on site configuration

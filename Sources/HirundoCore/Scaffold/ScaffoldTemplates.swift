@@ -76,20 +76,30 @@ enum ScaffoldTemplates {
 
     """
 
+    /// Every interpolation in the templates below is escaped except `{{ content }}`.
+    ///
+    /// Stencil has no automatic escaping, so a title or an author name written in `config.yaml`
+    /// or a Markdown file's front matter would otherwise reach the page as markup. The rule has
+    /// no exceptions beyond `{{ content }}` — a value that is already slugified or date-formatted
+    /// has nothing left to escape, but "all of them except the rendered body" is a rule a reader
+    /// can check at a glance, and "the ones that happen to need it" is not.
+    ///
+    /// `{{ content }}` is the rendered page body: HTML that `HTMLRenderer` built and escaped as
+    /// it went. Escaping it again would show a reader its own source.
     static func baseHTML(includeBlog: Bool) -> String {
         let blogNav = includeBlog ? "\n            <a href=\"/archive/\">Blog</a>" : ""
         return """
         <!DOCTYPE html>
-        <html lang="{{ site.language }}">
+        <html lang="{{ site.language|escape }}">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>{% block title %}{{ page.title }} - {{ site.title }}{% endblock %}</title>
+            <title>{% block title %}{{ page.title|escape }} - {{ site.title|escape }}{% endblock %}</title>
             <link rel="stylesheet" href="/css/style.css">
         </head>
         <body>
             <header>
-                <h1><a href="/">{{ site.title }}</a></h1>
+                <h1><a href="/">{{ site.title|escape }}</a></h1>
                 <nav>
                     <a href="/">Home</a>
                     <a href="/about/">About</a>\(blogNav)
@@ -99,7 +109,7 @@ enum ScaffoldTemplates {
                 {% block content %}{% endblock %}
             </main>
             <footer>
-                <p>&copy; {{ site.author.name }}</p>
+                <p>&copy; {{ site.author.name|escape }}</p>
             </footer>
         </body>
         </html>
@@ -112,7 +122,7 @@ enum ScaffoldTemplates {
 
     {% block content %}
     <article>
-        <h1>{{ page.title }}</h1>
+        <h1>{{ page.title|escape }}</h1>
         {{ content }}
     </article>
     {% endblock %}
@@ -124,13 +134,13 @@ enum ScaffoldTemplates {
 
     {% block content %}
     <article>
-        <h1>{{ page.title }}</h1>
-        <time>{{ page.date | date: "%B %d, %Y" }}</time>
+        <h1>{{ page.title|escape }}</h1>
+        <time>{{ page.date|date: "%B %d, %Y"|escape }}</time>
         {% if page.categories %}
         <div class="categories">
             Categories:
             {% for category in page.categories %}
-            <a href="/categories/{{ category | slugify }}">{{ category }}</a>
+            <a href="/categories/{{ category|slugify|escape }}">{{ category|escape }}</a>
             {% endfor %}
         </div>
         {% endif %}
@@ -138,7 +148,7 @@ enum ScaffoldTemplates {
         <div class="tags">
             Tags:
             {% for tag in page.tags %}
-            <a href="/tags/{{ tag | slugify }}">{{ tag }}</a>
+            <a href="/tags/{{ tag|slugify|escape }}">{{ tag|escape }}</a>
             {% endfor %}
         </div>
         {% endif %}

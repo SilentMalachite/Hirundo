@@ -580,6 +580,70 @@ final class SiteScaffolderTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(
             atPath: dest.appendingPathComponent("_site/tags").path))
     }
+
+    // MARK: - Escaping in the scaffolded templates
+
+    /// Stencil escapes nothing on its own, so a scaffolded template that interpolates a value
+    /// without `|escape` publishes whatever an author wrote in `config.yaml` or in front matter
+    /// as markup. The rule is "every interpolation except `{{ content }}`", which is checkable.
+    func testEveryInterpolationInTheScaffoldedTemplatesIsEscapedExceptTheRenderedContent() throws {
+        let templates = [
+            "base.html": ScaffoldTemplates.baseHTML(includeBlog: true),
+            "default.html": ScaffoldTemplates.defaultHTML,
+            "post.html": ScaffoldTemplates.postHTML,
+        ]
+        let interpolation = try NSRegularExpression(pattern: "\\{\\{(.+?)\\}\\}")
+
+        for (name, body) in templates {
+            let range = NSRange(body.startIndex..., in: body)
+            for match in interpolation.matches(in: body, range: range) {
+                guard let r = Range(match.range(at: 1), in: body) else { continue }
+                let expression = body[r].trimmingCharacters(in: .whitespaces)
+                if expression == "content" { continue }
+                XCTAssertTrue(
+                    expression.hasSuffix("|escape"),
+                    "\(name): {{ \(expression) }} is interpolated without |escape"
+                )
+            }
+        }
+    }
+
+    func testTheScaffoldedTemplatesDoNotEscapeTheRenderedContent() throws {
+        XCTAssertTrue(ScaffoldTemplates.defaultHTML.contains("{{ content }}"))
+        XCTAssertTrue(ScaffoldTemplates.postHTML.contains("{{ content }}"))
+    }
+
+    func testTheScaffoldedTemplatesEscapeEveryValueTheyRender() throws {
+        let dest = tempDir.appendingPathComponent("render-check")
+        _ = try SiteScaffolder().scaffold(
+            at: dest, options: SiteScaffoldOptions(title: "My Site", includeBlog: true)
+        )
+
+        let engine = TemplateEngine(
+            templatesDirectory: dest.appendingPathComponent("templates").path
+        )
+        let context: [String: Any] = [
+            "site": [
+                "title": "Tom & Jerry",
+                "language": "en-US",
+                "author": ["name": "<b>Author</b>"],
+            ],
+            "page": [
+                "title": "A \"quoted\" title",
+                "date": Date(timeIntervalSince1970: 0),
+                "categories": ["a <b>bold</b> category"],
+                "tags": ["a <b>bold</b> tag"],
+            ],
+            "content": "<p>body</p>",
+        ]
+
+        let rendered = try engine.render(template: "post.html", context: context)
+        XCTAssertTrue(rendered.contains("Tom &amp; Jerry"))
+        XCTAssertTrue(rendered.contains("A &quot;quoted&quot; title"))
+        XCTAssertTrue(rendered.contains("&lt;b&gt;Author&lt;/b&gt;"))
+        XCTAssertFalse(rendered.contains("<b>bold</b>"))
+        XCTAssertTrue(rendered.contains("<p>body</p>"), "the rendered body must not be escaped")
+    }
 }
 
 /// A `FileManager` that fails the nth `createDirectory` call, so scaffolding can be
