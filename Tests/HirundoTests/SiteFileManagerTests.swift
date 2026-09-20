@@ -218,6 +218,32 @@ final class SiteFileManagerTests: XCTestCase {
 
     // MARK: - prepareOutputDirectory
 
+    func testCreateDirectoryRefusesADanglingIntermediateLink() throws {
+        // `resolvingSymlinksInPath()` cannot resolve a link whose target is missing, so it hands
+        // the path back unchanged — inside the output root by construction, whatever the link
+        // actually points at. Without a separate existence check the containment test passes and
+        // the failure surfaces from Foundation as `Input/output error`, naming neither the link
+        // nor the reason.
+        try manager.prepareOutputDirectory(clean: true)
+        try FileManager.default.createSymbolicLink(
+            at: outputDir.appendingPathComponent("a"),
+            withDestinationURL: tempDir.appendingPathComponent("does-not-exist")
+        )
+
+        XCTAssertThrowsError(
+            try manager.createDirectory(at: outputDir.appendingPathComponent("a/b"))
+        ) { error in
+            guard case FileManagerError.outputPathEscapes = error else {
+                return XCTFail("expected a containment error, got \(error)")
+            }
+        }
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: tempDir.appendingPathComponent("does-not-exist").path
+            )
+        )
+    }
+
     func testPrepareCreatesTheConfiguredOutputDirectory() throws {
         try manager.prepareOutputDirectory(clean: false)
 
