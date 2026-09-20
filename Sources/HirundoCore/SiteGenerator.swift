@@ -522,8 +522,12 @@ public class SiteGenerator {
         while let fileURL = enumerator?.nextObject() as? URL {
             try Task.checkCancellation()
             guard fileURL.pathExtension == "html" else { continue }
-            var rel = fileURL.path.replacingOccurrences(of: outputURL.path, with: "")
-            rel = rel.replacingOccurrences(of: "/index.html", with: "/")
+            // Same derivation as every other published URL. Not `replacingOccurrences`, which
+            // removes the output directory's spelling wherever it sits and turns a file named
+            // `docs/index.html.html` into `/docs/.html` — and which matches nothing at all when
+            // the enumerator reports `/private/var/…` for a root configured as `/var/…`, leaving
+            // the whole absolute path in `<loc>`.
+            let rel = siteRelativePath(forOutput: fileURL.path)
             let mod = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
             let loc = URLUtils.joinSiteURL(base: base, path: rel)
             urls.append((loc: loc, lastmod: mod))
