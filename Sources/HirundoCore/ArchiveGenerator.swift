@@ -181,27 +181,31 @@ public class ArchiveGenerator {
         do {
             return try templateEngine.render(template: templateName, context: context)
         } catch {
-            // Fallback to safe default template
+            // `hirundo init` does not scaffold `categories.html`, so this is the path a site
+            // takes until an author writes one — not an exceptional case.
             return generateDefaultCategoriesHTML(context: context)
         }
     }
     
-    private func generateDefaultCategoriesHTML(context: [String: Any]) -> String {
+    /// `internal` rather than `private` so the escaping below can be tested without standing up
+    /// a whole site; see `ArchiveGeneratorFallbackTests`.
+    func generateDefaultCategoriesHTML(context: [String: Any]) -> String {
         guard let site = context["site"] as? [String: Any],
               let categories = context["categories"] as? [[String: Any]],
               let page = context["page"] as? [String: Any] else {
             return "<html><body><h1>Error: Invalid context</h1></body></html>"
         }
         
-        let title = site["title"] as? String ?? "Site"
-        let language = site["language"] as? String ?? "en"
-        let pageTitle = page["title"] as? String ?? "Categories"
+        let title = HTMLEscaping.escaped(site["title"] as? String ?? "Site")
+        let language = HTMLEscaping.escaped(site["language"] as? String ?? "en")
+        let pageTitle = HTMLEscaping.escaped(page["title"] as? String ?? "Categories")
         
         var categoriesHTML = ""
         for category in categories {
             if let name = category["name"] as? String,
                let url = category["url"] as? String {
-                categoriesHTML += "<li><a href=\"\(url)\">\(name)</a></li>\n"
+                categoriesHTML += "<li><a href=\"\(HTMLEscaping.escaped(url))\">"
+                    + "\(HTMLEscaping.escaped(name))</a></li>\n"
             }
         }
         
@@ -255,27 +259,31 @@ public class ArchiveGenerator {
         do {
             return try templateEngine.render(template: templateName, context: context)
         } catch {
-            // Fallback to safe default template
+            // `hirundo init` does not scaffold `tags.html`, so this is the path a site takes
+            // until an author writes one — not an exceptional case.
             return generateDefaultTagsHTML(context: context)
         }
     }
     
-    private func generateDefaultTagsHTML(context: [String: Any]) -> String {
+    /// `internal` rather than `private` so the escaping below can be tested without standing up
+    /// a whole site; see `ArchiveGeneratorFallbackTests`.
+    func generateDefaultTagsHTML(context: [String: Any]) -> String {
         guard let site = context["site"] as? [String: Any],
               let tags = context["tags"] as? [[String: Any]],
               let page = context["page"] as? [String: Any] else {
             return "<html><body><h1>Error: Invalid context</h1></body></html>"
         }
         
-        let title = site["title"] as? String ?? "Site"
-        let language = site["language"] as? String ?? "en"
-        let pageTitle = page["title"] as? String ?? "Tags"
+        let title = HTMLEscaping.escaped(site["title"] as? String ?? "Site")
+        let language = HTMLEscaping.escaped(site["language"] as? String ?? "en")
+        let pageTitle = HTMLEscaping.escaped(page["title"] as? String ?? "Tags")
         
         var tagsHTML = ""
         for tag in tags {
             if let name = tag["name"] as? String,
                let url = tag["url"] as? String {
-                tagsHTML += "<li><a href=\"\(url)\">\(name)</a></li>\n"
+                tagsHTML += "<li><a href=\"\(HTMLEscaping.escaped(url))\">"
+                    + "\(HTMLEscaping.escaped(name))</a></li>\n"
             }
         }
         
