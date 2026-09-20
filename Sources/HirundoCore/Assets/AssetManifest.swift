@@ -9,8 +9,16 @@ import Foundation
 public struct AssetManifest: Equatable, Codable {
     private var entries: [String: String]
 
-    public init(_ entries: [String: String] = [:]) {
+    /// サイトが公開されるパス（`site.url` にパスがあるときの `/blog` など。無ければ空文字列）。
+    ///
+    /// キーは static からの相対パスなので、`/blog/css/style.css` のようなルート絶対参照は
+    /// これを剥がしてからキーに直し、書き戻すときに付け直す。**マニフェストには書き出さない**
+    /// ── 目録の中身ではなく、参照をどう読むかという設定だから。
+    public var basePath: String = ""
+
+    public init(_ entries: [String: String] = [:], basePath: String = "") {
         self.entries = entries
+        self.basePath = basePath
     }
 
     public init(from decoder: Decoder) throws {
@@ -40,12 +48,14 @@ public struct AssetManifest: Equatable, Codable {
     /// マニフェストに無い参照、値がキーと等しい参照はすべて `nil` になる。
     public func rewrite(reference: String, inDirectory directory: String) -> String? {
         let (path, suffix) = Self.splitSuffix(reference)
-        guard let key = Self.resolveKey(reference: reference, inDirectory: directory),
+        guard let key = Self.resolveKey(
+                  reference: reference, inDirectory: directory, basePath: basePath
+              ),
               let value = entries[key],
               value != key else { return nil }
 
         if path.hasPrefix("/") {
-            return "/" + value + suffix
+            return basePath + "/" + value + suffix
         }
         return Self.relativePath(from: directory, to: value) + suffix
     }
@@ -55,14 +65,26 @@ public struct AssetManifest: Equatable, Codable {
     ///
     /// 書き換え（`rewrite`）と、スタイルシート同士の依存関係の解決が同じ規則を使うように、
     /// キーの求め方はここ1箇所に置く。
-    internal static func resolveKey(reference: String, inDirectory directory: String) -> String? {
+    internal static func resolveKey(
+        reference: String, inDirectory directory: String, basePath: String = ""
+    ) -> String? {
         let (path, _) = splitSuffix(reference)
         guard !path.isEmpty else { return nil }
         guard !path.hasPrefix("//"), !hasScheme(path) else { return nil }
 
-        let candidate = path.hasPrefix("/")
-            ? String(path.dropFirst())
-            : (directory.isEmpty ? path : directory + "/" + path)
+        let candidate: String
+        if path.hasPrefix("/") {
+            // A root-absolute reference on a site published under a path is written the way it
+            // is served — `/blog/css/style.css` — while a key is relative to `static/`. Matching
+            // on a whole component, so a base path of `/blog` does not eat `/blogging/…`.
+            var absolute = path
+            if !basePath.isEmpty, absolute == basePath || absolute.hasPrefix(basePath + "/") {
+                absolute = String(absolute.dropFirst(basePath.count))
+            }
+            candidate = String(absolute.drop(while: { $0 == "/" }))
+        } else {
+            candidate = directory.isEmpty ? path : directory + "/" + path
+        }
         return normalize(candidate)
     }
 

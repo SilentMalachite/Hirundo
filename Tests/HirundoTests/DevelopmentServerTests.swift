@@ -154,6 +154,64 @@ final class DevelopmentServerTests: XCTestCase {
         XCTAssertNil(makeServer().resolveFilePath(forRequestPath: "/a/../../secret.txt"))
     }
 
+    func testResolveFilePath_whenRequestIsPercentEncoded_servesTheDecodedNameOnDisk() throws {
+        // A tag page is written to `_site/tags/テスト/` and linked as
+        // `/tags/%E3%83%86%E3%82%B9%E3%83%88/`. Swifter hands the escapes over as literals, so
+        // the decoding is ours — without it the development server 404s on every page a static
+        // host would serve.
+        let tag = tempDir.appendingPathComponent("_site/tags/テスト")
+        try fileManager.createDirectory(at: tag, withIntermediateDirectories: true)
+        let index = tag.appendingPathComponent("index.html")
+        try "<p>テスト</p>".write(to: index, atomically: true, encoding: .utf8)
+
+        let server = makeServer()
+        XCTAssertEqual(
+            server.resolveFilePath(forRequestPath: "/tags/%E3%83%86%E3%82%B9%E3%83%88/"),
+            index.path
+        )
+    }
+
+    func testResolveFilePath_whenNameHoldsAReservedCharacter_servesItEncoded() throws {
+        let page = tempDir.appendingPathComponent("_site/foo#bar")
+        try fileManager.createDirectory(at: page, withIntermediateDirectories: true)
+        let index = page.appendingPathComponent("index.html")
+        try "<p>H</p>".write(to: index, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(makeServer().resolveFilePath(forRequestPath: "/foo%23bar/"), index.path)
+    }
+
+    func testResolveFilePath_whenRequestIsPlainASCII_isUnchanged() throws {
+        let about = tempDir.appendingPathComponent("_site/about")
+        try fileManager.createDirectory(at: about, withIntermediateDirectories: true)
+        let index = about.appendingPathComponent("index.html")
+        try "<p>About</p>".write(to: index, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(makeServer().resolveFilePath(forRequestPath: "/about/"), index.path)
+    }
+
+    func testResolveFilePath_whenAComponentEncodesASlash_returnsNil() throws {
+        // Decoding per component is what makes this refusable: `%2F` is a name that cannot be,
+        // not a separator that arrived late.
+        let about = tempDir.appendingPathComponent("_site/about")
+        try fileManager.createDirectory(at: about, withIntermediateDirectories: true)
+        try "<p>About</p>".write(
+            to: about.appendingPathComponent("index.html"), atomically: true, encoding: .utf8
+        )
+
+        XCTAssertNil(makeServer().resolveFilePath(forRequestPath: "/about%2Findex.html"))
+        XCTAssertNil(makeServer().resolveFilePath(forRequestPath: "/%2E%2E%2Fsecret.txt"))
+    }
+
+    func testResolveFilePath_whenAnEscapeIsMalformed_usesTheLiteralComponent() throws {
+        // A request spelling a bare `%` still asks for a file whose name holds one.
+        let page = tempDir.appendingPathComponent("_site/100%pure")
+        try fileManager.createDirectory(at: page, withIntermediateDirectories: true)
+        let index = page.appendingPathComponent("index.html")
+        try "<p>P</p>".write(to: index, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(makeServer().resolveFilePath(forRequestPath: "/100%pure/"), index.path)
+    }
+
     func testServer_whenDirectoryRequested_respondsWithNestedIndexHTML() async throws {
         let about = tempDir.appendingPathComponent("_site/about")
         try fileManager.createDirectory(at: about, withIntermediateDirectories: true)

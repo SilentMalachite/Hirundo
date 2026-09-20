@@ -360,7 +360,7 @@ my-site/
 ```yaml
 site:
   title: "マイサイト"                 # 必須
-  url: "https://example.com"         # 必須
+  url: "https://example.com"         # 必須（パス付きも可。下記参照）
   description: "Hirundoで構築されたサイト"   # オプション（最大500文字）
   language: "ja-JP"                  # オプション（デフォルト: "en-US"）
   author:                            # オプション
@@ -504,16 +504,30 @@ Hirundoは[Stencil](https://github.com/stencilproject/Stencil)テンプレート
 - `tags`: タグマッピング
 - `content`: レンダリングされたページコンテンツ
 
+### サブパスでの公開
+
+`site.url` にはパスを書けます（`https://example.com/blog`）。サブディレクトリで配信する
+サイト向けで、ビルドが作る内部リンクはすべてこれを含みます——`{{ page.url }}`、アーカイブ、
+カテゴリ/タグページ、RSS、sitemap、検索インデックス。**出力ツリーは変わりません**。ページは
+今までどおり `_site/posts/…` に書かれます。パスは「どこで配信されるか」であって「どこに
+書くか」ではないからです。テンプレートで自分でリンクを組むときは `relative_url` フィルタを
+使います。成分単位で冪等なので、既にパスの付いた `{{ page.url }}` を通しても二重になりません。
+
+`hirundo serve` もこれに追従し、**プレフィックス無しのリクエストも受けます**。本番より意図的に
+甘くしてあります——開発サーバは今書いたものをすぐ見せるためのもので、最初のページロードが
+404 になるのは壊れたツールに見えるからです。
+
 ### カスタムフィルター
 
 | フィルター | 用途 |
 |-----------|------|
 | `date` | 日付フォーマット |
-| `slugify` | URLスラグ作成 |
+| `slugify` | タイトルから名前を作る（URLではない。非ASCIIはそのまま） |
 | `excerpt` | 抜粋抽出 |
 | `markdown` | Markdownレンダリング |
 | `absolute_url` | 絶対URL作成 |
-| `relative_url` | ルート相対URL作成 |
+| `url_encode` | パス成分を1つパーセント符号化 |
+| `relative_url` | `site.url` のパスを前置したルート相対URL |
 | `site_url` | 設定値のサイトURL |
 | `site_title` | 設定値のサイトタイトル |
 | `site_description` | 設定値のサイト説明 |

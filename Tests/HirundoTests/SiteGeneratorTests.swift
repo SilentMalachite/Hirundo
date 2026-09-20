@@ -84,7 +84,7 @@ final class SiteGeneratorTests: XCTestCase {
             {% if page.categories %}
             <div class="categories">
                 {% for category in page.categories %}
-                <a href="/categories/{{ category | slugify }}">{{ category }}</a>
+                <a href="/categories/{{ category|slugify|url_encode }}/">{{ category }}</a>
                 {% endfor %}
             </div>
             {% endif %}
@@ -274,15 +274,19 @@ final class SiteGeneratorTests: XCTestCase {
         
         XCTAssertTrue(postContent.contains("<title>最初の投稿 - テストサイト</title>"))
         XCTAssertTrue(postContent.contains("<time>2024-01-01</time>"))
-        XCTAssertTrue(postContent.contains("<a href=\"/categories/%E3%83%86%E3%82%B9%E3%83%88\">テスト</a>"))
-        XCTAssertTrue(postContent.contains("<a href=\"/categories/swift\">Swift</a>"))
+        // The idiom a template uses for a name in an href: `slugify` names the directory,
+        // `url_encode` makes the link that reaches it.
+        XCTAssertTrue(postContent.contains(
+            "<a href=\"/categories/%E3%83%86%E3%82%B9%E3%83%88/\">テスト</a>"
+        ))
+        XCTAssertTrue(postContent.contains("<a href=\"/categories/swift/\">Swift</a>"))
     }
     
     func testCategoryPageGeneration() async throws {
         generator = try SiteGenerator(projectPath: tempDir.path)
         try await generator.build()
         
-        let categoryDir = tempDir.appendingPathComponent("_site/categories/%E3%83%86%E3%82%B9%E3%83%88")
+        let categoryDir = tempDir.appendingPathComponent("_site/categories/テスト")
         XCTAssertTrue(FileManager.default.fileExists(atPath: categoryDir.appendingPathComponent("index.html").path))
         
         let categoryContent = try String(
@@ -373,7 +377,7 @@ final class SiteGeneratorTests: XCTestCase {
         let thirdPostContent = try String(contentsOf: thirdPostPath, encoding: .utf8)
         XCTAssertTrue(thirdPostContent.contains("三番目の投稿"))
         
-        let newCategoryPath = tempDir.appendingPathComponent("_site/categories/%E6%96%B0%E8%A6%8F/index.html")
+        let newCategoryPath = tempDir.appendingPathComponent("_site/categories/新規/index.html")
         XCTAssertTrue(FileManager.default.fileExists(atPath: newCategoryPath.path))
     }
     

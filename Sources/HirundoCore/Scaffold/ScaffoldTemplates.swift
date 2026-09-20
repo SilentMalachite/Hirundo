@@ -80,14 +80,20 @@ enum ScaffoldTemplates {
     ///
     /// Stencil has no automatic escaping, so a title or an author name written in `config.yaml`
     /// or a Markdown file's front matter would otherwise reach the page as markup. The rule has
-    /// no exceptions beyond `{{ content }}` — a value that is already slugified or date-formatted
-    /// has nothing left to escape, but "all of them except the rendered body" is a rule a reader
-    /// can check at a glance, and "the ones that happen to need it" is not.
+    /// no exceptions beyond `{{ content }}` — a value that is already slugified, date-formatted
+    /// or percent-encoded has nothing left to escape, but "all of them except the rendered body"
+    /// is a rule a reader can check at a glance, and "the ones that happen to need it" is not.
+    ///
+    /// Links go through `relative_url`, so a site published under a path in `site.url` gets it
+    /// on every href, and a category or tag name through `slugify|url_encode`: the slug names
+    /// the directory that was created, the encoding makes the link that reaches it.
     ///
     /// `{{ content }}` is the rendered page body: HTML that `HTMLRenderer` built and escaped as
     /// it went. Escaping it again would show a reader its own source.
     static func baseHTML(includeBlog: Bool) -> String {
-        let blogNav = includeBlog ? "\n            <a href=\"/archive/\">Blog</a>" : ""
+        let blogNav = includeBlog
+            ? "\n            <a href=\"{{ \"/archive/\"|relative_url|escape }}\">Blog</a>"
+            : ""
         return """
         <!DOCTYPE html>
         <html lang="{{ site.language|escape }}">
@@ -95,14 +101,14 @@ enum ScaffoldTemplates {
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>{% block title %}{{ page.title|escape }} - {{ site.title|escape }}{% endblock %}</title>
-            <link rel="stylesheet" href="/css/style.css">
+            <link rel="stylesheet" href="{{ "/css/style.css"|relative_url|escape }}">
         </head>
         <body>
             <header>
-                <h1><a href="/">{{ site.title|escape }}</a></h1>
+                <h1><a href="{{ "/"|relative_url|escape }}">{{ site.title|escape }}</a></h1>
                 <nav>
-                    <a href="/">Home</a>
-                    <a href="/about/">About</a>\(blogNav)
+                    <a href="{{ "/"|relative_url|escape }}">Home</a>
+                    <a href="{{ "/about/"|relative_url|escape }}">About</a>\(blogNav)
                 </nav>
             </header>
             <main>
@@ -140,7 +146,7 @@ enum ScaffoldTemplates {
         <div class="categories">
             Categories:
             {% for category in page.categories %}
-            <a href="/categories/{{ category|slugify|escape }}">{{ category|escape }}</a>
+            <a href="{{ "/categories/"|relative_url|escape }}{{ category|slugify|url_encode|escape }}/">{{ category|escape }}</a>
             {% endfor %}
         </div>
         {% endif %}
@@ -148,7 +154,7 @@ enum ScaffoldTemplates {
         <div class="tags">
             Tags:
             {% for tag in page.tags %}
-            <a href="/tags/{{ tag|slugify|escape }}">{{ tag|escape }}</a>
+            <a href="{{ "/tags/"|relative_url|escape }}{{ tag|slugify|url_encode|escape }}/">{{ tag|escape }}</a>
             {% endfor %}
         </div>
         {% endif %}

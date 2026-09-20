@@ -169,6 +169,7 @@ struct ServeCommand: AsyncParsableCommand {
                 liveReload: options.liveReload,
                 fileManager: .default,
                 outputDirectory: config.build.outputDirectory,
+                basePath: URLUtils.sitePathPrefix(of: config.site.url),
                 hub: hub
             )
             server = developmentServer

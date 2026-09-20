@@ -182,6 +182,34 @@ type.
 Escaping is the boundary. `MarkdownValidator`'s denylist and `HTMLSanitizer` are defence in
 depth over it, and both say so in their own documentation.
 
+### 4c. URL Construction (`Utils/URLUtils.swift`, `StringExtensions.swift`)
+
+One rule: **a name on disk is the decoded form, a URL is the encoded form, and the encoding
+happens once — where a raw name becomes a URL component.**
+
+Static hosting is why. nginx, Apache, GitHub Pages and S3 all percent-decode a request path
+before they look for a file, so a tag page has to be written to `_site/tags/テスト/` and linked
+as `/tags/%E3%83%86%E3%82%B9%E3%83%88/`. The reverse — which is what Hirundo did — 404s on every
+deployed site.
+
+The work is split three ways, and each piece does only its own half:
+
+- `String.slugify` makes a **name**. Non-ASCII survives, the result is NFC, and it drops only
+  what cannot survive the trip (path separators and `:`, control characters, the URL delimiters,
+  the five that can change markup, and `*` and `|`). `maxLength` is a UTF-8 byte budget, because
+  that is what `NAME_MAX` counts.
+- `URLUtils.encodedComponent` / `encodedPath` do the **encoding**, over RFC 3986's unreserved
+  set. `%` is outside that set, so encoding twice shows up as `%25` rather than passing silently.
+- `SiteGenerator.siteRelativePath` is the **one place** a published URL is derived. It encodes,
+  and it prepends the path from `site.url`. Everything downstream — `{{ page.url }}`, the
+  archive, the feed, the sitemap, the search index — gets both without knowing about either.
+  `URLUtils.joinSiteURL` takes only the origin of `site.url`, so the base path reaches a URL from
+  one side rather than two.
+
+`ArchiveGenerator` is where the two forms part company: the directory it creates keeps the bare
+slug, the `href` the index links it by goes through `encodedComponent`. A template does the same
+pair with `{{ category|slugify|url_encode }}`.
+
 ### 5. Development Server (`DevelopmentServer.swift`)
 
 Serves the build output over HTTP, with a WebSocket live-reload channel:
@@ -196,6 +224,15 @@ Serves the build output over HTTP, with a WebSocket live-reload channel:
 - WebSocket session cleanup
 - Real-time error notifications
 - Request logging
+
+**Request paths:** `resolveFilePath` percent-decodes each component of a request path, after
+splitting on `/`, and strips the path from `site.url` if the request carries it. Both are
+necessary rather than optional. `HttpRequest.path` is *not* decoded, whatever its name suggests:
+Swifter percent-encodes the request target with `.urlQueryAllowed`, which excludes `%`, and then
+reads `URLComponents.path`, whose decoding undoes exactly that — a round trip. Decoding per
+component is what lets `%2F` and `%00` be refused instead of arriving as a separator or a
+truncation. A request without the base path still resolves: the development server's job is to
+show what was just written, not to reproduce a host's routing.
 
 **Routing:** the `/livereload` WebSocket route is registered first, and static
 files are served from `HttpServer.notFoundHandler` so they only run after the

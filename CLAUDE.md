@@ -93,6 +93,9 @@ hirundo new page "チーム紹介" --path about/team      # → content/about/te
 - 生成先は `config.yaml` の `build.contentDirectory` に従います。
 - 既存ファイルは上書きしません（エラーになります）。
 - `--slug` はファイル名だけを決めます。フロントマターに `slug:` は書き出しません。
+- タイトルから導出するファイル名に**非 ASCII はそのまま残ります**（`日本語タイトル.md`）。
+  `limits.maxFilenameLength` は **UTF-8 バイト数**です（ファイルシステムの `NAME_MAX` が
+  数えるものに合わせてあります）。
 - `--open` は `$VISUAL` / `$EDITOR` を許可リストで検証してから起動します。
   失敗しても終了コードは 0 のままです。
 
@@ -220,6 +223,43 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 sitemap、RSS、アーカイブ/カテゴリ/タグページのリンクがすべてこれを使います。既に公開URLに
 なっている値をもう一度通してはいけません（`/about/` → `/about`、`/` → `//` になります）。
 
+#### 符号化の規則
+
+> **ディスク名はデコード後の形。URL は符号化後の形。符号化は一度だけ、生の名前が URL 成分に
+> なる地点で行う。**
+
+本番の静的ホスティング（nginx / Apache / GitHub Pages / S3）がリクエストパスをデコードして
+からファイルを探すからです。タグ `テスト` のページは `_site/tags/テスト/` に書かれ、
+`/tags/%E3%83%86%E3%82%B9%E3%83%88/` としてリンクされます。
+
+- 符号化するのは `URLUtils.encodedComponent` / `encodedPath` の1箇所だけです。許可集合は
+  RFC 3986 の unreserved（`A-Za-z0-9-._~`）で、`%` が入っていないので、符号化済みの文字列を
+  もう一度通すと `%25` になって二重符号化がテストで見えます。
+- `String.slugify()` は**名前を返します**（非 ASCII はそのまま、NFC 正規化済み）。URL に
+  入れるときはテンプレートの `url_encode` フィルタを通します
+  （`{{ category|slugify|url_encode }}`）。
+- `ArchiveGenerator` は素の slug でディレクトリを作り、索引ページのリンクだけを符号化します。
+- `hirundo serve` は**自分でデコードします**（`DevelopmentServer.resolveFilePath`）。
+  Swifter の `HttpRequest.path` は名前に反して復号されておらず、`.urlQueryAllowed` での
+  符号化と `URLComponents.path` の復号が往復で打ち消しあうため、リクエスト行のエスケープが
+  リテラルのまま届きます。デコードは `/` で分割した**成分ごと**に行うので、`%2F` と `%00` は
+  区切りや切り詰めとして紛れ込まずに拒否できます。
+
+#### `site.url` にパスを書いた場合
+
+`site.url: "https://example.com/blog"` のようにパスを書くと、`page.url` / `post.url` /
+sitemap / RSS / 検索インデックス / アーカイブ・カテゴリ・タグページのリンクがすべて
+`/blog/…` になります。前置するのは `siteRelativePath` の1箇所で、`URLUtils.joinSiteURL` は
+`site.url` の **origin だけ**を使うため `/blog/blog/…` にはなりません。
+
+- **出力ツリーは変わりません。** `_site/posts/foo/index.html` のままです。プレフィックスは
+  「どこで配信されるか」であって「どこに書くか」ではありません。
+- テンプレートからは `relative_url` フィルタで前置します（Jekyll と同じ意味論）。成分単位で
+  冪等なので、既にプレフィックスの付いた `{{ page.url }}` を通しても二重になりません。
+- `hirundo serve` はプレフィックスを剥がして解決します。**プレフィックス無しのリクエストも
+  受けます**——本番より甘い側に倒してあります。開発サーバの仕事は今書いたものをすぐ見せる
+  ことで、最初のページロードが 404 になるのは壊れたツールに見えるからです。
+
 ### 5. 機能フラグ（features）
 `config.yaml` の `features` ブロックで有効・無効を切り替えます（すべてデフォルト `false`）：
 - **sitemap**: sitemap.xml生成
@@ -334,9 +374,11 @@ assets:
 
 カスタムフィルター：
 - `date`: 日付フォーマット
-- `slugify`: URLスラグ作成
+- `slugify`: 名前を作る（URL ではありません。非 ASCII はそのまま残ります）
+- `url_encode`: パス成分を1つパーセント符号化する（`slugify` の相方）
 - `excerpt`: 抜粋抽出
-- `absolute_url`: 絶対URL作成
+- `absolute_url`: 絶対URL作成（`site.url` の origin + base path + パス）
+- `relative_url`: `site.url` のパスを前置したルート相対URL
 - `markdown`: Markdownレンダリング
 
 ## 今後の拡張予定

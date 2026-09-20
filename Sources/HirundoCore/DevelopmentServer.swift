@@ -9,6 +9,10 @@ public final class DevelopmentServer: @unchecked Sendable {
     private let server: HttpServer
     private let fileManager: FileManager
     private let outputPath: String
+
+    /// サイトが公開されるパス（`site.url` にパスがあるときの `/blog` など）。
+    private let basePath: String
+
     private let injector = LiveReloadScriptInjector()
     private let originGuard = WebSocketOriginGuard()
     private let refusalLog = RefusalLog()
@@ -34,8 +38,10 @@ public final class DevelopmentServer: @unchecked Sendable {
         liveReload: Bool,
         fileManager: FileManager = .default,
         outputDirectory: String = "_site",
+        basePath: String = "",
         hub: LiveReloadHub? = nil
     ) {
+        self.basePath = basePath
         self.fileManager = fileManager
         self.projectPath = projectPath
         self.port = port
@@ -56,7 +62,7 @@ public final class DevelopmentServer: @unchecked Sendable {
             server.listenAddressIPv6 = listen.address
         }
         try server.start(UInt16(port), forceIPv4: listen.forceIPv4, priority: .default)
-        print("Development server started at http://\(listen.displayHost):\(port)")
+        print("Development server started at http://\(listen.displayHost):\(port)\(basePath)/")
     }
 
     /// Gracefully stop the server and related resources (idempotent)
@@ -131,10 +137,30 @@ public final class DevelopmentServer: @unchecked Sendable {
     ///   or the path escapes the output directory.
     func resolveFilePath(forRequestPath requestPath: String) -> String? {
         let root = URL(fileURLWithPath: outputPath, isDirectory: true).standardizedFileURL
-        // `HttpRequest.path` is already percent-decoded and query-stripped by Swifter's parser.
+        // `HttpRequest.path` is query-stripped but **not** decoded, whatever the name suggests.
+        // Swifter percent-encodes the request target with `.urlQueryAllowed` — which does not
+        // include `%`, so each `%` becomes `%25` — and then reads `URLComponents.path`, whose
+        // decoding undoes exactly that. The escapes arrive as the literals the client sent.
+        //
+        // So the decoding is ours to do, and it has to happen: a page is published under the
+        // encoded form of its name and written to disk under the decoded one, the same split
+        // every static host makes. Doing it per component, after the split on `/`, is what keeps
+        // a `%2F` from turning into a separator.
+        // A site published under a path links everything as `/blog/…` while the output tree it
+        // is served from starts at `_site`. The prefix comes off here so the generated links
+        // work, and a request without it still resolves — the development server's job is to
+        // show what was just written, not to reproduce a host's routing, and a first page load
+        // that 404s because the prefix is missing reads as a broken tool.
+        var path = requestPath
+        if !basePath.isEmpty, path == basePath || path.hasPrefix(basePath + "/") {
+            // On a whole component, so `/blog` does not swallow the front of `/blogging/`.
+            path = String(path.dropFirst(basePath.count))
+        }
+
         var candidate = root
-        for component in requestPath.split(separator: "/") {
-            candidate.appendPathComponent(String(component))
+        for component in path.split(separator: "/") {
+            guard let name = decodedComponent(String(component)) else { return nil }
+            candidate.appendPathComponent(name)
         }
         candidate.standardize()
 
@@ -156,6 +182,22 @@ public final class DevelopmentServer: @unchecked Sendable {
             return nil
         }
         return index.path
+    }
+
+    /// One component of a request path, as the name it refers to on disk.
+    ///
+    /// - Returns: `nil` when the decoded form could not be a single name, which is the whole
+    ///   reason this is done per component: `%2F` would otherwise become a separator and `%00`
+    ///   would truncate the name a system call sees.
+    private func decodedComponent(_ component: String) -> String? {
+        // `removingPercentEncoding` returns nil for a malformed escape (`%zz`, or a `%` at the
+        // end). A request spelling a bare `%` is still a request for a file whose name holds
+        // one, so fall back to the component as it arrived.
+        let decoded = component.removingPercentEncoding ?? component
+        guard !decoded.contains("/"), !decoded.unicodeScalars.contains("\u{0}") else {
+            return nil
+        }
+        return decoded
     }
 
     private func handleStaticFileRequest(_ request: HttpRequest) -> HttpResponse {

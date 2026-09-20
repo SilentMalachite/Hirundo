@@ -83,4 +83,46 @@ final class HTMLEscapingTests: XCTestCase {
         // call site in this module writes its attributes with quotes for exactly this reason.
         XCTAssertEqual(HTMLEscaping.escaped("x onfocus=alert(1)"), "x onfocus=alert(1)")
     }
+
+    // MARK: - unescaped
+
+    func testUnescapeReversesEscape() {
+        for text in ["Tom & Jerry", "<b>bold</b>", "a \"quoted\" 'value'", "plain", ""] {
+            XCTAssertEqual(HTMLEscaping.unescaped(HTMLEscaping.escaped(text)), text)
+        }
+    }
+
+    func testUnescapeRestoresTheAmpersandLast() {
+        // An author writing a literal `&lt;` gets `&amp;lt;`. Undoing `&amp;` first would turn
+        // that back into `<` — the mirror of why `escaped` replaces `&` first.
+        XCTAssertEqual(HTMLEscaping.unescaped("&amp;lt;"), "&lt;")
+        XCTAssertEqual(HTMLEscaping.unescaped("&amp;amp;"), "&amp;")
+    }
+
+    func testUnescapeHandlesDecimalAndHexReferences() {
+        XCTAssertEqual(HTMLEscaping.unescaped("it&#39;s"), "it's")
+        XCTAssertEqual(HTMLEscaping.unescaped("it&#x27;s"), "it's")
+        XCTAssertEqual(HTMLEscaping.unescaped("&#12486;&#12473;&#12488;"), "テスト")
+    }
+
+    func testUnescapeLeavesAnEscapedNumericReferenceAlone() {
+        // `&amp;#39;` is an author writing `&#39;`, not an apostrophe.
+        XCTAssertEqual(HTMLEscaping.unescaped("&amp;#39;"), "&#39;")
+    }
+
+    func testUnescapeLeavesAnUnknownEntityAlone() {
+        // The limit, stated: this is not a general entity decoder.
+        XCTAssertEqual(HTMLEscaping.unescaped("a&nbsp;b &copy; c"), "a&nbsp;b &copy; c")
+        XCTAssertEqual(HTMLEscaping.unescaped("AT&amp;T &lt 5"), "AT&T &lt 5")
+    }
+
+    func testUnescapeLeavesAReferenceNamingNoCharacterAlone() {
+        XCTAssertEqual(HTMLEscaping.unescaped("&#xD800;"), "&#xD800;")
+        XCTAssertEqual(HTMLEscaping.unescaped("&#0;"), "&#0;")
+        XCTAssertEqual(HTMLEscaping.unescaped("&#1114112;"), "&#1114112;")
+    }
+
+    func testUnescapeLeavesAStringWithoutEntitiesUntouched() {
+        XCTAssertEqual(HTMLEscaping.unescaped("nothing to do here"), "nothing to do here")
+    }
 }

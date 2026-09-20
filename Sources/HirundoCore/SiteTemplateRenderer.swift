@@ -21,13 +21,13 @@ public class SiteTemplateRenderer {
         self.contextBuilder = TemplateContextBuilder(config: config)
         self.cacheManager = TemplateCacheManager()
         self.htmlGenerator = DefaultHTMLGenerator()
-        
-        // Configure template engine with site config (async initialization not allowed in init)
-        // Must be called separately via configureEngine()
-    }
-    
-    /// Configure template engine (must be called after init)
-    public func configureEngine() {
+
+        // Here, not in a step the caller has to remember. `configureEngine()` was the step, and
+        // nothing in the sources called it — so `absolute_url`, `relative_url`, `site_url`,
+        // `site_title` and `site_description` were registered in tests that configured the
+        // engine by hand and nowhere else. A template using one of them failed the build with a
+        // Stencil syntax error, which reads as the template being wrong rather than the filter
+        // being absent.
         templateEngine.configure(with: config.site)
     }
     

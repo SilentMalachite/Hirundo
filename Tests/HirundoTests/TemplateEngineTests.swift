@@ -170,9 +170,10 @@ final class TemplateEngineTests: XCTestCase {
         engine.registerCustomFilters()
         let rendered = try engine.render(template: "filters.html", context: context)
         
-        // Check slugified title - Japanese text should be preserved in Unicode-aware slugify
-        // The title "これは タイトル です！" becomes "これは-タイトル-です" after slugification
-        XCTAssertTrue(rendered.contains("<h1>%E3%81%93%E3%82%8C%E3%81%AF-%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB-%E3%81%A7%E3%81%99%EF%BC%81</h1>"), 
+        // A slug is a name, not a URL, so Japanese survives as itself. The title
+        // "これは タイトル です！" becomes "これは-タイトル-です！"; a template that needs this in
+        // an href pipes it through `url_encode`.
+        XCTAssertTrue(rendered.contains("<h1>これは-タイトル-です！</h1>"),
                      "Expected slugified title in output, got: \(rendered)") // slugified
         XCTAssertTrue(rendered.contains("January 01, 2024")) // formatted date
         XCTAssertTrue(rendered.contains("...")) // excerpt with ellipsis
@@ -181,6 +182,81 @@ final class TemplateEngineTests: XCTestCase {
         XCTAssertTrue(rendered.contains("<strong>") || rendered.contains("**太字**"), "Expected markdown rendering, got: \(rendered)")
     }
     
+    private func renderWithSite(_ template: String, url: String, context: [String: Any] = [:]) throws -> String {
+        let name = "t-\(UUID().uuidString).html"
+        try template.write(
+            to: tempTemplatesDir.appendingPathComponent(name), atomically: true, encoding: .utf8
+        )
+        engine.configure(with: try Site(
+            title: "S", description: nil, url: url, language: nil, author: nil
+        ))
+        return try engine.render(template: name, context: context)
+    }
+
+    func testRelativeURLPrependsTheBasePath() throws {
+        XCTAssertEqual(
+            try renderWithSite("{{ \"/about/\"|relative_url }}", url: "https://example.com/blog"),
+            "/blog/about/"
+        )
+    }
+
+    func testRelativeURLIsIdempotent() throws {
+        // `{{ page.url }}` already carries the prefix; a literal an author writes does not.
+        XCTAssertEqual(
+            try renderWithSite(
+                "{{ \"/blog/about/\"|relative_url }}", url: "https://example.com/blog"
+            ),
+            "/blog/about/"
+        )
+    }
+
+    func testRelativeURLDoesNotPrefixASiblingPathThatMerelyStartsWithIt() throws {
+        XCTAssertEqual(
+            try renderWithSite(
+                "{{ \"/blogging/\"|relative_url }}", url: "https://example.com/blog"
+            ),
+            "/blog/blogging/"
+        )
+    }
+
+    func testRelativeURLIsUnchangedForARootHostedSite() throws {
+        XCTAssertEqual(
+            try renderWithSite("{{ \"/about/\"|relative_url }}", url: "https://example.com"),
+            "/about/"
+        )
+    }
+
+    func testAbsoluteURLCombinesTheOriginAndTheBasePathExactlyOnce() throws {
+        XCTAssertEqual(
+            try renderWithSite("{{ \"/about/\"|absolute_url }}", url: "https://example.com/blog"),
+            "https://example.com/blog/about/"
+        )
+        XCTAssertEqual(
+            try renderWithSite(
+                "{{ \"/blog/about/\"|absolute_url }}", url: "https://example.com/blog"
+            ),
+            "https://example.com/blog/about/"
+        )
+    }
+
+    func testURLEncodeMakesALinkOutOfASlug() throws {
+        // The pair: `slugify` names the directory, `url_encode` makes the href that reaches it.
+        let template = """
+        <a href="/tags/{{ tag|slugify|url_encode }}/">{{ tag }}</a>
+        """
+        try template.write(
+            to: tempTemplatesDir.appendingPathComponent("urlencode.html"),
+            atomically: true, encoding: .utf8
+        )
+        engine.registerCustomFilters()
+
+        let rendered = try engine.render(template: "urlencode.html", context: ["tag": "テスト"])
+        XCTAssertTrue(
+            rendered.contains("href=\"/tags/%E3%83%86%E3%82%B9%E3%83%88/\""),
+            "got: \(rendered)"
+        )
+    }
+
     func testCollectionLoops() throws {
         let template = """
         <nav>
