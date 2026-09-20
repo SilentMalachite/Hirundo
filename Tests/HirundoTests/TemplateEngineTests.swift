@@ -170,9 +170,10 @@ final class TemplateEngineTests: XCTestCase {
         engine.registerCustomFilters()
         let rendered = try engine.render(template: "filters.html", context: context)
         
-        // Check slugified title - Japanese text should be preserved in Unicode-aware slugify
-        // The title "これは タイトル です！" becomes "これは-タイトル-です" after slugification
-        XCTAssertTrue(rendered.contains("<h1>%E3%81%93%E3%82%8C%E3%81%AF-%E3%82%BF%E3%82%A4%E3%83%88%E3%83%AB-%E3%81%A7%E3%81%99%EF%BC%81</h1>"), 
+        // A slug is a name, not a URL, so Japanese survives as itself. The title
+        // "これは タイトル です！" becomes "これは-タイトル-です！"; a template that needs this in
+        // an href pipes it through `url_encode`.
+        XCTAssertTrue(rendered.contains("<h1>これは-タイトル-です！</h1>"),
                      "Expected slugified title in output, got: \(rendered)") // slugified
         XCTAssertTrue(rendered.contains("January 01, 2024")) // formatted date
         XCTAssertTrue(rendered.contains("...")) // excerpt with ellipsis

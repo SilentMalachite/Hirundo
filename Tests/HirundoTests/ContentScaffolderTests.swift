@@ -102,13 +102,12 @@ final class ContentScaffolderTests: XCTestCase {
         XCTAssertEqual(result.relativePath, "content/posts/custom-name.md")
     }
 
-    func testPost_slugifiesNonASCIITitles() throws {
+    func testPost_namesTheFileAfterANonASCIITitle() throws {
         let result = try scaffold(kind: .post, ContentScaffoldOptions(title: "こんにちは"))
 
-        // slugify percent-encodes non-ASCII, so the name stays URL-safe.
-        XCTAssertTrue(result.relativePath.hasPrefix("content/posts/"))
-        XCTAssertTrue(result.relativePath.hasSuffix(".md"))
-        XCTAssertFalse(result.relativePath.contains("こんにちは"))
+        // A slug is a name, not a URL. It used to be percent-encoded, which named the file
+        // `%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF.md`.
+        XCTAssertEqual(result.relativePath, "content/posts/こんにちは.md")
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.url.path))
     }
 
@@ -121,13 +120,15 @@ final class ContentScaffolderTests: XCTestCase {
         )
 
         let name = URL(fileURLWithPath: result.relativePath).lastPathComponent
-        XCTAssertLessThanOrEqual(name.count, 40, "Got a \(name.count)-character name: \(name)")
+        // Bytes, because that is what a file system's NAME_MAX counts.
+        XCTAssertLessThanOrEqual(name.utf8.count, 40, "Got a \(name.utf8.count)-byte name: \(name)")
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.url.path))
     }
 
     /// A derived slug that truncates back to nothing must not become a hidden `.md` file.
     func testPost_fallsBackToUntitledWhenTheDerivedSlugTruncatesToNothing() throws {
-        // slugify cuts this to 37 hyphens, then trims hyphens off both ends, leaving "".
+        // slugify collapses the run to a single hyphen and trims it, leaving "" — which its
+        // own fallback now turns into "untitled" before this code sees it.
         let result = try scaffold(
             kind: .post,
             ContentScaffoldOptions(title: String(repeating: "-", count: 60)),

@@ -11,6 +11,8 @@ public struct Limits: Codable, Sendable {
 
     public let maxMarkdownFileSize: Int
     public let maxFrontMatterSize: Int
+    /// 生成するファイル名の上限。単位は **UTF-8 バイト数** で、ファイルシステムの
+    /// `NAME_MAX` が数えるものに合わせてある。ASCII のタイトルでは文字数と一致する。
     public let maxFilenameLength: Int
     public let maxTitleLength: Int
     public let maxDescriptionLength: Int

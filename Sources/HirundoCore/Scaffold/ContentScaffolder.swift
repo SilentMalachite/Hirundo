@@ -330,11 +330,9 @@ public struct ContentScaffolder {
         guard let explicit else {
             // Leave room for the ".md" the caller appends.
             let derived = title.slugify(maxLength: max(1, limits.maxFilenameLength - 3))
-            // `slugify` trims the truncated form back to nothing when the cut lands in a
-            // run of hyphens, and its own "untitled" fallback sits after the truncation
-            // branch, so it can hand back "". Containing that here — rather than in
-            // `slugify`, which has other callers — keeps `posts/.md`, a hidden file, from
-            // ever being the destination.
+            // `slugify` applies its own "untitled" fallback after truncating, so it no
+            // longer hands back "". Kept as a second guard because the cost is a comparison
+            // and the failure it prevents — `posts/.md`, a hidden file — is silent.
             return derived.isEmpty ? "untitled" : derived
         }
 
@@ -351,9 +349,11 @@ public struct ContentScaffolder {
         guard !trimmed.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw ContentScaffoldError.invalidSlug("Slug cannot contain control characters")
         }
-        guard trimmed.count + 3 <= limits.maxFilenameLength else {
+        // Bytes, not characters: `maxFilenameLength` describes what a file system's NAME_MAX
+        // counts, and a slug may now hold non-ASCII, which costs more than one byte each.
+        guard trimmed.utf8.count + 3 <= limits.maxFilenameLength else {
             throw ContentScaffoldError.invalidSlug(
-                "Slug exceeds the \(limits.maxFilenameLength)-character file name limit"
+                "Slug exceeds the \(limits.maxFilenameLength)-byte file name limit"
             )
         }
         return trimmed
@@ -377,9 +377,9 @@ public struct ContentScaffolder {
         // otherwise fail inside the write as a bare ENAMETOOLONG rather than as a clear
         // rejection of the input.
         for component in withExtension.split(separator: "/")
-        where component.count > limits.maxFilenameLength {
+        where component.utf8.count > limits.maxFilenameLength {
             throw ContentScaffoldError.invalidPath(
-                "Path component exceeds the \(limits.maxFilenameLength)-character "
+                "Path component exceeds the \(limits.maxFilenameLength)-byte "
                     + "file name limit: \(component)"
             )
         }
