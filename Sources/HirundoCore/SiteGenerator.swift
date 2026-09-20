@@ -353,14 +353,19 @@ public class SiteGenerator {
         
         // Write output file
         try siteFileManager.writeFile(content: renderedHTML, to: outputPath)
-        
+
+        // The URL the page is published under, not the path it was written to. Everything that
+        // consumes `Page.url` / `Post.url` — the archive, category and tag pages, the search
+        // index — is describing the site, not the filesystem.
+        let publishedURL = siteRelativePath(forOutput: outputPath.path)
+
         // Create page or post model
         switch content.type {
         case .page:
             let page = Page(
                 title: content.metadata.title,
                 slug: content.metadata.slug ?? content.url.deletingPathExtension().lastPathComponent,
-                url: outputPath.path,
+                url: publishedURL,
                 description: content.metadata.description,
                 content: htmlContent
             )
@@ -370,7 +375,7 @@ public class SiteGenerator {
             let post = Post(
                 title: content.metadata.title,
                 slug: content.metadata.slug ?? content.url.deletingPathExtension().lastPathComponent,
-                url: outputPath.path,
+                url: publishedURL,
                 date: content.metadata.date,
                 author: content.metadata.author,
                 description: content.metadata.description,
@@ -593,15 +598,16 @@ public class SiteGenerator {
                     .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
         }
+        // `Page.url` / `Post.url` are already the published URLs. Converting again would not be
+        // a no-op: `/about/` is not under the output root, so it would fall through to the
+        // `lastPathComponent` branch and come back as `/about`, and `/` as `//`.
         var entries: [Entry] = []
         for p in pages {
-            let rel = siteRelativePath(forOutput: p.url)
-            entries.append(Entry(url: rel, title: p.title, content: String(stripHTML(p.content).prefix(200)), tags: [], date: nil))
+            entries.append(Entry(url: p.url, title: p.title, content: String(stripHTML(p.content).prefix(200)), tags: [], date: nil))
         }
         for p in posts {
-            let rel = siteRelativePath(forOutput: p.url)
             let tags = p.categories + p.tags
-            entries.append(Entry(url: rel, title: p.title, content: String(stripHTML(p.content).prefix(200)), tags: tags, date: p.date))
+            entries.append(Entry(url: p.url, title: p.title, content: String(stripHTML(p.content).prefix(200)), tags: tags, date: p.date))
         }
         let index = Index(version: "1.0", generated: Date(), entries: entries)
         let data = try JSONEncoder().encode(index)
@@ -610,11 +616,14 @@ public class SiteGenerator {
 
     /// The URL a generated file is published under, from the absolute path it was written to.
     ///
-    /// The path to strip is the output directory, not the project directory: `Page.url` and
-    /// `Post.url` hold `<project>/_site/…`, so stripping only the project left `/_site` in the
-    /// URL of every entry in `search-index.json`. And it is stripped as a whole path component
-    /// from the front — `range(of:)` removed the first occurrence wherever it sat, which for a
-    /// project whose own path repeats further along cut the wrong piece out.
+    /// The one place that derives a published URL. The path to strip is the output directory,
+    /// not the project directory, and it is stripped as a whole path component from the front —
+    /// `range(of:)` removed the first occurrence wherever it sat, which for a project whose own
+    /// path repeats further along cut the wrong piece out.
+    ///
+    /// Give it an output path, never a URL this function already produced. A second pass is not
+    /// idempotent: `/about/` is not under the output root, so it falls through to the last
+    /// branch and comes back as `/about`, and `/` as `//`.
     private func siteRelativePath(forOutput outputPath: String) -> String {
         let outputRoot = URL(fileURLWithPath: projectPath)
             .appendingPathComponent(config.build.outputDirectory).path

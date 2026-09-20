@@ -442,12 +442,13 @@ final class ContentProcessorSymlinkTests: XCTestCase {
             contentsOf: output.appendingPathComponent("archive/index.html"),
             encoding: .utf8
         )
+        // The archive links a post by its published URL, not by the path it was written to.
         XCTAssertEqual(
-            occurrences(of: "/blog/hello/index.html", in: archive), 1,
+            occurrences(of: "href=\"/blog/hello/\"", in: archive), 1,
             "the aliased post is listed once, at the alias's URL: \(archive)"
         )
         XCTAssertEqual(
-            occurrences(of: "/posts/hello/index.html", in: archive), 1,
+            occurrences(of: "href=\"/posts/hello/\"", in: archive), 1,
             "the post must not be listed twice under one URL: \(archive)"
         )
     }
