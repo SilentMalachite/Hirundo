@@ -6,8 +6,8 @@ import Markdown
 /// 安全性は「どのタグを許すか」を後から選り分けることではなく、**タグをこちらで組み立てる**
 /// ことから来ている。`HTMLBlock` と `InlineHTML` には case を持たず、どちらも子を持たない
 /// 葉なので、Markdown 中の生HTMLは何も出力されずに落ちる。出力に現れるタグはここに書かれた
-/// ものだけで、ノード由来の文字列はすべて `escapeText` / `escapeAttribute` を通すか、
-/// `sanitizeURL` で拒否したうえでさらに属性としてエスケープする。
+/// ものだけで、ノード由来の文字列はすべて `HTMLEscaping.escaped` を通すか、`sanitizeURL`
+/// で拒否したうえでさらにエスケープする。
 ///
 /// `HTMLSanitizer` はそのうえに重ねる多層防御であって、汎用サニタイザではない（同型の
 /// doc コメントを参照）。
@@ -57,8 +57,8 @@ public final class HTMLRenderer: Sendable {
             // class attribute and everything after it becomes further attributes.
             let languageAttr = language.isEmpty
                 ? ""
-                : " class=\"language-\(escapeAttribute(language))\""
-            return "<pre><code\(languageAttr)>\(escapeText(codeBlock.code))</code></pre>\n"
+                : " class=\"language-\(HTMLEscaping.escaped(language))\""
+            return "<pre><code\(languageAttr)>\(HTMLEscaping.escaped(codeBlock.code))</code></pre>\n"
         case let table as Markdown.Table:
             return renderTable(table)
         case is ThematicBreak:
@@ -72,7 +72,7 @@ public final class HTMLRenderer: Sendable {
     private func renderInline(_ node: Markup) -> String {
         switch node {
         case let text as Text:
-            return escapeText(text.string)
+            return HTMLEscaping.escaped(text.string)
         case let emphasis as Emphasis:
             return "<em>\(emphasis.children.map { renderInline($0) }.joined())</em>"
         case let strong as Strong:
@@ -80,16 +80,16 @@ public final class HTMLRenderer: Sendable {
         case let link as Markdown.Link:
             // `sanitizeURL` decides whether the URL may be used at all; it does not make it
             // safe to interpolate, so the value is still escaped as an attribute.
-            let href = escapeAttribute(sanitizeURL(link.destination ?? ""))
-            let title = link.title?.isEmpty == false ? " title=\"\(escapeAttribute(link.title!))\"" : ""
+            let href = HTMLEscaping.escaped(sanitizeURL(link.destination ?? ""))
+            let title = link.title?.isEmpty == false ? " title=\"\(HTMLEscaping.escaped(link.title!))\"" : ""
             return "<a href=\"\(href)\"\(title)>\(link.children.map { renderInline($0) }.joined())</a>"
         case let image as Markdown.Image:
-            let src = escapeAttribute(sanitizeURL(image.source ?? ""))
+            let src = HTMLEscaping.escaped(sanitizeURL(image.source ?? ""))
             let alt = image.plainText
-            let title = image.title?.isEmpty == false ? " title=\"\(escapeAttribute(image.title!))\"" : ""
-            return "<img src=\"\(src)\" alt=\"\(escapeAttribute(alt))\"\(title)>"
+            let title = image.title?.isEmpty == false ? " title=\"\(HTMLEscaping.escaped(image.title!))\"" : ""
+            return "<img src=\"\(src)\" alt=\"\(HTMLEscaping.escaped(alt))\"\(title)>"
         case let inlineCode as InlineCode:
-            return "<code>\(escapeText(inlineCode.code))</code>"
+            return "<code>\(HTMLEscaping.escaped(inlineCode.code))</code>"
         case let strikethrough as Strikethrough:
             return "<s>\(strikethrough.children.map { renderInline($0) }.joined())</s>"
         default:
@@ -124,29 +124,6 @@ public final class HTMLRenderer: Sendable {
         
         html += "</table>\n"
         return html
-    }
-    
-    /// テキストをエスケープ
-    private func escapeText(_ text: String) -> String {
-        return text
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "'", with: "&#39;")
-    }
-    
-    /// 属性値をエスケープ
-    ///
-    /// `&` は最初に置換する。後にすると、先に入れたエンティティのアンパサンドまで
-    /// 二重にエスケープしてしまう。
-    private func escapeAttribute(_ text: String) -> String {
-        return text
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "'", with: "&#39;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
     }
     
     /// URLをサニタイズ

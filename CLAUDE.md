@@ -143,10 +143,11 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 
 #### 出力ディレクトリへの閉じ込め
 
-生成物の書き込みはすべて、設定された出力ディレクトリ（既定 `_site`）の中に閉じ込められます。
-判定の規則は `PathBoundary`（境界は必ずパスコンポーネント単位。`/a/stat` は `/a/static` の中
-ではない）と `OutputPathGuard`（出力ルートと親ディレクトリは解決し、**最後の要素は解決しない**）
-の2つに集約されていて、アセットパイプラインと `SiteFileManager` が同じものを使います。
+**ページ本体とアセットの**書き込みは、設定された出力ディレクトリ（既定 `_site`）の中に
+閉じ込められます。判定の規則は `PathBoundary`（境界は必ずパスコンポーネント単位。`/a/stat`
+は `/a/static` の中ではない）と `OutputPathGuard`（出力ルートと親ディレクトリは解決し、
+**最後の要素は解決しない**）の2つに集約されていて、アセットパイプラインと `SiteFileManager`
+が同じものを使います。
 
 - 出力ファイルの位置にシンボリックリンクが残っていた場合、それを**辿らずに取り除いて**実体を
   書きます。古い出力ツリーは次のビルドで自動的に直ります。
@@ -160,6 +161,18 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 パスにそのまま書く必要があり、閉じ込めの対象は生成物だけだからです（各 scaffolder の
 コメントを参照）。
 
+**まだ閉じ込められていない書き込みが2種類あります。** ここに書いてあることを実装より強く
+読まないでください。
+
+- `sitemap.xml` / `rss.xml` / `search-index.json` / `asset-manifest.json` は
+  `SiteFileManager` を通さず直接 `write(to:)` します。したがって出力ルート直下にこれらの名前
+  で外を指すリンクが残っていると、取り除かずに**辿って上書き**します。
+- `AssetPipeline.write` は親ディレクトリの作成に `OutputPathGuard.createDirectories`
+  （1コンポーネントずつ作って各段で再検査する）ではなく
+  `createDirectory(withIntermediateDirectories: true)` を使っています。`resolvingSymlinksInPath()`
+  は**まだ存在しないパスには無力**なので、`_site/a -> /outside` があって `/outside/b` が未作成の
+  とき、`static/a/b/x.css` の書き込みが出力外へ届きます。
+
 #### HTMLのエスケープとサニタイズ
 
 `HTMLRenderer` は Markdown の AST から**自分でタグを組み立てます**。`HTMLBlock` と
@@ -170,6 +183,41 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 `HTMLSanitizer` はそのうえに重ねる**多層防御の補助であって、汎用サニタイザではありません**。
 任意の信頼できないHTMLを渡すと `<iframe>` / `<object>` / `<form>` や引用符なしの属性値は
 素通りします。用途を取り違えないよう、その制限自体をテストで固定してあります。
+
+エスケープの規則は `Utilities/HTMLEscaping.swift` の1箇所にあります。文字列補間でHTMLを
+組み立てるものはすべてこれを通ります——`HTMLRenderer` と、組み込みのアーカイブ/カテゴリ/
+タグページ（`Templates/DefaultHTMLGenerator.swift` と `ArchiveGenerator.swift`）です。
+
+**組み込みのアーカイブ/カテゴリ/タグHTMLは「テンプレートが無いときの保険」ではなく通常経路
+です。** `hirundo init` が書き出すテンプレートは `base.html` / `default.html` / `post.html`
+の3つだけで、`archive.html` / `category.html` / `tag.html` / `categories.html` /
+`tags.html` は生成されません。
+
+**入力側の検証は境界ではありません。** `MarkdownValidator` の危険パターン検査は12個の部分
+文字列を小文字化して `contains` するだけの denylist で、`<iframe` / `onpointerover=` /
+空白入りの `onerror =` は素通りします。`config.yaml` 由来の値とファイル名はこの検査を一度も
+通りません。境界は出力側のエスケープです。
+
+#### テンプレート経路のエスケープ
+
+**Stencil に自動エスケープはありません**（ライブラリ側に機構が存在しません）。テンプレートの
+`{{ … }}` はそのまま出力されるので、エスケープはテンプレート作者の責任です。`escape`
+フィルタ（別名 `e`）で要求します。
+
+`hirundo init` が書き出すテンプレートは、**`{{ content }}` を除くすべての補間**に
+`|escape` を付けています。`{{ content }}` と `markdown` フィルタの出力には付けては
+いけません——どちらも既にHTMLで、エスケープは冪等ではないため、ページのソースがそのまま
+表示されます。
+
+このフィルタが入る前に作ったサイトのテンプレートは、Hirundo を更新しても書き換わりません。
+
+#### 公開URL（`page.url` / `post.url`）
+
+`Page.url` / `Post.url` とテンプレートの `{{ page.url }}` は、**サイト相対の公開URL**
+（`/about/`、出力ルートの index は `/`）です。ファイルシステムのパスではありません。
+導出は `SiteGenerator.siteRelativePath(forOutput:)` の1箇所だけで、`search-index.json`、
+sitemap、RSS、アーカイブ/カテゴリ/タグページのリンクがすべてこれを使います。既に公開URLに
+なっている値をもう一度通してはいけません（`/about/` → `/about`、`/` → `//` になります）。
 
 ### 5. 機能フラグ（features）
 `config.yaml` の `features` ブロックで有効・無効を切り替えます（すべてデフォルト `false`）：

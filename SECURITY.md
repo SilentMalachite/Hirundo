@@ -63,12 +63,56 @@ Hirundo includes basic security measures appropriate for a static site generator
 - **Attribute Escaping**: Every author-controlled value reaching an attribute is
   escaped, including the fenced code block's language, link and image URLs, `title`
   and `alt`
-- **URL Schemes**: Link and image URLs are limited to http, https, mailto, ftp and
-  ftps; anything else becomes `#`
+- **URL Schemes**: `HTMLRenderer` admits http, https, mailto, ftp and ftps, and
+  `HTMLSanitizer` runs over its output admitting http, https, mailto and tel. The two
+  lists disagree, so an `ftp://` link the renderer accepted is rewritten to `#` by the
+  pass after it. The effective set is their intersection — http, https and mailto —
+  and anything else becomes `#`
 - **Known Limitation**: `HTMLSanitizer` is a defence-in-depth pass over markup the
   renderer already produced, not a sanitizer for untrusted HTML. Pointed at arbitrary
   input it would let `<iframe>`, `<object>`, `<form>` and unquoted attribute values
   through. Do not use it as one
+- **One Escape Table**: `HTMLEscaping.escaped` is the single rule for turning a value
+  into markup that means the value. Everything that builds HTML by interpolation uses
+  it — the renderer, and the built-in archive, category and tag pages
+- **`search-index.json` Holds Text, Not Markup**: with `features.searchIndex` on, a
+  page's title and its category and tag names are written to the index as the author
+  wrote them. That is correct for JSON — escaping them there would show a searcher
+  `&lt;b&gt;` — but it makes the search UI responsible for the last step. Insert a
+  result with `textContent`, never `innerHTML`. Hirundo ships no search UI, so this is
+  a contract with whatever consumes the file
+- **`search-index.json` Bodies Are Not Decoded**: an entry's `content` is the rendered
+  page with its tags stripped by a regular expression, and nothing decodes the entities
+  the renderer introduced. A body reading `Tom & Jerry` is indexed as `Tom &amp;amp;
+  Jerry`, so it displays wrong under the `textContent` rule above and does not match a
+  search for the text the author wrote
+
+#### Input Validation Is Not The Boundary
+- **What It Is**: `MarkdownValidator` rejects a file containing any of twelve
+  lowercased substrings (`<script`, `javascript:`, `onerror=` and nine more). It fails
+  a build early. It is not a gate
+- **What Walks Past It**: `<iframe`, `<object`, `<embed`, `onpointerover=`,
+  `ontoggle=`, `onwheel=`, and `onerror =` with a space before the equals. The list
+  cannot be completed, and lengthening it costs real false positives — `onclick=` as a
+  string, in an article about XSS, already fails a build
+- **What It Never Sees**: `config.yaml` — `site.title` and `site.author.name` are
+  checked for length and nothing else — and file names, which become URLs. A macOS file
+  may be named `a"onmouseover="alert(1).md`
+- **Where The Boundary Is**: the output side. `HTMLRenderer` constructs its own tags,
+  every interpolated value goes through `HTMLEscaping.escaped`, and templates escape
+  with the `escape` filter
+
+#### Template Escaping
+- **No Autoescaping**: Stencil has none, and the mechanism does not exist in the
+  library — a template's `{{ … }}` is written out as it stands. Escaping is the
+  template author's responsibility
+- **The `escape` Filter**: `{{ value|escape }}`, with `e` as an alias. The templates
+  `hirundo init` writes apply it to every value they interpolate except `{{ content }}`
+- **Never On Rendered HTML**: `{{ content }}` and the `markdown` filter's output are
+  already HTML, and escaping is not idempotent, so escaping them shows a reader the
+  page's own source
+- **Opt-In For Existing Sites**: upgrading Hirundo does not rewrite templates a site
+  already has. A template written before this filter existed still interpolates raw
 
 #### Development Server Security
 - **Basic WebSocket**: Simple live reload functionality on `/livereload`

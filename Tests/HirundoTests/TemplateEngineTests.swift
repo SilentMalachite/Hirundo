@@ -393,4 +393,76 @@ final class TemplateEngineTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - The escape filter
+
+    /// Writes `body` as a template and renders it. `render(template:)` takes a name, not source.
+    private func render(_ body: String, _ context: [String: Any] = [:]) throws -> String {
+        let name = "escape-\(UUID().uuidString).html"
+        try body.write(
+            to: tempTemplatesDir.appendingPathComponent(name), atomically: true, encoding: .utf8
+        )
+        return try engine.render(template: name, context: context)
+    }
+
+    func testTheEscapeFilterEscapesTheFiveSpecialCharacters() throws {
+        XCTAssertEqual(try render("[{{ x|escape }}]", ["x": "&\"'<>"]), "[&amp;&quot;&#39;&lt;&gt;]")
+    }
+
+    func testTheEFilterIsAnAliasForEscape() throws {
+        let context: [String: Any] = ["x": "<b>"]
+        XCTAssertEqual(
+            try render("{{ x|e }}", context), try render("{{ x|escape }}", context)
+        )
+    }
+
+    func testTheEscapeFilterRendersANumberUnchanged() throws {
+        XCTAssertEqual(try render("{{ n|escape }}", ["n": 42]), "42")
+    }
+
+    func testTheEscapeFilterEscapesEachElementOfAnArray() throws {
+        // The value handed back used to be the array itself, which Stencil then stringified —
+        // so `{{ page.tags|escape }}` printed `["<img src=x onpointerover=alert(1)>"]` with the
+        // tag intact, in a template that had asked for escaping.
+        XCTAssertEqual(
+            try render("{{ tags|escape }}", ["tags": ["<img src=x onpointerover=alert(1)>"]]),
+            "[\"&lt;img src=x onpointerover=alert(1)&gt;\"]"
+        )
+    }
+
+    func testAnEscapedArrayIsStillIterable() throws {
+        XCTAssertEqual(
+            try render("{% for t in tags|escape %}[{{ t }}]{% endfor %}", ["tags": ["<b>", "&"]]),
+            "[&lt;b&gt;][&amp;]"
+        )
+    }
+
+    func testTheEscapeFilterEscapesAValueThatIsNeitherStringNorArray() throws {
+        struct Hostile: CustomStringConvertible { let description = "<b>bold</b>" }
+        XCTAssertEqual(try render("{{ x|escape }}", ["x": Hostile()]), "&lt;b&gt;bold&lt;/b&gt;")
+    }
+
+    func testTheEscapeFilterLeavesNilEmpty() throws {
+        XCTAssertEqual(try render("[{{ missing|escape }}]"), "[]")
+    }
+
+    func testTheEscapeFilterIsNotIdempotent() throws {
+        // Which is why it must never be applied to `{{ content }}` or to `markdown` output.
+        XCTAssertEqual(try render("{{ x|escape|escape }}", ["x": "&"]), "&amp;amp;")
+    }
+
+    func testAnEscapeFilterChainedAfterAFilterWithArgumentsParses() throws {
+        // `post.html` writes `{{ page.date|date: "%B %d, %Y"|escape }}`, so the parser has to
+        // accept a no-argument filter following one that takes arguments.
+        XCTAssertEqual(
+            try render("{{ d|date: \"%Y\"|escape }}", ["d": Date(timeIntervalSince1970: 0)]),
+            "1970"
+        )
+    }
+
+    func testTheEscapeFilterIsAvailableWithoutSiteConfiguration() throws {
+        // It is registered with the static filters, so a template renders with it before
+        // `configure(with:)` has ever been called.
+        XCTAssertEqual(try render("{{ x|escape }}", ["x": "<b>"]), "&lt;b&gt;")
+    }
 }

@@ -4,6 +4,9 @@ import Foundation
 public struct Page {
     public let title: String
     public let slug: String
+    /// The site-relative URL the page is published under — `/about/`, and `/` for the output
+    /// root's own index. Not a filesystem path: it held one until 3.0.0, which is how the
+    /// archive pages came to link to `/Users/…/_site/posts/foo/index.html`.
     public let url: String
     public let description: String?
     public let content: String
@@ -21,6 +24,9 @@ public struct Page {
 public struct Post {
     public let title: String
     public let slug: String
+    /// The site-relative URL the page is published under — `/about/`, and `/` for the output
+    /// root's own index. Not a filesystem path: it held one until 3.0.0, which is how the
+    /// archive pages came to link to `/Users/…/_site/posts/foo/index.html`.
     public let url: String
     public let date: Date
     public let author: String?

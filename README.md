@@ -14,7 +14,7 @@ A modern, fast, and secure static site generator built with Swift.
 
 - **🚀 Fast**: Built with Swift, with caching for parsed content, rendered pages, and templates
 - **📝 Markdown**: CommonMark support with YAML frontmatter using Apple's swift-markdown
-- **🎨 Templates**: Stencil-based templating engine with 20 custom filters
+- **🎨 Templates**: Stencil-based templating engine with 21 custom filters
 - **🔄 Live Reload**: Development server that rebuilds on change and pushes reloads over WebSocket
 - **🧩 Built-in Features**: Sitemap, RSS, search index, asset minification, and asset fingerprinting as simple on/off flags
 - **📦 Type Safe**: Strongly typed, validated configuration and models
@@ -528,6 +528,14 @@ Templates have access to these variables:
 | `split` | Split a string into a list |
 | `number` | Numeric formatting |
 | `default` | Fallback for an empty value |
+| `escape` (alias `e`) | Escape a value for HTML |
+
+Stencil has no automatic escaping, so `escape` is how a template asks for it. The
+templates `hirundo init` writes apply it to every value they interpolate except
+`{{ content }}`. Never apply it to `{{ content }}` or to the `markdown` filter's
+output: both are already HTML, and escaping is not idempotent, so a reader would be
+shown the page's own source. A site scaffolded before this filter existed keeps the
+templates it has — upgrading Hirundo does not rewrite them.
 
 ### Example Template
 

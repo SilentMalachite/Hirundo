@@ -709,4 +709,77 @@ final class SecurityTests: XCTestCase {
             print("Infinite template recursion correctly prevented: \(error)")
         }
     }
+
+    // MARK: - Output escaping on the built-in archive pages
+
+    /// The denylist in `MarkdownValidator` is twelve lowercased substrings, so a payload that
+    /// avoids all twelve reaches the renderer untouched. These pages are built by string
+    /// interpolation in `DefaultHTMLGenerator` and `ArchiveGenerator` — `hirundo init` writes no
+    /// `archive.html`, `category.html` or `tag.html`, so that is the path a blog actually takes —
+    /// and no sanitizer runs over them afterwards. Escaping is the only thing standing here.
+    func testArchiveAndCategoryPagesEscapeFrontMatterTheDenylistDoesNotCatch() async throws {
+        let contentDir = tempDir.appendingPathComponent("content/posts")
+        let templatesDir = tempDir.appendingPathComponent("templates")
+        try FileManager.default.createDirectory(at: contentDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: templatesDir, withIntermediateDirectories: true)
+
+        let configYAML = """
+        site:
+          title: Test Site
+          url: https://example.com
+          language: en-US
+        build:
+          contentDirectory: content
+          outputDirectory: _site
+          templatesDirectory: templates
+          staticDirectory: static
+        """
+        try configYAML.write(
+            to: tempDir.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8
+        )
+        for name in ["base.html", "default.html", "post.html"] {
+            try "<!DOCTYPE html><html><body>{{ content }}</body></html>".write(
+                to: templatesDir.appendingPathComponent(name), atomically: true, encoding: .utf8
+            )
+        }
+
+        // None of these trip `validateDangerousPatterns`: `<iframe` is not on the list, and
+        // `onpointerover` is not one of the twelve named handlers.
+        let post = """
+        ---
+        title: "Title <iframe src=//example.invalid></iframe>"
+        date: 2026-01-01
+        categories: ["Cat <b>bold</b>"]
+        tags: ["Tag <b>bold</b>"]
+        ---
+
+        Body.
+        """
+        try post.write(
+            to: contentDir.appendingPathComponent("hello.md"), atomically: true, encoding: .utf8
+        )
+
+        let generator = try SiteGenerator(projectPath: tempDir.path)
+        try await generator.build(clean: true, includeDrafts: false)
+
+        let outputDir = tempDir.appendingPathComponent("_site")
+        let enumerator = FileManager.default.enumerator(at: outputDir, includingPropertiesForKeys: nil)
+        var checked = 0
+        while let fileURL = enumerator?.nextObject() as? URL {
+            guard fileURL.pathExtension == "html" else { continue }
+            let html = try String(contentsOf: fileURL, encoding: .utf8)
+            XCTAssertFalse(
+                html.contains("<iframe"), "raw <iframe> reached \(fileURL.lastPathComponent)"
+            )
+            XCTAssertFalse(
+                html.contains("<b>bold</b>"), "raw <b> reached \(fileURL.lastPathComponent)"
+            )
+            checked += 1
+        }
+        XCTAssertGreaterThan(checked, 0, "the build produced no HTML to check")
+
+        let archive = outputDir.appendingPathComponent("archive/index.html")
+        let archiveHTML = try String(contentsOf: archive, encoding: .utf8)
+        XCTAssertTrue(archiveHTML.contains("&lt;iframe src=//example.invalid&gt;"))
+    }
 }

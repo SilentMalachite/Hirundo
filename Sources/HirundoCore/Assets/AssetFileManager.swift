@@ -37,16 +37,32 @@ public class AssetFileManager {
             directoryURL,
             sourcePath: sourcePath,
             rootPath: rootPath,
+            relativePrefix: startingPrefix(for: directoryURL, sourcePath: sourcePath),
             excludePatterns: excludePatterns,
             visitedDirectories: &visitedDirectories,
             onFile: onFile
         )
     }
 
+    /// Where `directoryURL` sits under `sourcePath`, as a relative prefix.
+    ///
+    /// Empty whenever the walk starts at the source directory itself, which is the only way
+    /// `AssetPipeline` calls this. A caller that starts deeper gets the prefix its files deserve;
+    /// one that starts outside gets `""`, and the paths reported are relative to where it began.
+    private func startingPrefix(for directoryURL: URL, sourcePath: String) -> String {
+        let relative = PathBoundary.relativePath(
+            of: directoryURL.standardizedFileURL.path,
+            under: URL(fileURLWithPath: sourcePath).standardizedFileURL.path
+        )
+        guard let relative, !relative.isEmpty else { return "" }
+        return relative + "/"
+    }
+
     private func processDirectory(
         _ directoryURL: URL,
         sourcePath: String,
         rootPath: String,
+        relativePrefix: String,
         excludePatterns: [String],
         visitedDirectories: inout Set<String>,
         onFile: (URL, String) throws -> Void
@@ -85,14 +101,26 @@ public class AssetFileManager {
                     itemURL,
                     sourcePath: sourcePath,
                     rootPath: rootPath,
+                    relativePrefix: relativePrefix + itemURL.lastPathComponent + "/",
                     excludePatterns: excludePatterns,
                     visitedDirectories: &visitedDirectories,
                     onFile: onFile
                 )
             } else {
-                let standardizedItemPath = itemURL.standardizedFileURL.path
-                let standardizedSourcePath = URL(fileURLWithPath: sourcePath).standardizedFileURL.path
-                let relativePath = standardizedItemPath.replacingOccurrences(of: standardizedSourcePath + "/", with: "")
+                // The relative path is accumulated on the way down, not subtracted from the
+                // absolute one on the way out. Subtracting cannot be made correct here: the
+                // enumerator reports its own spelling (`/private/var/…` where the configuration
+                // says `/var/…`), `standardizedFileURL` folds the two together only for a path
+                // that resolves, and `resolvingSymlinksInPath()` on the source normalises the
+                // other way — so a *broken* link matches neither spelling of its own directory.
+                // Before this it was `replacingOccurrences`, which removed the source
+                // directory's spelling wherever it sat, so a tree repeating it
+                // (`static/<the whole of static's own path>/logo.png`) lost both copies and
+                // published the file at the wrong depth under the wrong manifest key.
+                //
+                // Accumulating also keeps a symbolic link that stays inside the source
+                // directory at the name its author gave it, rather than its target's.
+                let relativePath = relativePrefix + itemURL.lastPathComponent
 
                 if shouldExclude(path: relativePath, patterns: excludePatterns) {
                     continue

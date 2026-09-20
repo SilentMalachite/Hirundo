@@ -154,6 +154,46 @@ public class TemplateFilters {
             }
             return value
         }
+
+        // Escape filter, with `e` as an alias.
+        //
+        // Stencil has no automatic escaping — the mechanism does not exist in the library, and
+        // a template's `{{ … }}` is written out as it stands — so a value from a Markdown file's
+        // front matter or from `config.yaml` reaches the page as markup unless a template asks
+        // for it not to. The templates `hirundo init` writes ask for it everywhere except
+        // `{{ content }}`; a template an author wrote before this filter existed does not, and
+        // is not changed by upgrading.
+        //
+        // It is not idempotent: `{{ x|escape|escape }}` double-escapes. Never apply it to
+        // `{{ content }}` or to the output of the `markdown` filter, both of which are already
+        // HTML and would be displayed as their own source.
+        //
+        // A non-string is *not* passed through, which is where `slugify`, `strip` and `replace`
+        // part company with this one. They transform text and have nothing to say about a
+        // `Date`; this one is asked to make a value safe to write into a page, and Stencil is
+        // going to write it whatever its type — `{{ page.tags|escape }}` over `[String]` came
+        // out as `["<img src=x onpointerover=alert(1)>"]`, tags and all, because the array was
+        // handed back untouched and stringified afterwards.
+        //
+        // So an array is escaped element by element, which also leaves it usable in a `{% for %}`
+        // loop, and anything else is escaped as the string Stencil would have printed. `nil`
+        // stays `nil`, which Stencil renders as empty.
+        func escapeValue(_ value: Any?) -> Any? {
+            switch value {
+            case nil:
+                return nil
+            case let string as String:
+                return HTMLEscaping.escaped(string)
+            case let array as [Any?]:
+                return array.map(escapeValue)
+            case let value?:
+                return HTMLEscaping.escaped(String(describing: value))
+            }
+        }
+
+        for name in ["escape", "e"] {
+            ext.registerFilter(name) { (value: Any?) in escapeValue(value) }
+        }
     }
     
     /// Registers dynamic filters that depend on site configuration

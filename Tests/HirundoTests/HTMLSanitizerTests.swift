@@ -24,12 +24,28 @@ final class HTMLSanitizerTests: XCTestCase {
         XCTAssertEqual(html, "<p>a</p>")
     }
 
-    func testEventHandlerWithoutLeadingWhitespaceIsRemoved() {
-        // The shape an attribute-escaping bug produces: the handler butts straight against the
-        // closing quote of the attribute before it.
+    func testDoesNotRemoveAHandlerThatButtsAgainstThePrecedingQuote() {
+        // The shape an attribute-escaping bug produces. This pass once caught it, by accepting
+        // a quote as the delimiter before `on`. That was a mistake: the gap it covered is
+        // closed where it belongs — `HTMLRenderer` escapes the attribute — and the widened
+        // pattern deleted valid markup, which the test below pins. Another reason not to read
+        // this type as a sanitizer for untrusted HTML.
         let html = sanitizer.sanitizeHTML("<code class=\"language-foo\"onmouseover=\"alert(1)\">x</code>")
 
-        XCTAssertFalse(html.contains("onmouseover"), html)
+        XCTAssertTrue(html.contains("onmouseover"), html)
+    }
+
+    func testLeavesALinkWhoseTitleStartsWithAWordBeginningWithOn() {
+        // `<a href="/a" title="once = ">x</a> <a href="/b">y</a>`: with a quote accepted as the
+        // delimiter, `on\w+` matched "once", `=` matched, and `["'][^"']*["']` swallowed
+        // everything to the next attribute's opening quote — taking the first link's text and
+        // the second link's opening tag with it.
+        let html = sanitizer.sanitizeHTML(
+            "<p><a href=\"/a\" title=\"once = \">x</a> <a href=\"/b\">y</a></p>"
+        )
+
+        XCTAssertTrue(html.contains(">x</a>"), html)
+        XCTAssertTrue(html.contains("href=\"/b\""), html)
     }
 
     func testJavaScriptURLsBecomeAFragment() {
@@ -51,5 +67,31 @@ final class HTMLSanitizerTests: XCTestCase {
         let html = sanitizer.sanitizeHTML("<iframe src=\"https://evil.example\"></iframe>")
 
         XCTAssertTrue(html.contains("<iframe"), html)
+    }
+
+    // MARK: - Ranges are UTF-16, not Characters
+
+    func testSanitizesAURLInAPageContainingAstralCharacters() {
+        // `NSRegularExpression` reports UTF-16 offsets. Walking them with
+        // `String.index(_:offsetBy:)` counts Characters, and one emoji is one Character and two
+        // UTF-16 units — so a link far enough past an emoji was sliced short, or past the end,
+        // and the build died with `String index is out of bounds`.
+        let emoji = String(repeating: "\u{1F600}", count: 20)
+        let html = "<p>\(emoji) <a href=\"/ok\">x</a></p>"
+
+        let sanitized = HTMLSanitizer().sanitizeHTML(html)
+
+        XCTAssertEqual(sanitized, html)
+    }
+
+    func testRewritesAJavaScriptURLAfterAstralCharacters() {
+        let emoji = String(repeating: "\u{1F600}", count: 20)
+        let sanitized = HTMLSanitizer().sanitizeHTML(
+            "<p>\(emoji) <a href=\"javascript:alert(1)\">x</a></p>"
+        )
+
+        XCTAssertTrue(sanitized.contains("href=\"#\""))
+        XCTAssertFalse(sanitized.contains("javascript:"))
+        XCTAssertTrue(sanitized.contains(emoji), "the emoji must survive intact")
     }
 }
