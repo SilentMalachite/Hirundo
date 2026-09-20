@@ -8,7 +8,7 @@ final class SearchIndexTests: XCTestCase {
     private var projectPath: String!
     private var outputURL: URL!
 
-    private struct Entry: Decodable { let url: String }
+    private struct Entry: Decodable { let url: String; let title: String; let content: String }
     private struct Index: Decodable { let entries: [Entry] }
 
     override func setUpWithError() throws {
@@ -79,5 +79,40 @@ final class SearchIndexTests: XCTestCase {
         let urls = try await buildAndReadIndex()
 
         XCTAssertEqual(urls, ["/", "/about/", "/posts/first-post/"])
+    }
+
+    // MARK: - Bodies
+
+    private func buildAndReadEntries() async throws -> [Entry] {
+        let generator = try SiteGenerator(projectPath: projectPath)
+        try await generator.build()
+        let data = try Data(contentsOf: outputURL.appendingPathComponent("search-index.json"))
+        return try JSONDecoder().decode(Index.self, from: data).entries
+    }
+
+    /// The index is read with `textContent`, so a body has to be the text the author wrote.
+    /// It used to be the rendered page with its tags stripped and nothing else, so `Tom & Jerry`
+    /// was indexed as `Tom &amp;amp; Jerry` — shown wrong, and matching no search for the words.
+    func testTheIndexedBodyHoldsTheTextTheAuthorWrote() async throws {
+        try write("---\ntitle: Amp\n---\n\nTom & Jerry <3\n", to: "content/amp.md")
+
+        let entries = try await buildAndReadEntries()
+        let entry = try XCTUnwrap(entries.first { $0.url == "/amp/" })
+        XCTAssertTrue(entry.content.contains("Tom & Jerry <3"), entry.content)
+        XCTAssertFalse(entry.content.contains("&amp;"), entry.content)
+    }
+
+    func testTheIndexedBodyIsNotCutInTheMiddleOfAnEntity() async throws {
+        // Decoding after the cut spent five characters of the budget per ampersand and could
+        // leave `&am` at the end.
+        try write(
+            "---\ntitle: Long\n---\n\n" + String(repeating: "a & ", count: 80) + "\n",
+            to: "content/long.md"
+        )
+
+        let entries = try await buildAndReadEntries()
+        let entry = try XCTUnwrap(entries.first { $0.url == "/long/" })
+        XCTAssertEqual(entry.content.count, 200)
+        XCTAssertFalse(entry.content.contains("&am"), entry.content)
     }
 }

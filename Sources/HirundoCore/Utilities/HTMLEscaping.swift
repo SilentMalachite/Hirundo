@@ -38,4 +38,56 @@ internal enum HTMLEscaping {
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
     }
+
+    /// Turns markup back into the text it means — the entities ``escaped(_:)`` introduces, plus
+    /// the numeric references a Markdown renderer emits.
+    ///
+    /// For the two places that publish a page's words as data rather than as markup:
+    /// `search-index.json`, whose consumer inserts a result with `textContent`, and the feed's
+    /// `<description>`, which is escaped again for XML on the way out. Both were handing a reader
+    /// `Tom &amp;amp; Jerry`.
+    ///
+    /// **This is not a general HTML entity decoder.** It knows `&amp;`, `&lt;`, `&gt;`,
+    /// `&quot;`, `&#39;`, `&apos;` and numeric references. `&nbsp;`, `&copy;` and the rest of
+    /// WHATWG's two-thousand-odd named references are left exactly as they are, as is a
+    /// reference without its closing semicolon, which a browser would still expand. Anything
+    /// that needs those needs a real parser, not this.
+    ///
+    /// `&amp;` is restored last, which is the mirror of `escaped(_:)` replacing `&` first: undo
+    /// it earlier and `&amp;lt;` — an author writing a literal `&lt;` — would come back as `<`.
+    static func unescaped(_ text: String) -> String {
+        return decodingNumericReferences(text)
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&apos;", with: "'")
+            .replacingOccurrences(of: "&amp;", with: "&")
+    }
+
+    /// `&#39;` and `&#x27;`. A reference naming no character — a surrogate, a value past the end
+    /// of Unicode, or NUL — is left as written rather than guessed at.
+    private static func decodingNumericReferences(_ text: String) -> String {
+        guard text.contains("&#") else { return text }
+        let pattern = try! NSRegularExpression(
+            pattern: "&#(?:([0-9]{1,7})|[xX]([0-9A-Fa-f]{1,6}));"
+        )
+        let full = NSRange(text.startIndex..., in: text)
+        var result = ""
+        var cursor = text.startIndex
+        for match in pattern.matches(in: text, range: full) {
+            guard let matched = Range(match.range, in: text) else { continue }
+            let digits = Range(match.range(at: 1), in: text).map { (String(text[$0]), 10) }
+                ?? Range(match.range(at: 2), in: text).map { (String(text[$0]), 16) }
+            guard let (number, radix) = digits,
+                  let value = UInt32(number, radix: radix),
+                  value != 0,
+                  let scalar = Unicode.Scalar(value) else { continue }
+            result += text[cursor..<matched.lowerBound]
+            result.unicodeScalars.append(scalar)
+            cursor = matched.upperBound
+        }
+        guard cursor != text.startIndex else { return text }
+        result += text[cursor...]
+        return result
+    }
 }

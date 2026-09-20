@@ -159,4 +159,75 @@ final class RSSFeedTests: XCTestCase {
         let parser = XMLParser(data: Data(xml.utf8))
         XCTAssertTrue(parser.parse(), "the feed is not well-formed XML: \(String(describing: parser.parserError))")
     }
+
+    // MARK: - Item descriptions
+
+    private func itemDescriptions() throws -> [String] {
+        let xml = try feed()
+        let pattern = try NSRegularExpression(
+            pattern: "<item>.*?<description>(.*?)</description>", options: [.dotMatchesLineSeparators]
+        )
+        let range = NSRange(xml.startIndex..., in: xml)
+        return pattern.matches(in: xml, range: range)
+            .compactMap { Range($0.range(at: 1), in: xml).map { String(xml[$0]) } }
+    }
+
+    /// The fallback description was the rendered body cut to 200 characters — HTML, with its
+    /// tags and entities intact, handed to an element that is text.
+    func testTheFeedDescriptionHoldsTextRatherThanMarkup() async throws {
+        try scaffoldSite()
+        try writeContent("posts/hello.md", """
+        ---
+        title: "Hello"
+        date: 2026-01-01
+        ---
+
+        # Heading
+
+        Body text.
+        """)
+        try await build()
+
+        let description = try XCTUnwrap(try itemDescriptions().first)
+        XCTAssertFalse(description.contains("&lt;p&gt;"), description)
+        XCTAssertFalse(description.contains("&lt;h1"), description)
+        XCTAssertTrue(description.contains("Body text."), description)
+    }
+
+    func testTheFeedDescriptionIsEscapedExactlyOnce() async throws {
+        // `escapeXML` runs over whatever arrives, so an entity already in the string was
+        // escaped a second time and a reader saw `&amp;`.
+        try scaffoldSite()
+        try writeContent("posts/amp.md", """
+        ---
+        title: "Amp"
+        date: 2026-01-01
+        ---
+
+        Tom & Jerry
+        """)
+        try await build()
+
+        let description = try XCTUnwrap(try itemDescriptions().first)
+        XCTAssertTrue(description.contains("Tom &amp; Jerry"), description)
+        XCTAssertFalse(description.contains("&amp;amp;"), description)
+    }
+
+    func testADescriptionTheAuthorWroteIsNotDecoded() async throws {
+        // Front matter is already text: decoding it would turn a literal `&amp;` into `&`.
+        try scaffoldSite()
+        try writeContent("posts/explicit.md", """
+        ---
+        title: "Explicit"
+        date: 2026-01-01
+        description: "A &amp; B"
+        ---
+
+        Body.
+        """)
+        try await build()
+
+        let description = try XCTUnwrap(try itemDescriptions().first)
+        XCTAssertEqual(description, "A &amp;amp; B")
+    }
 }

@@ -580,7 +580,13 @@ public class SiteGenerator {
             // from the file's place under `content/`, so a post with a `slug:` of its own, or
             // one marked `type: post` outside `content/posts/`, had a feed link that 404ed.
             let link = URLUtils.joinSiteURL(base: config.site.url, path: p.url)
-            let desc = p.description ?? String(p.content.prefix(200))
+            // The rendered body is HTML, and this element is text: without stripping it the feed
+            // showed a reader `&lt;p&gt;`, and without decoding it `&amp;amp;` — `escapeXML`
+            // below runs over whatever arrives, so an entity already in the string is escaped a
+            // second time. A description the author wrote is left alone; it is already text, and
+            // decoding it would turn a literal `&amp;` they typed into an `&`.
+            let desc = p.description
+                ?? PlainText.excerpt(fromHTML: p.content, maxCharacters: 200)
             rss += """
             <item>
                 <title>\(escapeXML(p.title))</title>
@@ -611,21 +617,24 @@ public class SiteGenerator {
             let generated: Date
             let entries: [Entry]
         }
-        func stripHTML(_ s: String) -> String {
-            return s.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
-                    .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        // `Page.url` / `Post.url` are already the published URLs. Converting again would not be
+// `Page.url` / `Post.url` are already the published URLs. Converting again would not be
         // a no-op: `/about/` is not under the output root, so it would fall through to the
         // `lastPathComponent` branch and come back as `/about`, and `/` as `//`.
         var entries: [Entry] = []
         for p in pages {
-            entries.append(Entry(url: p.url, title: p.title, content: String(stripHTML(p.content).prefix(200)), tags: [], date: nil))
+            entries.append(Entry(
+                url: p.url, title: p.title,
+                content: PlainText.excerpt(fromHTML: p.content, maxCharacters: 200),
+                tags: [], date: nil
+            ))
         }
         for p in posts {
             let tags = p.categories + p.tags
-            entries.append(Entry(url: p.url, title: p.title, content: String(stripHTML(p.content).prefix(200)), tags: tags, date: p.date))
+            entries.append(Entry(
+                url: p.url, title: p.title,
+                content: PlainText.excerpt(fromHTML: p.content, maxCharacters: 200),
+                tags: tags, date: p.date
+            ))
         }
         let index = Index(version: "1.0", generated: Date(), entries: entries)
         let data = try JSONEncoder().encode(index)
@@ -676,6 +685,9 @@ public class SiteGenerator {
         return URLUtils.sitePathPrefix(of: config.site.url) + URLUtils.encodedPath("/" + path)
     }
 
+    /// XML's spelling, which is not HTML's: `&apos;` where `HTMLEscaping.escaped` writes `&#39;`.
+    /// The two look mergeable and are not — `&apos;` is undefined in HTML 4 and older parsers
+    /// print it literally — so they stay apart, each in the output it belongs to.
     private func escapeXML(_ string: String) -> String {
         string.replacingOccurrences(of: "&", with: "&amp;")
               .replacingOccurrences(of: "<", with: "&lt;")
