@@ -365,7 +365,17 @@ public class AssetPipeline {
         let parentURL = destination.parent
         let outputDirectory = destination.relativeDirectory
 
-        try fileManager.createDirectory(at: parentURL, withIntermediateDirectories: true)
+        // One component at a time, not `withIntermediateDirectories: true`. `destination.parent`
+        // is resolved, but resolution is a no-op on the part of a path that does not exist yet,
+        // so a bulk create trusts a single resolution of a chain it has not seen: with
+        // `_site/a -> /outside` in place and `/outside/b` missing, writing `a/b/x.css` created
+        // `/outside/b` and wrote there. `createDirectories` re-checks every existing link
+        // against the root as it reaches it. See `OutputPathGuard.createDirectories`.
+        guard try guardian.createDirectories(upTo: parentURL) else {
+            throw AssetPipelineError.processingFailed(
+                "Output path escapes destination directory: \(rawCandidateURL.path)"
+            )
+        }
 
         let shouldFingerprint = enableFingerprinting && allowFingerprint
             && !fingerprintExclusions.excludes(relativePath)
