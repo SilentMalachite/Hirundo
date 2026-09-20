@@ -168,14 +168,17 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 通ります。`SiteFileManager` は `String` と `Data` の両方を受けるので、`JSONEncoder` の
 出力もここを通せます。
 
-**閉じ込めに使う判定が2系統あります。** 書き込みは `OutputPathGuard`、削除（`AssetPruner`）は
-自前の `relativePath(of:under:)` です。前者は「最後の要素は解決しない」（置き換える対象だから）、
-後者は「両辺を解決する」（消してよいか判断するから）で、解決の方針が逆なので統一できません。
+**削除も同じ判定を通ります。** 以前は書き込みが `OutputPathGuard`、削除（`AssetPruner`）が
+自前の `relativePath(of:under:)` で2系統ありました。後者は両辺を解決していたので、ハッシュ名の
+位置に残ったシンボリックリンクは解決先が出力の外に出て包含判定に落ち、**永久に掃除されません**
+でした。今はどちらも `OutputPathGuard` で、親は解決し最後の要素は解決しません
+（`removeItem` はリンクを辿らないので、消えるのはリンクであってリンク先ではありません）。
 `AssetPruner` はさらに「ハッシュ名のファイルしか消さない」という条件で二重に守っています。
 
-**`hirundo clean --force` はこの経路を通りません。** `prepareOutputDirectory` が出力ルートを
-削除せず中身だけ空にするのに対し、`CleanCommand` は `removeItem` で出力ルートごと消します
-（`_site` 自体がリンクならリンクを消すだけ）。意味論の違いを承知のうえで残してあります。
+**`hirundo clean --force` も同じ経路です。** `SiteFileManager.emptyOutputDirectory` を
+`hirundo build --clean` と共有していて、どちらも出力ルートを削除せず中身だけを空にします。
+`_site` 自体がリンクの構成（`_site -> /Volumes/build/site`）でもリンクは残り、リンク先の
+中身だけが空になります。削除に失敗したときは成功メッセージを出さず終了コード1で終わります。
 
 #### HTMLのエスケープとサニタイズ
 

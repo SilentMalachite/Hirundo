@@ -154,15 +154,22 @@ Writes that are not generated output stay out of this path on purpose. `hirundo 
 `hirundo new` must land on the literal path the user named, following the user's own symlinks;
 their scaffolders use plain `FileManager` and say why in comments.
 
-Containment is decided in two places, not one, because the two questions want opposite
-symlink policies. `OutputPathGuard` answers *may I write here*, and never resolves the last
-component — that is the file being replaced. `AssetPruner.relativePath(of:under:)` answers
-*may I delete this*, and resolves both sides, because a link's target is what deletion
-would reach. Folding them together would break whichever question lost. The pruner is
-additionally bounded to names carrying a content hash.
+Containment is decided in one place. `OutputPathGuard` answers both *may I write here* and
+*may I delete this*, with the same policy: the parent is resolved, so a link in the chain
+that leaves the tree puts the target out of reach, and the last component is not, so what is
+written or removed is the entry itself. `removeItem` never follows a link, so a stale link at
+a generated name is taken out rather than its target.
 
-`hirundo clean --force` does not go through either: it removes the output root outright,
-where `prepareOutputDirectory` empties it and leaves a deliberately symlinked root alone.
+The pruner used to carry its own test that resolved both sides. That looked more careful and
+was less useful: resolving the last component meant a link left at a hashed name resolved
+outside the tree, failed containment, and was skipped — so it was never cleaned up at all,
+while the write path had been taking such links out since the confinement landed. The pruner
+remains additionally bounded to names carrying a content hash.
+
+`hirundo clean --force` shares `SiteFileManager.emptyOutputDirectory` with
+`hirundo build --clean`, so both empty the output directory rather than removing it, and a
+deliberately symlinked root survives either. A failure is reported and exits non-zero rather
+than being printed under a success message.
 
 ### 4b. Markup Escaping (`Utilities/HTMLEscaping.swift`)
 
