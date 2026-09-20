@@ -143,10 +143,11 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 
 #### 出力ディレクトリへの閉じ込め
 
-生成物の書き込みはすべて、設定された出力ディレクトリ（既定 `_site`）の中に閉じ込められます。
-判定の規則は `PathBoundary`（境界は必ずパスコンポーネント単位。`/a/stat` は `/a/static` の中
-ではない）と `OutputPathGuard`（出力ルートと親ディレクトリは解決し、**最後の要素は解決しない**）
-の2つに集約されていて、アセットパイプラインと `SiteFileManager` が同じものを使います。
+**ページ本体とアセットの**書き込みは、設定された出力ディレクトリ（既定 `_site`）の中に
+閉じ込められます。判定の規則は `PathBoundary`（境界は必ずパスコンポーネント単位。`/a/stat`
+は `/a/static` の中ではない）と `OutputPathGuard`（出力ルートと親ディレクトリは解決し、
+**最後の要素は解決しない**）の2つに集約されていて、アセットパイプラインと `SiteFileManager`
+が同じものを使います。
 
 - 出力ファイルの位置にシンボリックリンクが残っていた場合、それを**辿らずに取り除いて**実体を
   書きます。古い出力ツリーは次のビルドで自動的に直ります。
@@ -159,6 +160,18 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 `hirundo init` / `hirundo new` の書き込みはこの経路を通りません。ユーザーが名指しした
 パスにそのまま書く必要があり、閉じ込めの対象は生成物だけだからです（各 scaffolder の
 コメントを参照）。
+
+**まだ閉じ込められていない書き込みが2種類あります。** ここに書いてあることを実装より強く
+読まないでください。
+
+- `sitemap.xml` / `rss.xml` / `search-index.json` / `asset-manifest.json` は
+  `SiteFileManager` を通さず直接 `write(to:)` します。したがって出力ルート直下にこれらの名前
+  で外を指すリンクが残っていると、取り除かずに**辿って上書き**します。
+- `AssetPipeline.write` は親ディレクトリの作成に `OutputPathGuard.createDirectories`
+  （1コンポーネントずつ作って各段で再検査する）ではなく
+  `createDirectory(withIntermediateDirectories: true)` を使っています。`resolvingSymlinksInPath()`
+  は**まだ存在しないパスには無力**なので、`_site/a -> /outside` があって `/outside/b` が未作成の
+  とき、`static/a/b/x.css` の書き込みが出力外へ届きます。
 
 #### HTMLのエスケープとサニタイズ
 

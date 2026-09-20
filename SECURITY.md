@@ -63,8 +63,11 @@ Hirundo includes basic security measures appropriate for a static site generator
 - **Attribute Escaping**: Every author-controlled value reaching an attribute is
   escaped, including the fenced code block's language, link and image URLs, `title`
   and `alt`
-- **URL Schemes**: Link and image URLs are limited to http, https, mailto, ftp and
-  ftps; anything else becomes `#`
+- **URL Schemes**: `HTMLRenderer` admits http, https, mailto, ftp and ftps, and
+  `HTMLSanitizer` runs over its output admitting http, https, mailto and tel. The two
+  lists disagree, so an `ftp://` link the renderer accepted is rewritten to `#` by the
+  pass after it. The effective set is their intersection — http, https and mailto —
+  and anything else becomes `#`
 - **Known Limitation**: `HTMLSanitizer` is a defence-in-depth pass over markup the
   renderer already produced, not a sanitizer for untrusted HTML. Pointed at arbitrary
   input it would let `<iframe>`, `<object>`, `<form>` and unquoted attribute values
@@ -78,6 +81,11 @@ Hirundo includes basic security measures appropriate for a static site generator
   `&lt;b&gt;` — but it makes the search UI responsible for the last step. Insert a
   result with `textContent`, never `innerHTML`. Hirundo ships no search UI, so this is
   a contract with whatever consumes the file
+- **`search-index.json` Bodies Are Not Decoded**: an entry's `content` is the rendered
+  page with its tags stripped by a regular expression, and nothing decodes the entities
+  the renderer introduced. A body reading `Tom & Jerry` is indexed as `Tom &amp;amp;
+  Jerry`, so it displays wrong under the `textContent` rule above and does not match a
+  search for the text the author wrote
 
 #### Input Validation Is Not The Boundary
 - **What It Is**: `MarkdownValidator` rejects a file containing any of twelve
