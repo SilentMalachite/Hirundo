@@ -154,6 +154,16 @@ Writes that are not generated output stay out of this path on purpose. `hirundo 
 `hirundo new` must land on the literal path the user named, following the user's own symlinks;
 their scaffolders use plain `FileManager` and say why in comments.
 
+Containment is decided in two places, not one, because the two questions want opposite
+symlink policies. `OutputPathGuard` answers *may I write here*, and never resolves the last
+component — that is the file being replaced. `AssetPruner.relativePath(of:under:)` answers
+*may I delete this*, and resolves both sides, because a link's target is what deletion
+would reach. Folding them together would break whichever question lost. The pruner is
+additionally bounded to names carrying a content hash.
+
+`hirundo clean --force` does not go through either: it removes the output root outright,
+where `prepareOutputDirectory` empties it and leaves a deliberately symlinked root alone.
+
 ### 4b. Markup Escaping (`Utilities/HTMLEscaping.swift`)
 
 `HTMLEscaping.escaped` is the single rule for turning a value into markup that means the

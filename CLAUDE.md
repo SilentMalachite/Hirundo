@@ -143,8 +143,8 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 
 #### 出力ディレクトリへの閉じ込め
 
-**ページ本体とアセットの**書き込みは、設定された出力ディレクトリ（既定 `_site`）の中に
-閉じ込められます。判定の規則は `PathBoundary`（境界は必ずパスコンポーネント単位。`/a/stat`
+生成物の書き込みはすべて、設定された出力ディレクトリ（既定 `_site`）の中に閉じ込められます。
+判定の規則は `PathBoundary`（境界は必ずパスコンポーネント単位。`/a/stat`
 は `/a/static` の中ではない）と `OutputPathGuard`（出力ルートと親ディレクトリは解決し、
 **最後の要素は解決しない**）の2つに集約されていて、アセットパイプラインと `SiteFileManager`
 が同じものを使います。
@@ -161,17 +161,18 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 パスにそのまま書く必要があり、閉じ込めの対象は生成物だけだからです（各 scaffolder の
 コメントを参照）。
 
-**まだ閉じ込められていない書き込みが2種類あります。** ここに書いてあることを実装より強く
-読まないでください。
+`sitemap.xml` / `rss.xml` / `search-index.json` / `asset-manifest.json` も同じ経路を
+通ります。`SiteFileManager` は `String` と `Data` の両方を受けるので、`JSONEncoder` の
+出力もここを通せます。
 
-- `sitemap.xml` / `rss.xml` / `search-index.json` / `asset-manifest.json` は
-  `SiteFileManager` を通さず直接 `write(to:)` します。したがって出力ルート直下にこれらの名前
-  で外を指すリンクが残っていると、取り除かずに**辿って上書き**します。
-- `AssetPipeline.write` は親ディレクトリの作成に `OutputPathGuard.createDirectories`
-  （1コンポーネントずつ作って各段で再検査する）ではなく
-  `createDirectory(withIntermediateDirectories: true)` を使っています。`resolvingSymlinksInPath()`
-  は**まだ存在しないパスには無力**なので、`_site/a -> /outside` があって `/outside/b` が未作成の
-  とき、`static/a/b/x.css` の書き込みが出力外へ届きます。
+**閉じ込めに使う判定が2系統あります。** 書き込みは `OutputPathGuard`、削除（`AssetPruner`）は
+自前の `relativePath(of:under:)` です。前者は「最後の要素は解決しない」（置き換える対象だから）、
+後者は「両辺を解決する」（消してよいか判断するから）で、解決の方針が逆なので統一できません。
+`AssetPruner` はさらに「ハッシュ名のファイルしか消さない」という条件で二重に守っています。
+
+**`hirundo clean --force` はこの経路を通りません。** `prepareOutputDirectory` が出力ルートを
+削除せず中身だけ空にするのに対し、`CleanCommand` は `removeItem` で出力ルートごと消します
+（`_site` 自体がリンクならリンクを消すだけ）。意味論の違いを承知のうえで残してあります。
 
 #### HTMLのエスケープとサニタイズ
 
