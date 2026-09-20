@@ -88,9 +88,19 @@ internal struct OutputPathGuard {
             // leaves it is refused rather than repaired: an intermediate directory is a path
             // being traversed, not the thing being replaced, and the asset pipeline refuses the
             // same shape. Only the last component self-heals, and its caller handles that.
-            if isSymbolicLink(at: current),
-               !PathBoundary.contains(current.resolvingSymlinksInPath(), in: root) {
-                return false
+            //
+            // A link whose target does not exist is refused as well, and it has to be checked
+            // separately: `resolvingSymlinksInPath()` cannot resolve a dangling link, so it
+            // hands back the path unchanged — which is inside the root by construction, and
+            // sails through the containment test no matter where the link actually points.
+            // Creating the directory then fails deep in Foundation with `Input/output error`,
+            // naming neither the link nor the reason.
+            if isSymbolicLink(at: current) {
+                let target = current.resolvingSymlinksInPath()
+                guard fileManager.fileExists(atPath: target.path),
+                      PathBoundary.contains(target, in: root) else {
+                    return false
+                }
             }
             try createIfMissing(current)
         }

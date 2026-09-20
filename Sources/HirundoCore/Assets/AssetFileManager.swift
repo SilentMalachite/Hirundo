@@ -6,12 +6,16 @@ public class AssetFileManager {
     
     public init() {}
     
-    /// Saves manifest to file
-    public func saveManifest(_ manifest: AssetManifest, to path: String) throws {
+    /// The manifest's bytes, for a caller that knows where it is allowed to put them.
+    ///
+    /// This type used to write the file itself, to any path it was handed, with no containment
+    /// check and no atomic flag — so `_site/asset-manifest.json` left as a link to somewhere
+    /// outside was followed. Encoding and writing are separated so the write can go through
+    /// `SiteFileManager` like every other generated file.
+    public func encodedManifest(_ manifest: AssetManifest) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(manifest)
-        try data.write(to: URL(fileURLWithPath: path))
+        return try encoder.encode(manifest)
     }
 
     /// Loads manifest from file

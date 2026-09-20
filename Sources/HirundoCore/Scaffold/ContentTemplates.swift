@@ -7,7 +7,7 @@ public enum ContentKind: Sendable {
 
     /// Template written into the `template:` key when the caller does not name one.
     ///
-    /// These match what the build falls back to on its own (`PageRenderer`), but the
+    /// These match what `SiteTemplateRenderer` picks when a file names no template, but the
     /// generated file states them explicitly, the same way `hirundo init` does — so the
     /// user can see which template a file uses without knowing the fallback rules.
     public var defaultTemplate: String {

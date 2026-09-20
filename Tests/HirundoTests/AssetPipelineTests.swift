@@ -492,7 +492,8 @@ final class AssetPipelineTests: XCTestCase {
 
         let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
         let path = destDir.appendingPathComponent("asset-manifest.json").path
-        try pipeline.saveManifest(manifest, to: path)
+        // The pipeline encodes; writing is the caller's, through the output guard.
+        try pipeline.encodedManifest(manifest).write(to: URL(fileURLWithPath: path))
 
         XCTAssertEqual(try pipeline.loadManifest(from: path), manifest)
     }
@@ -1066,6 +1067,37 @@ final class AssetPipelineTests: XCTestCase {
         XCTAssertNil(manifest["vendor/secret.txt"])
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: destDir.appendingPathComponent("vendor/secret.txt").path)
+        )
+    }
+
+    /// The hole a bulk `withIntermediateDirectories: true` leaves: symlink resolution is a no-op
+    /// on the part of a path that does not exist yet, so an intermediate link pointing outside
+    /// was invisible on the build that first needed the directory under it.
+    func testRefusesAnEscapingIntermediateDirectoryThatDoesNotExistYet() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+        let outside = tempDir.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(
+            at: sourceDir.appendingPathComponent("a/b"), withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try "body{}".write(
+            to: sourceDir.appendingPathComponent("a/b/x.css"), atomically: true, encoding: .utf8
+        )
+
+        // `dest/a` leaves the output tree, and `outside/b` does not exist yet.
+        try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: destDir.appendingPathComponent("a"), withDestinationURL: outside
+        )
+
+        XCTAssertThrowsError(
+            try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
+            "an intermediate link pointing outside the output was followed"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: outside.appendingPathComponent("b").path),
+            "a directory was created outside the output tree"
         )
     }
 

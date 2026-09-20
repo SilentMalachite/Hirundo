@@ -438,9 +438,9 @@ public class SiteGenerator {
             previous: previous
         )
 
-        try assetPipeline.saveManifest(
-            manifest,
-            to: outputURL.appendingPathComponent("asset-manifest.json").path
+        try siteFileManager.writeFile(
+            data: assetPipeline.encodedManifest(manifest),
+            to: outputURL.appendingPathComponent("asset-manifest.json")
         )
     }
 
@@ -550,7 +550,9 @@ public class SiteGenerator {
             """
         }
         xml += "</urlset>"
-        try xml.write(to: outputURL.appendingPathComponent("sitemap.xml"), atomically: true, encoding: .utf8)
+        try siteFileManager.writeFile(
+            content: xml, to: outputURL.appendingPathComponent("sitemap.xml")
+        )
     }
 
     private func generateRSS(posts: [Post], outputURL: URL) throws {
@@ -587,7 +589,9 @@ public class SiteGenerator {
             """
         }
         rss += "</channel>\n</rss>\n"
-        try rss.write(to: outputURL.appendingPathComponent("rss.xml"), atomically: true, encoding: .utf8)
+        try siteFileManager.writeFile(
+            content: rss, to: outputURL.appendingPathComponent("rss.xml")
+        )
     }
 
     private func generateSearchIndex(pages: [Page], posts: [Post], outputURL: URL) throws {
@@ -621,7 +625,9 @@ public class SiteGenerator {
         }
         let index = Index(version: "1.0", generated: Date(), entries: entries)
         let data = try JSONEncoder().encode(index)
-        try data.write(to: outputURL.appendingPathComponent("search-index.json"))
+        try siteFileManager.writeFile(
+            data: data, to: outputURL.appendingPathComponent("search-index.json")
+        )
     }
 
     /// The URL a generated file is published under, from the absolute path it was written to.
