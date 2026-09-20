@@ -393,7 +393,13 @@ final class AssetPipelineTests: XCTestCase {
         XCTAssertThrowsError(
             try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
             "出力ツリーの外を指すディレクトリリンク越しに書き込んでいる"
-        )
+        ) { error in
+            // 閉じ込めの refusal は1種類。`SiteFileManager` が投げるものと同じで、
+            // かつては `AssetPipelineError.processingFailed` に別の文面で包まれていた。
+            guard case FileManagerError.outputPathEscapes = error else {
+                return XCTFail("expected outputPathEscapes, got \(error)")
+            }
+        }
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: outsideDir.appendingPathComponent("logo.png").path),
             "出力先の外にファイルが書き出された"
@@ -1094,7 +1100,11 @@ final class AssetPipelineTests: XCTestCase {
         XCTAssertThrowsError(
             try pipeline.processAssets(from: sourceDir.path, to: destDir.path),
             "an intermediate link pointing outside the output was followed"
-        )
+        ) { error in
+            guard case FileManagerError.outputPathEscapes = error else {
+                return XCTFail("expected outputPathEscapes, got \(error)")
+            }
+        }
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: outside.appendingPathComponent("b").path),
             "a directory was created outside the output tree"

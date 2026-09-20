@@ -302,8 +302,14 @@ Options:
 ```
 
 > `clean` is a **dry run by default**. There is no interactive confirmation prompt:
-> without `--force` it just lists the paths it would remove. The output directory is read
+> without `--force` it just lists what it would remove. The output directory is read
 > from `build.outputDirectory` in `config.yaml`, falling back to `_site`.
+>
+> `--force` **empties the output directory rather than removing it**, which is what
+> `hirundo build --clean` does — the two share one implementation. A site whose `_site` is a
+> symbolic link to a build volume keeps the link, and the volume's contents go. The
+> `.hirundo-cache` directory, which `--cache` adds, is removed outright: it is this tool's
+> own, not a root someone configured. A failure is reported and exits non-zero.
 
 ### `hirundo validate`
 Check the configuration file without building anything.

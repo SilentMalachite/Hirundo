@@ -36,8 +36,9 @@ internal struct OutputPathGuard {
 
     /// The path `url` would actually be written to, or `nil` when that lands outside the root.
     ///
-    /// Returns rather than throws: the callers report containment failures with their own error
-    /// types, and folding those into one would change messages the tests pin down.
+    /// Returns rather than throws, for the callers that are deciding rather than demanding —
+    /// ``AssetPruner`` skips what falls outside instead of failing the build. A caller that needs
+    /// the destination wants ``requireDestination(for:)``, which reports the refusal.
     func destination(for url: URL) -> Destination? {
         let lastComponent = url.lastPathComponent
         guard lastComponent != ".", lastComponent != ".." else { return nil }
@@ -51,6 +52,62 @@ internal struct OutputPathGuard {
             parent: parent,
             relativeDirectory: relativeDirectory
         )
+    }
+
+    /// ``destination(for:)``, refusing rather than returning `nil`.
+    ///
+    /// The refusal is one error with one message, wherever it comes from. It used to be two: the
+    /// generator raised `FileManagerError.outputPathEscapes` and the asset pipeline wrapped its
+    /// own sentence in `AssetPipelineError.processingFailed`, so the same rule broken in the same
+    /// way read differently depending on which caller happened to reach it first.
+    func requireDestination(for url: URL) throws -> Destination {
+        guard let destination = destination(for: url) else {
+            throw FileManagerError.outputPathEscapes(url.path)
+        }
+        return destination
+    }
+
+    /// ``createDirectories(upTo:)``, refusing rather than returning `false`.
+    ///
+    /// - Parameter reporting: the path to name in the refusal, when the directory being created
+    ///   is a step towards something else and naming it would be less use than naming the
+    ///   destination it was for.
+    func requireDirectories(upTo directory: URL, reporting path: String? = nil) throws {
+        guard try createDirectories(upTo: directory) else {
+            throw FileManagerError.outputPathEscapes(path ?? directory.path)
+        }
+    }
+
+    /// Removes a file from inside the output tree, or does nothing when it is not inside one.
+    ///
+    /// The same rule as a write, for the same reason: the parent is resolved, so a link in the
+    /// chain that leaves the output tree takes the file out of reach, and the last component is
+    /// not, so what gets removed is the entry itself. `removeItem` never follows a link, so a
+    /// stale link left at a generated name is taken out rather than its target.
+    ///
+    /// That last part is why this is not the resolve-both-sides test the pruner used to carry:
+    /// resolving the last component means a link at a generated name resolves outside the tree,
+    /// fails the containment test, and is skipped — so it is never cleaned up, and every rebuild
+    /// leaves it there. The write path has taken such a link out since the confinement landed;
+    /// this makes the delete path agree.
+    ///
+    /// - Returns: the removed entry's path relative to the root, or `nil` when nothing was
+    ///   removed because the entry fell outside it.
+    @discardableResult
+    func remove(at url: URL) throws -> String? {
+        guard let destination = destination(for: url) else { return nil }
+        guard fileManager.fileExists(atPath: destination.url.path)
+                || isSymbolicLink(at: destination.url) else { return nil }
+        try fileManager.removeItem(at: destination.url)
+        return relativePath(of: destination)
+    }
+
+    /// Where a destination sits relative to the root, as a `/`-separated path.
+    func relativePath(of destination: Destination) -> String {
+        let name = destination.url.lastPathComponent
+        return destination.relativeDirectory.isEmpty
+            ? name
+            : destination.relativeDirectory + "/" + name
     }
 
     /// Removes a symbolic link sitting where a file is about to be written.
@@ -121,5 +178,24 @@ internal struct OutputPathGuard {
             return
         }
         try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+}
+
+/// What breaking the confinement raises, for every caller that enforces it.
+///
+/// Anything the filesystem itself refuses is rethrown as the `FileManager` error it came with,
+/// which carries a reason worth reading. These two are the rule's own refusals, and they live
+/// beside the rule rather than beside one of the types that applies it.
+public enum FileManagerError: LocalizedError {
+    case outputPathEscapes(String)
+    case outputRootIsNotADirectory(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .outputPathEscapes(let path):
+            return "Output path escapes the output directory: \(path)"
+        case .outputRootIsNotADirectory(let path):
+            return "Output path exists and is not a directory: \(path)"
+        }
     }
 }

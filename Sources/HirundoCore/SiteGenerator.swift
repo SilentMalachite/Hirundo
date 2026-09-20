@@ -476,6 +476,11 @@ public class SiteGenerator {
             options: [.skipsHiddenFiles]
         ) else { return }
 
+        // 出力ツリーの中のファイルかどうかと、その相対パスは、書き込みや削除と同じ判定に通す。
+        let guardian = OutputPathGuard(
+            root: outputURL.standardizedFileURL.resolvingSymlinksInPath()
+        )
+
         for case let fileURL as URL in walker {
             try Task.checkCancellation()
 
@@ -491,8 +496,9 @@ public class SiteGenerator {
             let ext = fileURL.pathExtension.lowercased()
             guard ext == "html" || ext == "css" else { continue }
 
-            guard let relativePath = AssetPruner.relativePath(of: fileURL, under: outputURL),
-                  !generated.contains(relativePath) else { continue }
+            guard let destination = guardian.destination(for: fileURL) else { continue }
+            let relativePath = guardian.relativePath(of: destination)
+            guard !generated.contains(relativePath) else { continue }
 
             let content: String
             do {
