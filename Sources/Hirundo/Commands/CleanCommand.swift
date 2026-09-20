@@ -43,34 +43,49 @@ struct CleanCommand: ParsableCommand {
         if !force {
             print("⚠️  This would delete:")
             if fileManager.fileExists(atPath: outputURL.path) {
-                print("  - Output directory: \(outputURL.path)")
+                print("  - Everything inside the output directory: \(outputURL.path)")
             }
             if cache && fileManager.fileExists(atPath: cacheURL.path) {
                 print("  - Cache directory: \(cacheURL.path)")
             }
             print("💡 Use --force to actually perform the cleanup")
-        } else {
-            // Clean output directory
-            if fileManager.fileExists(atPath: outputURL.path) {
-                do {
-                    try fileManager.removeItem(at: outputURL)
-                    print("✅ Removed output directory")
-                } catch {
-                    handleError(error, context: "Clean", verbose: verbose)
-                }
-            }
-            
-            // Clean cache if requested
-            if cache && fileManager.fileExists(atPath: cacheURL.path) {
-                do {
-                    try fileManager.removeItem(at: cacheURL)
-                    print("✅ Removed cache directory")
-                } catch {
-                    handleError(error, context: "Clean", verbose: verbose)
-                }
+            print("✅ Clean command executed successfully!")
+            return
+        }
+
+        var failed = false
+
+        // The contents, not the directory. `hirundo build --clean` has emptied it rather than
+        // removing it since the confinement landed, and this used to `removeItem` the root — so
+        // the same word meant two things, and on a site whose `_site` is a symbolic link to a
+        // build volume, `hirundo clean --force` took the link out and the next build wrote to a
+        // fresh directory beside it. Both commands go through `emptyOutputDirectory` now.
+        if fileManager.fileExists(atPath: outputURL.path) {
+            do {
+                try SiteFileManager.emptyOutputDirectory(at: outputURL)
+                print("✅ Emptied output directory")
+            } catch {
+                handleError(error, context: "Clean", verbose: verbose)
+                failed = true
             }
         }
-        
+
+        // The cache is this tool's own directory rather than a configured root, so it goes.
+        if cache && fileManager.fileExists(atPath: cacheURL.path) {
+            do {
+                try fileManager.removeItem(at: cacheURL)
+                print("✅ Removed cache directory")
+            } catch {
+                handleError(error, context: "Clean", verbose: verbose)
+                failed = true
+            }
+        }
+
+        // Reporting success after printing an error, and exiting 0 while doing it, is how a
+        // failed clean in a script looked like a clean one.
+        guard !failed else {
+            throw ExitCode.failure
+        }
         print("✅ Clean command executed successfully!")
     }
 }
