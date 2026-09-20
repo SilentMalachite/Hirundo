@@ -360,7 +360,7 @@ is served at `/css/style.css`, not `/static/css/style.css`. `hirundo init` creat
 ```yaml
 site:
   title: "My Site"                  # required
-  url: "https://example.com"        # required
+  url: "https://example.com"        # required; a path is allowed, see below
   description: "A site built with Hirundo"   # optional, max 500 chars
   language: "en-US"                 # optional, default "en-US"
   author:                           # optional
@@ -504,16 +504,30 @@ Templates have access to these variables:
 - `tags`: Tag mappings
 - `content`: Rendered page content
 
+### Publishing Under a Path
+
+`site.url` may carry a path — `https://example.com/blog` — for a site served from a
+subdirectory. Every internal link a build produces gets it: `{{ page.url }}`, the archive, the
+category and tag pages, the feed, the sitemap and the search index. The output tree does not:
+pages are still written to `_site/posts/…`, because the path says where the site is served, not
+where the build writes. A template composes its own links with the `relative_url` filter, which
+is idempotent — passing it `{{ page.url }}`, which already carries the path, does not double it.
+
+`hirundo serve` follows it, and also answers a request without it. That is deliberately laxer
+than a host: the development server is there to show what was just written, and a first page
+load that 404s because the prefix is missing reads as a broken tool.
+
 ### Custom Filters
 
 | Filter | Purpose |
 |--------|---------|
 | `date` | Format dates |
-| `slugify` | Create URL slugs |
+| `slugify` | Make a name from a title (not a URL — non-ASCII survives) |
 | `excerpt` | Extract excerpts |
 | `markdown` | Render Markdown |
 | `absolute_url` | Create absolute URLs |
-| `relative_url` | Create root-relative URLs |
+| `url_encode` | Percent-encode one path component |
+| `relative_url` | Root-relative URLs, under the path in `site.url` |
 | `site_url` | Site URL from configuration |
 | `site_title` | Site title from configuration |
 | `site_description` | Site description from configuration |

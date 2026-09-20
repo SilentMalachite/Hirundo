@@ -81,11 +81,14 @@ Hirundo includes basic security measures appropriate for a static site generator
   `&lt;b&gt;` — but it makes the search UI responsible for the last step. Insert a
   result with `textContent`, never `innerHTML`. Hirundo ships no search UI, so this is
   a contract with whatever consumes the file
-- **`search-index.json` Bodies Are Not Decoded**: an entry's `content` is the rendered
-  page with its tags stripped by a regular expression, and nothing decodes the entities
-  the renderer introduced. A body reading `Tom & Jerry` is indexed as `Tom &amp;amp;
-  Jerry`, so it displays wrong under the `textContent` rule above and does not match a
-  search for the text the author wrote
+- **`search-index.json` Bodies Are Text Too**: an entry's `content` is the rendered page
+  with its tags stripped and the entities the renderer introduced decoded, in that order,
+  before it is cut to 200 characters (`PlainText.excerpt`). A body reading `Tom & Jerry`
+  is indexed as `Tom & Jerry`. This makes the file consistent — every field in it is the
+  text an author wrote — and leaves the `textContent` rule above as the one thing a
+  consumer must get right. `HTMLEscaping.unescaped` does the decoding and is not a general
+  entity decoder: it knows what `escaped` produces plus numeric references, and leaves
+  `&nbsp;`, `&copy;` and a reference missing its semicolon exactly as they are
 
 #### Input Validation Is Not The Boundary
 - **What It Is**: `MarkdownValidator` rejects a file containing any of twelve
