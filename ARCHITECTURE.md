@@ -154,6 +154,24 @@ Writes that are not generated output stay out of this path on purpose. `hirundo 
 `hirundo new` must land on the literal path the user named, following the user's own symlinks;
 their scaffolders use plain `FileManager` and say why in comments.
 
+### 4b. Markup Escaping (`Utilities/HTMLEscaping.swift`)
+
+`HTMLEscaping.escaped` is the single rule for turning a value into markup that means the
+value. Everything that builds HTML by interpolating into a literal goes through it:
+`HTMLRenderer`, the built-in archive/category/tag pages in `DefaultHTMLGenerator` and
+`ArchiveGenerator`, and the `escape` template filter.
+
+There is one function rather than a text one and an attribute one because the two would have
+been the same function — `HTMLRenderer` carried both, and they replaced the same five
+characters with the same five entities. Splitting them back apart fails a test.
+
+`SiteGenerator.escapeXML` stays separate: it writes `&apos;` for an apostrophe, which is XML's
+spelling and not HTML's, and its two call sites (`sitemap.xml`, `rss.xml`) are both inside that
+type.
+
+Escaping is the boundary. `MarkdownValidator`'s denylist and `HTMLSanitizer` are defence in
+depth over it, and both say so in their own documentation.
+
 ### 5. Development Server (`DevelopmentServer.swift`)
 
 Serves the build output over HTTP, with a WebSocket live-reload channel:

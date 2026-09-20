@@ -69,6 +69,36 @@ Hirundo includes basic security measures appropriate for a static site generator
   renderer already produced, not a sanitizer for untrusted HTML. Pointed at arbitrary
   input it would let `<iframe>`, `<object>`, `<form>` and unquoted attribute values
   through. Do not use it as one
+- **One Escape Table**: `HTMLEscaping.escaped` is the single rule for turning a value
+  into markup that means the value. Everything that builds HTML by interpolation uses
+  it — the renderer, and the built-in archive, category and tag pages
+
+#### Input Validation Is Not The Boundary
+- **What It Is**: `MarkdownValidator` rejects a file containing any of twelve
+  lowercased substrings (`<script`, `javascript:`, `onerror=` and nine more). It fails
+  a build early. It is not a gate
+- **What Walks Past It**: `<iframe`, `<object`, `<embed`, `onpointerover=`,
+  `ontoggle=`, `onwheel=`, and `onerror =` with a space before the equals. The list
+  cannot be completed, and lengthening it costs real false positives — `onclick=` as a
+  string, in an article about XSS, already fails a build
+- **What It Never Sees**: `config.yaml` — `site.title` and `site.author.name` are
+  checked for length and nothing else — and file names, which become URLs. A macOS file
+  may be named `a"onmouseover="alert(1).md`
+- **Where The Boundary Is**: the output side. `HTMLRenderer` constructs its own tags,
+  every interpolated value goes through `HTMLEscaping.escaped`, and templates escape
+  with the `escape` filter
+
+#### Template Escaping
+- **No Autoescaping**: Stencil has none, and the mechanism does not exist in the
+  library — a template's `{{ … }}` is written out as it stands. Escaping is the
+  template author's responsibility
+- **The `escape` Filter**: `{{ value|escape }}`, with `e` as an alias. The templates
+  `hirundo init` writes apply it to every value they interpolate except `{{ content }}`
+- **Never On Rendered HTML**: `{{ content }}` and the `markdown` filter's output are
+  already HTML, and escaping is not idempotent, so escaping them shows a reader the
+  page's own source
+- **Opt-In For Existing Sites**: upgrading Hirundo does not rewrite templates a site
+  already has. A template written before this filter existed still interpolates raw
 
 #### Development Server Security
 - **Basic WebSocket**: Simple live reload functionality on `/livereload`

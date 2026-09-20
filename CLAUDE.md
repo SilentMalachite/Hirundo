@@ -171,6 +171,41 @@ HIRUNDO_LOG_LEVEL=debug hirundo build
 任意の信頼できないHTMLを渡すと `<iframe>` / `<object>` / `<form>` や引用符なしの属性値は
 素通りします。用途を取り違えないよう、その制限自体をテストで固定してあります。
 
+エスケープの規則は `Utilities/HTMLEscaping.swift` の1箇所にあります。文字列補間でHTMLを
+組み立てるものはすべてこれを通ります——`HTMLRenderer` と、組み込みのアーカイブ/カテゴリ/
+タグページ（`Templates/DefaultHTMLGenerator.swift` と `ArchiveGenerator.swift`）です。
+
+**組み込みのアーカイブ/カテゴリ/タグHTMLは「テンプレートが無いときの保険」ではなく通常経路
+です。** `hirundo init` が書き出すテンプレートは `base.html` / `default.html` / `post.html`
+の3つだけで、`archive.html` / `category.html` / `tag.html` / `categories.html` /
+`tags.html` は生成されません。
+
+**入力側の検証は境界ではありません。** `MarkdownValidator` の危険パターン検査は12個の部分
+文字列を小文字化して `contains` するだけの denylist で、`<iframe` / `onpointerover=` /
+空白入りの `onerror =` は素通りします。`config.yaml` 由来の値とファイル名はこの検査を一度も
+通りません。境界は出力側のエスケープです。
+
+#### テンプレート経路のエスケープ
+
+**Stencil に自動エスケープはありません**（ライブラリ側に機構が存在しません）。テンプレートの
+`{{ … }}` はそのまま出力されるので、エスケープはテンプレート作者の責任です。`escape`
+フィルタ（別名 `e`）で要求します。
+
+`hirundo init` が書き出すテンプレートは、**`{{ content }}` を除くすべての補間**に
+`|escape` を付けています。`{{ content }}` と `markdown` フィルタの出力には付けては
+いけません——どちらも既にHTMLで、エスケープは冪等ではないため、ページのソースがそのまま
+表示されます。
+
+このフィルタが入る前に作ったサイトのテンプレートは、Hirundo を更新しても書き換わりません。
+
+#### 公開URL（`page.url` / `post.url`）
+
+`Page.url` / `Post.url` とテンプレートの `{{ page.url }}` は、**サイト相対の公開URL**
+（`/about/`、出力ルートの index は `/`）です。ファイルシステムのパスではありません。
+導出は `SiteGenerator.siteRelativePath(forOutput:)` の1箇所だけで、`search-index.json`、
+sitemap、RSS、アーカイブ/カテゴリ/タグページのリンクがすべてこれを使います。既に公開URLに
+なっている値をもう一度通してはいけません（`/about/` → `/about`、`/` → `//` になります）。
+
 ### 5. 機能フラグ（features）
 `config.yaml` の `features` ブロックで有効・無効を切り替えます（すべてデフォルト `false`）：
 - **sitemap**: sitemap.xml生成
