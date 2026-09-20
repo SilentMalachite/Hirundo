@@ -1,6 +1,19 @@
 import Foundation
 
-/// Thread-safe HTML content sanitizer (stateless)
+/// A defence-in-depth pass over HTML that ``HTMLRenderer`` has already built.
+///
+/// **This is not a general-purpose HTML sanitizer, and must not be used as one.** It is a set of
+/// regular expressions over markup produced by ``HTMLRenderer``, which assembles every tag itself
+/// from the Markdown tree and has no case for `HTMLBlock` or `InlineHTML` — both are leaves, so
+/// raw HTML in a Markdown source renders to nothing. That, not anything here, is why an author
+/// cannot inject a tag. What this pass adds is a second look at the handful of shapes the
+/// renderer could in principle emit: a stray `<script>`, `<style>` or `<meta>`, a URL in an
+/// `href`/`src` that is not http(s)/mailto/tel, and an event-handler attribute.
+///
+/// Fed arbitrary untrusted HTML it would let plenty through — `<iframe>`, `<object>`, `<form>`
+/// and anything using an unquoted attribute value all survive. A whitelist of tags and attributes
+/// used to be declared in this file; `sanitizeHTML` never called it, and wiring it up would have
+/// meant a second, worse HTML parser rather than any real gain, so it is gone.
 public final class HTMLSanitizer: Sendable {
     
     /// HTMLをサニタイズ
@@ -57,115 +70,6 @@ public final class HTMLSanitizer: Sendable {
         )
     }
     
-    /// 危険な要素を削除
-    private func removeDangerousElements(_ html: String) -> String {
-        let dangerousTags = ["iframe", "embed", "object", "link", "svg", "math", "form", "input", "button", "select", "textarea"]
-        var result = html
-        
-        for tag in dangerousTags {
-            // 開始タグと終了タグを削除
-            let openPattern = #"<\#(tag)(?:\s[^>]*)?"#
-            let closePattern = #"</\#(tag)>"#
-            
-            result = result.replacingOccurrences(
-                of: openPattern,
-                with: "",
-                options: [.regularExpression, .caseInsensitive]
-            )
-            result = result.replacingOccurrences(
-                of: closePattern,
-                with: "",
-                options: [.regularExpression, .caseInsensitive]
-            )
-        }
-        
-        return result
-    }
-    
-    /// タグをクリーンアップ
-    private func cleanTags(_ html: String) -> String {
-        let tagPattern = #"<(/?)(\w+)([^>]*)>"#
-        
-        guard let regex = try? NSRegularExpression(pattern: tagPattern, options: .caseInsensitive) else {
-            return html
-        }
-        
-        let nsString = html as NSString
-        var result = html
-        var offset = 0
-        
-        let matches = regex.matches(in: html, options: [], range: NSRange(location: 0, length: nsString.length))
-        
-        for match in matches {
-            let fullRange = NSRange(location: match.range.location + offset, length: match.range.length)
-            let fullMatch = nsString.substring(with: fullRange)
-            
-            let isClosing = match.range(at: 1).location != NSNotFound
-            let tagName = nsString.substring(with: match.range(at: 2))
-            let attributes = match.range(at: 3).location != NSNotFound ? nsString.substring(with: match.range(at: 3)) : ""
-            
-            // 許可されたタグのみを保持
-            let allowedTags = ["p", "br", "strong", "em", "u", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "blockquote", "code", "pre", "a", "img", "table", "thead", "tbody", "tr", "th", "td"]
-            
-            if allowedTags.contains(tagName.lowercased()) {
-                let cleanedAttributes = cleanAttributes(tagName: tagName, attributes: attributes)
-                let replacement = "<\(isClosing ? "/" : "")\(tagName)\(cleanedAttributes)>"
-                result = result.replacingOccurrences(of: fullMatch, with: replacement)
-            } else {
-                // 許可されていないタグは削除
-                result = result.replacingOccurrences(of: fullMatch, with: "")
-                offset -= fullMatch.count
-            }
-        }
-        
-        return result
-    }
-    
-    /// 属性をクリーンアップ
-    private func cleanAttributes(tagName: String, attributes: String) -> String {
-        let allowedAttributes: [String: [String]] = [
-            "a": ["href", "title"],
-            "img": ["src", "alt", "title", "width", "height"],
-            "table": ["border", "cellpadding", "cellspacing"],
-            "th": ["colspan", "rowspan"],
-            "td": ["colspan", "rowspan"]
-        ]
-        
-        guard let allowedForTag = allowedAttributes[tagName.lowercased()] else {
-            return ""
-        }
-        
-        let attributePattern = #"(\w+)\s*=\s*["']([^"']*)["']"#
-        guard let regex = try? NSRegularExpression(pattern: attributePattern, options: .caseInsensitive) else {
-            return ""
-        }
-        
-        let matches = regex.matches(in: attributes, options: [], range: NSRange(location: 0, length: attributes.count))
-        var cleanedAttributes: [String] = []
-        
-        for match in matches {
-            let attributeName = (attributes as NSString).substring(with: match.range(at: 1))
-            let attributeValue = (attributes as NSString).substring(with: match.range(at: 2))
-            
-            if allowedForTag.contains(attributeName.lowercased()) {
-                let sanitizedValue = sanitizeAttributeValue(attributeName: attributeName, value: attributeValue)
-                cleanedAttributes.append("\(attributeName)=\"\(sanitizedValue)\"")
-            }
-        }
-        
-        return cleanedAttributes.isEmpty ? "" : " " + cleanedAttributes.joined(separator: " ")
-    }
-    
-    /// 属性値をサニタイズ
-    private func sanitizeAttributeValue(attributeName: String, value: String) -> String {
-        switch attributeName.lowercased() {
-        case "href", "src":
-            return sanitizeURL(value)
-        default:
-            return escapeAttribute(value)
-        }
-    }
-    
     /// URLをサニタイズ
     private func sanitizeURL(_ url: String) -> String {
         // 基本的なURL検証
@@ -220,46 +124,15 @@ public final class HTMLSanitizer: Sendable {
     }
     
     /// イベントハンドラーを削除
+    ///
+    /// `on` の手前は空白とは限らない。属性値のエスケープ漏れがあると `"` が直前に来るため、
+    /// 引用符も区切りとして受ける（本筋の修正は `HTMLRenderer` 側のエスケープ）。
     private func removeEventHandlers(_ html: String) -> String {
-        let eventHandlerPattern = #"\s+on\w+\s*=\s*["'][^"']*["']"#
+        let eventHandlerPattern = #"[\s"']+on\w+\s*=\s*["'][^"']*["']"#
         return html.replacingOccurrences(
             of: eventHandlerPattern,
             with: "",
             options: [.regularExpression, .caseInsensitive]
         )
-    }
-    
-    /// テキストコンテンツをエスケープ
-    private func escapeTextContent(_ html: String) -> String {
-        // HTMLエンティティをデコードしてから再エスケープ
-        let decoded = decodeHTMLEntities(html)
-        return decoded
-    }
-    
-    /// HTMLエンティティをデコード
-    private func decodeHTMLEntities(_ string: String) -> String {
-        let entities = [
-            "&amp;": "&",
-            "&lt;": "<",
-            "&gt;": ">",
-            "&quot;": "\"",
-            "&#39;": "'",
-            "&nbsp;": " "
-        ]
-        
-        var result = string
-        for (entity, character) in entities {
-            result = result.replacingOccurrences(of: entity, with: character)
-        }
-        return result
-    }
-    
-    /// 属性値をエスケープ
-    private func escapeAttribute(_ text: String) -> String {
-        return text
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "'", with: "&#39;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
     }
 }
