@@ -492,7 +492,8 @@ final class AssetPipelineTests: XCTestCase {
 
         let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
         let path = destDir.appendingPathComponent("asset-manifest.json").path
-        try pipeline.saveManifest(manifest, to: path)
+        // The pipeline encodes; writing is the caller's, through the output guard.
+        try pipeline.encodedManifest(manifest).write(to: URL(fileURLWithPath: path))
 
         XCTAssertEqual(try pipeline.loadManifest(from: path), manifest)
     }

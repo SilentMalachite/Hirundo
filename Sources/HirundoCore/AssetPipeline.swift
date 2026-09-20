@@ -114,9 +114,9 @@ public class AssetPipeline {
         return processor.detectAssetType(for: filename)
     }
 
-    // Save manifest to file
-    public func saveManifest(_ manifest: AssetManifest, to path: String) throws {
-        try fileManagerHelper.saveManifest(manifest, to: path)
+    // The manifest's bytes. Writing it is the caller's, through the output guard.
+    public func encodedManifest(_ manifest: AssetManifest) throws -> Data {
+        try fileManagerHelper.encodedManifest(manifest)
     }
 
     // Load manifest from file
