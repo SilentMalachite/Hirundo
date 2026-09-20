@@ -115,6 +115,10 @@ public class ArchiveGenerator {
         }
     }
     
+    /// サイトが公開されるパス（`site.url` にパスがあるときの `/blog` など）。索引ページの
+    /// リンクにだけ付く ── ディレクトリは出力ルートからの位置で作るので付けない。
+    private var basePath: String { URLUtils.sitePathPrefix(of: config.site.url) }
+
     private func generateCategoryPage(category: String, posts: [Post], categoriesDir: URL) throws {
         // The bare slug, because this is a name on disk. The URL that links it is built from the
         // same slug in `generateCategoriesIndex`, where it goes through
@@ -166,7 +170,8 @@ public class ArchiveGenerator {
                     // `slug` is the name on disk, `url` the encoded link to it. A template that
                     // builds its own href from `slug` wants the `url_encode` filter.
                     "slug": category.slugify(),
-                    "url": "/categories/\(URLUtils.encodedComponent(category.slugify()))/"
+                    "url": basePath + "/categories/"
+                        + URLUtils.encodedComponent(category.slugify()) + "/"
                 ]
             },
             "page": [
@@ -245,7 +250,7 @@ public class ArchiveGenerator {
                     "name": tag,
                     // See `generateCategoriesIndex` for why these two differ.
                     "slug": tag.slugify(),
-                    "url": "/tags/\(URLUtils.encodedComponent(tag.slugify()))/"
+                    "url": basePath + "/tags/" + URLUtils.encodedComponent(tag.slugify()) + "/"
                 ]
             },
             "page": [

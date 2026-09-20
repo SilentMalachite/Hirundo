@@ -450,6 +450,10 @@ public class SiteGenerator {
             assetPipeline.jsOptions.minify = true
         }
         assetPipeline.enableFingerprinting = config.features.fingerprint
+        // A root-absolute reference in a stylesheet is written the way the site serves it, so on
+        // a site published under a path the pipeline has to take that path off before it can
+        // match a manifest key — and put it back when it rewrites.
+        assetPipeline.basePath = URLUtils.sitePathPrefix(of: config.site.url)
         assetPipeline.fingerprintExclusions = AssetFingerprintExclusions(
             additional: config.assets.fingerprintExclude
         )
@@ -663,7 +667,13 @@ public class SiteGenerator {
         } else if path.hasSuffix("/index.html") {
             path = String(path.dropLast("index.html".count))
         }
-        return URLUtils.encodedPath("/" + path)
+        // A site published under a path carries it here, once, so everything downstream —
+        // `{{ page.url }}`, the archive, the feed, the sitemap, the search index — gets it
+        // without knowing about it. `joinSiteURL` takes only the origin of `site.url` for the
+        // same reason: the path reaches a URL from one side rather than two.
+        //
+        // Not encoded: the author wrote it into `site.url` as a URL already.
+        return URLUtils.sitePathPrefix(of: config.site.url) + URLUtils.encodedPath("/" + path)
     }
 
     private func escapeXML(_ string: String) -> String {

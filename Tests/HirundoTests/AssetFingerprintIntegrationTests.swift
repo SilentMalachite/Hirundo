@@ -114,6 +114,53 @@ final class AssetFingerprintIntegrationTests: XCTestCase {
         try assertEveryReferenceResolves(in: stylesheet)
     }
 
+    /// マニフェストのキーは `static/` からの相対パスなので、`site.url` にパスがあるサイトの
+    /// ルート絶対参照（`/blog/css/style.css`）はそのままではキーに当たらない。当たらないと
+    /// `rewrite` が `nil` を返し、呼び出し側は元の値を残す ── 警告もエラーも無しに書き換えが
+    /// 止まり、ハッシュ付きの名前しか存在しないのに元の名前を指し続けることになる。
+    func testAFingerprintedAssetIsStillRewrittenUnderABasePath() async throws {
+        try write("""
+        site:
+          title: "Fingerprint Site"
+          url: "https://example.com/blog"
+
+        features:
+          fingerprint: true
+          minify: true
+        """, to: "config.yaml")
+        try write("""
+        <!DOCTYPE html>
+        <html>
+        <head><link rel="stylesheet" href="/blog/css/style.css"></head>
+        <body>
+          <img src="/blog/images/logo.png" alt="logo">
+          <script src="/blog/js/app.js"></script>
+          {{ content }}
+        </body>
+        </html>
+        """, to: "templates/default.html")
+
+        let generator = try SiteGenerator(projectPath: projectPath)
+        try await generator.build()
+
+        let html = try String(
+            contentsOf: outputURL.appendingPathComponent("index.html"), encoding: .utf8
+        )
+        let stylesheet = try XCTUnwrap(manifest()["css/style.css"])
+        XCTAssertNotEqual(stylesheet, "css/style.css", "前提: ハッシュが付いていること")
+        XCTAssertTrue(
+            html.contains("href=\"/blog/\(stylesheet)\""),
+            "base path 付きの参照が書き換わっていない: \(html)"
+        )
+        XCTAssertFalse(html.contains("/blog/css/style.css"), "元の名前が残っている")
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: outputURL.appendingPathComponent(stylesheet).path
+            ),
+            "書き換え先が出力に実在すること"
+        )
+    }
+
     func testEveryAssetIsFingerprinted() async throws {
         let generator = try SiteGenerator(projectPath: projectPath)
         try await generator.build()

@@ -207,24 +207,40 @@ public class TemplateFilters {
     
     /// Registers dynamic filters that depend on site configuration
     public static func registerDynamicFilters(to ext: inout Extension, siteConfig: Site) {
+        let basePath = URLUtils.sitePathPrefix(of: siteConfig.url)
+
+        /// Root-relative, with the path from `site.url` in front of it.
+        ///
+        /// Idempotent, because the values a template hands it come from both sides: a literal
+        /// the author wrote (`"/about/"`), and `{{ page.url }}`, which already carries the base
+        /// path. The test is on a whole component, so a base path of `/blog` leaves an author's
+        /// `/blogging/` alone.
+        func relativeURL(_ path: String) -> String {
+            let rooted = path.hasPrefix("/") ? path : "/" + path
+            guard !basePath.isEmpty else { return rooted }
+            if rooted == basePath || rooted.hasPrefix(basePath + "/") { return rooted }
+            return basePath + rooted
+        }
+
         // Absolute URL filter
         ext.registerFilter("absolute_url") { (value: Any?) in
             guard let path = value as? String else { return value }
             if path.hasPrefix("http") {
                 return path
             }
-            let baseURL = siteConfig.url.hasSuffix("/") ? siteConfig.url : siteConfig.url + "/"
-            let cleanPath = path.hasPrefix("/") ? String(path.dropFirst()) : path
-            return baseURL + cleanPath
+            // Delegated so the origin, the base path and the trailing slash are decided in one
+            // place. `joinSiteURL` takes only the origin, which is why the base path has to be
+            // on the path already.
+            return URLUtils.joinSiteURL(base: siteConfig.url, path: relativeURL(path))
         }
-        
+
         // Relative URL filter
         ext.registerFilter("relative_url") { (value: Any?) in
             guard let path = value as? String else { return value }
             if path.hasPrefix("http") {
                 return path
             }
-            return path.hasPrefix("/") ? path : "/" + path
+            return relativeURL(path)
         }
         
         // Site URL filter

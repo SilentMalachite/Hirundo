@@ -25,6 +25,12 @@ public class AssetPipeline {
     // Configuration
     public var enableFingerprinting: Bool = false
 
+    /// サイトが公開されるパス（`site.url` にパスがあるときの `/blog` など）。
+    ///
+    /// スタイルシートの中のルート絶対参照は公開される形で書かれるので、マニフェストのキーに
+    /// 直すにはこれを剥がす必要がある。空文字列なら何も変わらない。
+    public var basePath: String = ""
+
     /// **コピーそのものをしない**ファイルのパターン。一致したファイルは出力ディレクトリに
     /// 一切現れず、マニフェストにも載らない。
     ///
@@ -71,7 +77,7 @@ public class AssetPipeline {
     /// - Returns: キーが static からの相対パス、値が出力ディレクトリからの相対パスのマニフェスト。
     ///   フィンガープリントが無効なときも全アセットを載せる。
     public func processAssets(from sourcePath: String, to destinationPath: String) throws -> AssetManifest {
-        var manifest = AssetManifest()
+        var manifest = AssetManifest(basePath: basePath)
 
         try fileManager.createDirectory(
             atPath: destinationPath,
@@ -222,7 +228,11 @@ public class AssetPipeline {
         for key in keys {
             let directory = AssetManifest.parentDirectory(of: key)
             dependencies[key] = AssetReferenceRewriter.cssReferences(in: contents[key] ?? "")
-                .compactMap { AssetManifest.resolveKey(reference: $0, inDirectory: directory) }
+                .compactMap {
+                    AssetManifest.resolveKey(
+                        reference: $0, inDirectory: directory, basePath: basePath
+                    )
+                }
                 .filter { contents[$0] != nil }
         }
 
@@ -312,7 +322,9 @@ public class AssetPipeline {
             // 閉路にいるスタイルシートへの参照もここに現れるが、それは上で1度報告済みで、かつ
             // 参照先も元の名前で出るので壊れていない。報告するのは行き先が無い参照だけ。
             for reference in result.unresolvedStylesheetReferences {
-                let key = AssetManifest.resolveKey(reference: reference, inDirectory: directory)
+                let key = AssetManifest.resolveKey(
+                    reference: reference, inDirectory: directory, basePath: basePath
+                )
                 guard key == nil || !knownStylesheets.contains(key!) else { continue }
                 warn("\(relativePath): \(reference) does not resolve to a stylesheet in "
                      + "the static directory; left unchanged")

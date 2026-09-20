@@ -622,6 +622,13 @@ final class SiteScaffolderTests: XCTestCase {
         let engine = TemplateEngine(
             templatesDirectory: dest.appendingPathComponent("templates").path
         )
+        // The scaffolded templates link through `relative_url`, which is a dynamic filter — it
+        // exists only once the engine has a site config, which is what `SiteTemplateRenderer`
+        // does for a real build.
+        engine.configure(with: try Site(
+            title: "My Site", description: nil, url: "https://example.com",
+            language: nil, author: nil
+        ))
         let context: [String: Any] = [
             "site": [
                 "title": "Tom & Jerry",

@@ -182,6 +182,63 @@ final class TemplateEngineTests: XCTestCase {
         XCTAssertTrue(rendered.contains("<strong>") || rendered.contains("**太字**"), "Expected markdown rendering, got: \(rendered)")
     }
     
+    private func renderWithSite(_ template: String, url: String, context: [String: Any] = [:]) throws -> String {
+        let name = "t-\(UUID().uuidString).html"
+        try template.write(
+            to: tempTemplatesDir.appendingPathComponent(name), atomically: true, encoding: .utf8
+        )
+        engine.configure(with: try Site(
+            title: "S", description: nil, url: url, language: nil, author: nil
+        ))
+        return try engine.render(template: name, context: context)
+    }
+
+    func testRelativeURLPrependsTheBasePath() throws {
+        XCTAssertEqual(
+            try renderWithSite("{{ \"/about/\"|relative_url }}", url: "https://example.com/blog"),
+            "/blog/about/"
+        )
+    }
+
+    func testRelativeURLIsIdempotent() throws {
+        // `{{ page.url }}` already carries the prefix; a literal an author writes does not.
+        XCTAssertEqual(
+            try renderWithSite(
+                "{{ \"/blog/about/\"|relative_url }}", url: "https://example.com/blog"
+            ),
+            "/blog/about/"
+        )
+    }
+
+    func testRelativeURLDoesNotPrefixASiblingPathThatMerelyStartsWithIt() throws {
+        XCTAssertEqual(
+            try renderWithSite(
+                "{{ \"/blogging/\"|relative_url }}", url: "https://example.com/blog"
+            ),
+            "/blog/blogging/"
+        )
+    }
+
+    func testRelativeURLIsUnchangedForARootHostedSite() throws {
+        XCTAssertEqual(
+            try renderWithSite("{{ \"/about/\"|relative_url }}", url: "https://example.com"),
+            "/about/"
+        )
+    }
+
+    func testAbsoluteURLCombinesTheOriginAndTheBasePathExactlyOnce() throws {
+        XCTAssertEqual(
+            try renderWithSite("{{ \"/about/\"|absolute_url }}", url: "https://example.com/blog"),
+            "https://example.com/blog/about/"
+        )
+        XCTAssertEqual(
+            try renderWithSite(
+                "{{ \"/blog/about/\"|absolute_url }}", url: "https://example.com/blog"
+            ),
+            "https://example.com/blog/about/"
+        )
+    }
+
     func testURLEncodeMakesALinkOutOfASlug() throws {
         // The pair: `slugify` names the directory, `url_encode` makes the href that reaches it.
         let template = """

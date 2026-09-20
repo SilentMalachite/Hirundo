@@ -9,6 +9,10 @@ public final class DevelopmentServer: @unchecked Sendable {
     private let server: HttpServer
     private let fileManager: FileManager
     private let outputPath: String
+
+    /// サイトが公開されるパス（`site.url` にパスがあるときの `/blog` など）。
+    private let basePath: String
+
     private let injector = LiveReloadScriptInjector()
     private let originGuard = WebSocketOriginGuard()
     private let refusalLog = RefusalLog()
@@ -34,8 +38,10 @@ public final class DevelopmentServer: @unchecked Sendable {
         liveReload: Bool,
         fileManager: FileManager = .default,
         outputDirectory: String = "_site",
+        basePath: String = "",
         hub: LiveReloadHub? = nil
     ) {
+        self.basePath = basePath
         self.fileManager = fileManager
         self.projectPath = projectPath
         self.port = port
@@ -56,7 +62,7 @@ public final class DevelopmentServer: @unchecked Sendable {
             server.listenAddressIPv6 = listen.address
         }
         try server.start(UInt16(port), forceIPv4: listen.forceIPv4, priority: .default)
-        print("Development server started at http://\(listen.displayHost):\(port)")
+        print("Development server started at http://\(listen.displayHost):\(port)\(basePath)/")
     }
 
     /// Gracefully stop the server and related resources (idempotent)
@@ -140,8 +146,19 @@ public final class DevelopmentServer: @unchecked Sendable {
         // encoded form of its name and written to disk under the decoded one, the same split
         // every static host makes. Doing it per component, after the split on `/`, is what keeps
         // a `%2F` from turning into a separator.
+        // A site published under a path links everything as `/blog/…` while the output tree it
+        // is served from starts at `_site`. The prefix comes off here so the generated links
+        // work, and a request without it still resolves — the development server's job is to
+        // show what was just written, not to reproduce a host's routing, and a first page load
+        // that 404s because the prefix is missing reads as a broken tool.
+        var path = requestPath
+        if !basePath.isEmpty, path == basePath || path.hasPrefix(basePath + "/") {
+            // On a whole component, so `/blog` does not swallow the front of `/blogging/`.
+            path = String(path.dropFirst(basePath.count))
+        }
+
         var candidate = root
-        for component in requestPath.split(separator: "/") {
+        for component in path.split(separator: "/") {
             guard let name = decodedComponent(String(component)) else { return nil }
             candidate.appendPathComponent(name)
         }
