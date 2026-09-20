@@ -72,6 +72,12 @@ Hirundo includes basic security measures appropriate for a static site generator
 - **One Escape Table**: `HTMLEscaping.escaped` is the single rule for turning a value
   into markup that means the value. Everything that builds HTML by interpolation uses
   it — the renderer, and the built-in archive, category and tag pages
+- **`search-index.json` Holds Text, Not Markup**: with `features.searchIndex` on, a
+  page's title and its category and tag names are written to the index as the author
+  wrote them. That is correct for JSON — escaping them there would show a searcher
+  `&lt;b&gt;` — but it makes the search UI responsible for the last step. Insert a
+  result with `textContent`, never `innerHTML`. Hirundo ships no search UI, so this is
+  a contract with whatever consumes the file
 
 #### Input Validation Is Not The Boundary
 - **What It Is**: `MarkdownValidator` rejects a file containing any of twelve
