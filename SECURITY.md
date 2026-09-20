@@ -43,6 +43,32 @@ Hirundo includes basic security measures appropriate for a static site generator
 - **Resource Management**: Automatic cleanup of file handles and resources
 - **Transpilation Disabled**: Potentially unsafe JS transpilation disabled by default
 - **File Type Validation**: Strict file type checking and processing
+- **Build-Output Confinement**: Every generated file is written inside the configured
+  output directory. The destination's parent is resolved and checked; the last
+  component never is, so a symbolic link sitting where a file is about to be written
+  is removed rather than followed, and an output tree left holding links from an
+  earlier build repairs itself instead of leaking the write to the link's target. An
+  intermediate directory that resolves outside is refused. `--clean` empties the
+  output directory rather than removing it, so a deliberately symlinked output root
+  is left intact and its target is not deleted
+- **Source Confinement**: A symbolic link under `static/` is followed only while it
+  resolves inside `static/`, and the containment check is repeated immediately before
+  the file is read
+
+#### Content Rendering
+- **Constructed, Not Filtered**: `HTMLRenderer` builds every tag itself from the
+  Markdown tree. It has no case for `HTMLBlock` or `InlineHTML`, both of which are
+  leaves, so raw HTML in a Markdown source renders to nothing rather than being
+  filtered after the fact
+- **Attribute Escaping**: Every author-controlled value reaching an attribute is
+  escaped, including the fenced code block's language, link and image URLs, `title`
+  and `alt`
+- **URL Schemes**: Link and image URLs are limited to http, https, mailto, ftp and
+  ftps; anything else becomes `#`
+- **Known Limitation**: `HTMLSanitizer` is a defence-in-depth pass over markup the
+  renderer already produced, not a sanitizer for untrusted HTML. Pointed at arbitrary
+  input it would let `<iframe>`, `<object>`, `<form>` and unquoted attribute values
+  through. Do not use it as one
 
 #### Development Server Security
 - **Basic WebSocket**: Simple live reload functionality on `/livereload`

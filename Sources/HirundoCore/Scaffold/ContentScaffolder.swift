@@ -401,10 +401,10 @@ public struct ContentScaffolder {
     /// Writes the file, creating missing parent directories and rolling those back if the
     /// write itself fails.
     ///
-    /// Deliberately not `SiteFileManager.writeFile(content:to:)`: this write is atomic and
-    /// exclusive (see ``createExclusively(_:at:in:)``) and must land on the literal path the
-    /// user named, whereas `SiteFileManager` resolves symlinks — right for generated output
-    /// under `_site`, wrong for content the user asked to create here.
+    /// Deliberately not `SiteFileManager.writeFile(content:to:)`: this write is exclusive
+    /// (see ``createExclusively(_:at:in:)``) and must land on the literal path the user named,
+    /// whereas `SiteFileManager` confines every write to the configured *output* directory and
+    /// would refuse a path under `content/` outright.
     ///
     /// A consequence, and a deliberate one: `standardizedFileURL` does not resolve
     /// symlinks, so a symlinked directory the user has already placed under `content/` will

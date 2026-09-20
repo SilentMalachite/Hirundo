@@ -238,10 +238,11 @@ public struct SiteScaffolder {
     ///
     /// Deliberately not `SiteFileManager.createDirectory(at:)`: that type is constructed with
     /// an already-loaded `HirundoConfig`, which does not exist yet while scaffolding is still
-    /// writing the `config.yaml` that would produce it. It also resolves symlinks before
-    /// creating, which is right for output under `_site` but wrong for a destination the user
-    /// named explicitly, and it surfaces raw `FileManager` errors rather than the
-    /// `ScaffoldError` cases `hirundo init` reports. Keep the two in sync only in intent.
+    /// writing the `config.yaml` that would produce it. It also confines every directory it
+    /// creates to that configuration's output directory, so it would refuse this one outright —
+    /// right for generated output under `_site`, wrong for a destination the user named — and it
+    /// surfaces raw `FileManager` errors rather than the `ScaffoldError` cases `hirundo init`
+    /// reports. Keep the two in sync only in intent.
     private func createDirectory(at url: URL) throws {
         do {
             try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
@@ -334,11 +335,11 @@ public struct SiteScaffolder {
     /// Writes one scaffolded file, creating its parent directory only if this run has not
     /// created it already.
     ///
-    /// Deliberately does not go through `SiteFileManager.writeFile(content:to:)`: this write
-    /// is atomic (a failure must not leave a truncated starter file behind) and must land on
-    /// the literal path the user asked to scaffold, whereas `SiteFileManager` resolves
-    /// symlinks — appropriate when it writes generated output into `_site`, but wrong here,
-    /// where a symlinked destination should be written through as given.
+    /// Deliberately does not go through `SiteFileManager.writeFile(content:to:)`, which
+    /// confines every write to the configured output directory and would refuse this one. It
+    /// would also take out a symbolic link sitting at the destination and write a real file in
+    /// its place — the right move for generated output under `_site`, wrong here, where a
+    /// symlinked destination the user set up should be written through as given.
     private func writeFile(
         _ contents: String,
         relativePath: String,
