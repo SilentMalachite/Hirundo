@@ -1089,6 +1089,31 @@ final class AssetPipelineTests: XCTestCase {
             "inside"
         )
     }
-}
 
-// (Plugin-based test helpers removed in Stage 2)
+    /// The walk derives an asset's relative path by taking the source directory off the front.
+    /// It used to do that with `replacingOccurrences`, which removes every occurrence wherever
+    /// it sits, so a tree that repeated the source directory's own absolute spelling lost both
+    /// copies: the asset was published at the wrong depth under the wrong manifest key.
+    func testAnAssetUnderAPathRepeatingTheSourceDirectorysOwnSpellingKeepsItsRelativePath() throws {
+        let sourceDir = tempDir.appendingPathComponent("source")
+        let destDir = tempDir.appendingPathComponent("dest")
+
+        // `<source>/<source without its leading slash>/logo.txt`
+        let repeated = sourceDir.appendingPathComponent(String(sourceDir.path.dropFirst()))
+        try FileManager.default.createDirectory(at: repeated, withIntermediateDirectories: true)
+        try "logo".write(
+            to: repeated.appendingPathComponent("logo.txt"), atomically: true, encoding: .utf8
+        )
+
+        let expected = String(sourceDir.path.dropFirst()) + "/logo.txt"
+        let manifest = try pipeline.processAssets(from: sourceDir.path, to: destDir.path)
+
+        XCTAssertEqual(manifest[expected], expected)
+        XCTAssertNil(manifest["logo.txt"], "the repeated prefix must not be collapsed")
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: destDir.appendingPathComponent(expected).path
+            )
+        )
+    }
+}
