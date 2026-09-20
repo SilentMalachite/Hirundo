@@ -330,9 +330,11 @@ public class SiteGenerator {
             // cannot move a page: a file found behind a symlink never reaches this branch.
             cleanRelativePath = relativePath
         } else {
-            // Fallback for a file that is not under the content directory at all.
-            let relativePath = content.url.path.replacingOccurrences(of: contentBase.path, with: "")
-            cleanRelativePath = relativePath.hasPrefix("/") ? String(relativePath.dropFirst()) : relativePath
+            // Fallback for a file that is not under the content directory at all. Anchored
+            // rather than `replacingOccurrences`, which removes every occurrence wherever it
+            // sits — the very thing `PathBoundary` exists to avoid. With no relationship to the
+            // content directory left to express, the file's own name is the honest answer.
+            cleanRelativePath = content.url.lastPathComponent
         }
 
         // Special handling for index.md files - they should become index.html in their directory
@@ -606,12 +608,33 @@ public class SiteGenerator {
         try data.write(to: outputURL.appendingPathComponent("search-index.json"))
     }
 
+    /// The URL a generated file is published under, from the absolute path it was written to.
+    ///
+    /// The path to strip is the output directory, not the project directory: `Page.url` and
+    /// `Post.url` hold `<project>/_site/…`, so stripping only the project left `/_site` in the
+    /// URL of every entry in `search-index.json`. And it is stripped as a whole path component
+    /// from the front — `range(of:)` removed the first occurrence wherever it sat, which for a
+    /// project whose own path repeats further along cut the wrong piece out.
     private func siteRelativePath(forOutput outputPath: String) -> String {
-        var path = outputPath
-        if let range = path.range(of: projectPath) { path.removeSubrange(range) }
-        if path.hasSuffix("/index.html") { path = String(path.dropLast("/index.html".count)) + "/" }
-        if !path.hasPrefix("/") { path = "/" + path }
-        return path
+        let outputRoot = URL(fileURLWithPath: projectPath)
+            .appendingPathComponent(config.build.outputDirectory).path
+
+        // Same two-step as the content side: the configured spelling first, then both sides
+        // resolved, which folds `/var` and `/private/var` together without moving anything.
+        var path = PathBoundary.relativePath(of: outputPath, under: outputRoot)
+            ?? PathBoundary.relativePath(
+                of: URL(fileURLWithPath: outputPath).resolvingSymlinksInPath().path,
+                under: URL(fileURLWithPath: outputRoot).resolvingSymlinksInPath().path
+            )
+            ?? URL(fileURLWithPath: outputPath).lastPathComponent
+
+        // `a/index.html` is published at `/a/`, and the output root's own index at `/`.
+        if path == "index.html" {
+            path = ""
+        } else if path.hasSuffix("/index.html") {
+            path = String(path.dropLast("index.html".count))
+        }
+        return "/" + path
     }
 
     private func escapeXML(_ string: String) -> String {
