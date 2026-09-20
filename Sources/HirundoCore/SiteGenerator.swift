@@ -77,7 +77,7 @@ public class SiteGenerator {
             .appendingPathComponent(config.build.outputDirectory)
         
         // Prepare output directory
-        try siteFileManager.prepareOutputDirectory(at: outputURL.path, clean: clean)
+        try siteFileManager.prepareOutputDirectory(clean: clean)
         
         // Process content
         let contentURL = URL(fileURLWithPath: projectPath)
@@ -114,16 +114,11 @@ public class SiteGenerator {
         let contentURL = URL(fileURLWithPath: projectPath)
             .appendingPathComponent(config.build.contentDirectory)
         
-        // Clean output directory if needed
-        if clean && FileManager.default.fileExists(atPath: outputURL.path) {
-            try FileManager.default.removeItem(at: outputURL)
-        }
-        
-        // Create output directory
-        try FileManager.default.createDirectory(
-            at: outputURL,
-            withIntermediateDirectories: true
-        )
+        // Prepare output directory. Same path as `build`: `serve` runs its initial build and
+        // every rebuild through here, so the confinement has to apply to both or it applies to
+        // neither. Going through `siteFileManager` also stops this path from ignoring the
+        // injected `FileManager`, which `FileManager.default` did.
+        try siteFileManager.prepareOutputDirectory(clean: clean)
         
         // Process content with error recovery
         let (processedContents, processingErrors) = try await contentProcessor.processDirectoryWithRecovery(

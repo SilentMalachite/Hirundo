@@ -84,14 +84,13 @@ internal struct OutputPathGuard {
         try createIfMissing(current)
         for component in relative.split(separator: "/") {
             current.appendPathComponent(String(component))
-            // An existing link here is fine as long as it stays inside the output tree; one that
-            // leaves it is stale output from a previous layout, so take it out and build over it.
-            if isSymbolicLink(at: current) {
-                guard PathBoundary.contains(current.resolvingSymlinksInPath(), in: root) else {
-                    try fileManager.removeItem(at: current)
-                    try createIfMissing(current)
-                    continue
-                }
+            // An existing link here is fine as long as it stays inside the output tree. One that
+            // leaves it is refused rather than repaired: an intermediate directory is a path
+            // being traversed, not the thing being replaced, and the asset pipeline refuses the
+            // same shape. Only the last component self-heals, and its caller handles that.
+            if isSymbolicLink(at: current),
+               !PathBoundary.contains(current.resolvingSymlinksInPath(), in: root) {
+                return false
             }
             try createIfMissing(current)
         }
