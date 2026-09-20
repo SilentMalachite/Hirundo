@@ -139,7 +139,7 @@ public final class DevelopmentServer: @unchecked Sendable {
         candidate.standardize()
 
         // Reject anything that climbs out of the output directory, e.g. `/../../etc/passwd`.
-        guard candidate.path == root.path || candidate.path.hasPrefix(root.path + "/") else {
+        guard PathBoundary.contains(candidate, in: root) else {
             return nil
         }
 

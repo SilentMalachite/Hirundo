@@ -73,10 +73,7 @@ private func standardizedPath(_ path: String) -> String {
 }
 
 /// True when `path` is `other` itself or a descendant of it. Both arguments must already be
-/// standardized. The separator is appended to `other` so that `/a/stat` does not count as being
-/// inside `/a/static`; the root directory already ends in one.
+/// standardized; ``PathBoundary`` deliberately resolves nothing, which is what this check wants.
 private func isSameOrInside(_ path: String, of other: String) -> Bool {
-    if path == other { return true }
-    let prefix = other.hasSuffix("/") ? other : other + "/"
-    return path.hasPrefix(prefix)
+    PathBoundary.contains(path, in: other)
 }

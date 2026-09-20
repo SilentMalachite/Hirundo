@@ -1,38 +1,19 @@
 import Foundation
 import Markdown
 
-/// セキュアなHTMLレンダラー（包括的なXSS保護付き）
-/// このレンダラーはXSS攻撃に対する複数の防御層を実装：
-/// 1. ホワイトリストベースのタグフィルタリング
-/// 2. 属性サニタイゼーション
-/// 3. URLスキーム検証
-/// 4. イベントハンドラー削除
-/// 5. HTMLエンティティデコード（エンコードされた攻撃を検出）
+/// MarkdownのASTからHTMLを組み立てるレンダラー。
+///
+/// 安全性は「どのタグを許すか」を後から選り分けることではなく、**タグをこちらで組み立てる**
+/// ことから来ている。`HTMLBlock` と `InlineHTML` には case を持たず、どちらも子を持たない
+/// 葉なので、Markdown 中の生HTMLは何も出力されずに落ちる。出力に現れるタグはここに書かれた
+/// ものだけで、ノード由来の文字列はすべて `escapeText` / `escapeAttribute` を通すか、
+/// `sanitizeURL` で拒否したうえでさらに属性としてエスケープする。
+///
+/// `HTMLSanitizer` はそのうえに重ねる多層防御であって、汎用サニタイザではない（同型の
+/// doc コメントを参照）。
 public final class HTMLRenderer: Sendable {
     private let sanitizer: HTMLSanitizer
-    
-    // 許可されたHTMLタグ（安全なサブセット）
-    private let allowedTags = Set([
-        "p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6",
-        "ul", "ol", "li", "dl", "dt", "dd",
-        "a", "em", "strong", "i", "b", "u", "s", "strike",
-        "code", "pre", "blockquote", "cite", "q",
-        "table", "thead", "tbody", "tr", "td", "th",
-        "img", "figure", "figcaption", "caption",
-        "div", "span", "article", "section", "nav", "aside",
-        "header", "footer", "main", "address"
-    ])
-    
-    // タグごとの許可された属性
-    private let allowedAttributes: [String: Set<String>] = [
-        "a": ["href", "title", "rel", "target"],
-        "img": ["src", "alt", "width", "height", "title"],
-        "blockquote": ["cite"],
-        "q": ["cite"],
-        "td": ["colspan", "rowspan"],
-        "th": ["colspan", "rowspan", "scope"]
-    ]
-    
+
     // 安全とみなされるURLスキーム
     private let safeURLSchemes = Set(["http", "https", "mailto", "ftp", "ftps"])
     
@@ -72,7 +53,11 @@ public final class HTMLRenderer: Sendable {
             return "<blockquote>\n\(blockquote.children.map { renderNode($0) }.joined())</blockquote>\n"
         case let codeBlock as Markdown.CodeBlock:
             let language = codeBlock.language ?? ""
-            let languageAttr = language.isEmpty ? "" : " class=\"language-\(language)\""
+            // The fence info string is author-controlled; unescaped, a `"` in it closes the
+            // class attribute and everything after it becomes further attributes.
+            let languageAttr = language.isEmpty
+                ? ""
+                : " class=\"language-\(escapeAttribute(language))\""
             return "<pre><code\(languageAttr)>\(escapeText(codeBlock.code))</code></pre>\n"
         case let table as Markdown.Table:
             return renderTable(table)
@@ -93,11 +78,13 @@ public final class HTMLRenderer: Sendable {
         case let strong as Strong:
             return "<strong>\(strong.children.map { renderInline($0) }.joined())</strong>"
         case let link as Markdown.Link:
-            let href = sanitizeURL(link.destination ?? "")
+            // `sanitizeURL` decides whether the URL may be used at all; it does not make it
+            // safe to interpolate, so the value is still escaped as an attribute.
+            let href = escapeAttribute(sanitizeURL(link.destination ?? ""))
             let title = link.title?.isEmpty == false ? " title=\"\(escapeAttribute(link.title!))\"" : ""
             return "<a href=\"\(href)\"\(title)>\(link.children.map { renderInline($0) }.joined())</a>"
         case let image as Markdown.Image:
-            let src = sanitizeURL(image.source ?? "")
+            let src = escapeAttribute(sanitizeURL(image.source ?? ""))
             let alt = image.plainText
             let title = image.title?.isEmpty == false ? " title=\"\(escapeAttribute(image.title!))\"" : ""
             return "<img src=\"\(src)\" alt=\"\(escapeAttribute(alt))\"\(title)>"
@@ -150,8 +137,12 @@ public final class HTMLRenderer: Sendable {
     }
     
     /// 属性値をエスケープ
+    ///
+    /// `&` は最初に置換する。後にすると、先に入れたエンティティのアンパサンドまで
+    /// 二重にエスケープしてしまう。
     private func escapeAttribute(_ text: String) -> String {
         return text
+            .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "\"", with: "&quot;")
             .replacingOccurrences(of: "'", with: "&#39;")
             .replacingOccurrences(of: "<", with: "&lt;")

@@ -152,8 +152,7 @@ public class AssetPipeline {
                 "Asset source is not readable (broken symlink?): \(fileURL.path)"
             )
         }
-        let prefix = sourceRoot.hasSuffix("/") ? sourceRoot : sourceRoot + "/"
-        guard resolved.path == sourceRoot || resolved.path.hasPrefix(prefix) else {
+        guard PathBoundary.contains(resolved.path, in: sourceRoot) else {
             throw AssetPipelineError.pathTraversalAttempt(fileURL.path)
         }
         return ConfinedSource(url: resolved, identity: try FileIdentity(ofItemAtPath: resolved.path))
@@ -352,23 +351,19 @@ public class AssetPipeline {
         manifest: inout AssetManifest
     ) throws {
         let destinationRootURL = URL(fileURLWithPath: destinationPath).resolvingSymlinksInPath()
+        let guardian = OutputPathGuard(root: destinationRootURL, fileManager: fileManager)
         let rawCandidateURL = destinationRootURL.appendingPathComponent(relativePath)
 
-        // 閉じ込めの判定は親ディレクトリまでを解決して行い、最後の要素は解決しない。最後の要素は
-        // これから置き換える対象であって辿る対象ではないためで、辿ってしまうと前回のビルドが
-        // 残したシンボリックリンク（以前のバージョンが書き出した `_site` がまさにそれ）の
-        // 解決先が出力先の外だという理由でビルドが落ち、自己修復できなくなる。
-        // 途中のディレクトリが出力先の外を指すリンクだった場合は、親の解決で弾かれる。
-        let lastComponent = rawCandidateURL.lastPathComponent
-        let parentURL = rawCandidateURL.deletingLastPathComponent().resolvingSymlinksInPath()
-        let candidateURL = parentURL.appendingPathComponent(lastComponent)
-
-        guard lastComponent != "." && lastComponent != "..",
-              let outputDirectory = Self.relativeDirectory(of: parentURL, under: destinationRootURL) else {
+        // 閉じ込めの判定は親ディレクトリまでを解決して行い、最後の要素は解決しない。理由は
+        // `OutputPathGuard` の doc コメントにまとめてある。
+        guard let destination = guardian.destination(for: rawCandidateURL) else {
             throw AssetPipelineError.processingFailed(
-                "Output path escapes destination directory: \(candidateURL.path)"
+                "Output path escapes destination directory: \(rawCandidateURL.path)"
             )
         }
+        let candidateURL = destination.url
+        let parentURL = destination.parent
+        let outputDirectory = destination.relativeDirectory
 
         try fileManager.createDirectory(at: parentURL, withIntermediateDirectories: true)
 
@@ -384,7 +379,7 @@ public class AssetPipeline {
                     fingerprint: processor.generateFingerprint(for: data)
                 ))
                 : candidateURL
-            try removeStaleSymlink(at: outputURL)
+            try guardian.removeStaleSymlink(at: outputURL)
             try data.write(to: outputURL, options: .atomic)
 
         case .file(let source):
@@ -442,7 +437,7 @@ public class AssetPipeline {
                     fingerprint: try processor.generateFingerprint(for: staging)
                 ))
                 : candidateURL
-            try removeStaleSymlink(at: outputURL)
+            try guardian.removeStaleSymlink(at: outputURL)
             // 既定では差し替え先（＝前回の出力）のメタデータが引き継がれるため、`static/` 側で
             // パーミッションを変えても非クリーン再ビルドに反映されない。`copyItem` が運んできた
             // ソース由来のメタデータを使う。
@@ -462,31 +457,7 @@ public class AssetPipeline {
             : outputDirectory + "/" + outputURL.lastPathComponent
     }
 
-    /// 出力先にシンボリックリンクが残っていると（以前のバージョンが書き出した `_site` が
-    /// まさにそれ）、`replaceItemAt` は "file doesn't exist" で失敗する。最後の要素は
-    /// 置き換える対象であって辿る対象ではないので、どちらの書き込み経路でも先に取り除いて
-    /// おき、非クリーン再ビルドで自己修復させる。`attributesOfItem` は `lstat` 相当で
-    /// リンクを辿らないため、壊れたリンクも判定できる。
-    private func removeStaleSymlink(at outputURL: URL) throws {
-        if let attributes = try? fileManager.attributesOfItem(atPath: outputURL.path),
-           attributes[.type] as? FileAttributeType == .typeSymbolicLink {
-            try fileManager.removeItem(at: outputURL)
-        }
-    }
 
-    /// 解決済みの親ディレクトリの、出力ルートからの相対パス。ルート直下なら空文字列、
-    /// ルートの外なら `nil`。
-    ///
-    /// 相対化するのはディレクトリだけで、最後の要素は呼び出し側が未解決のまま足す。
-    /// パス全体を解決してしまうと、置き換える予定の出力側リンクを辿った先を
-    /// マニフェストに書いてしまう。
-    private static func relativeDirectory(of directory: URL, under root: URL) -> String? {
-        let rootPath = root.path
-        if directory.path == rootPath { return "" }
-        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
-        guard directory.path.hasPrefix(prefix) else { return nil }
-        return String(directory.path.dropFirst(prefix.count))
-    }
 
     private func warn(_ message: String) {
         try? FileHandle.standardError.write(contentsOf: Data("⚠️  \(message)\n".utf8))

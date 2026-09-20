@@ -123,7 +123,36 @@ and source map generation have been removed entirely — `AssetConcatenator`,
 - Safe processing validation
 - Symlink containment — a link under `static/` is followed only while it resolves inside
   `static/`; one pointing outside is skipped with a warning, so it cannot publish its target
+- Output confinement — see below; the pipeline and `SiteFileManager` share one implementation
 - Content verification
+
+### 4a. Output Confinement (`Utilities/PathBoundary.swift`, `Utilities/OutputPathGuard.swift`)
+
+Every generated file — pages, archive/category/tag pages, assets, feeds — is written through
+one rule, so there is one place to read and one place to change.
+
+`PathBoundary` answers "is this path inside that directory" from the two strings alone. The
+boundary is always a whole path component: `content-extra`, `contents` and `content2` are
+siblings of `content`, not children of it, and `/a/stat` is not inside `/a/static`. It never
+touches the filesystem, which is the point — the call sites disagree on symlink resolution
+deliberately (the pruner resolves both sides, `WatchPathValidation` resolves nothing because
+it validates the configuration rather than the filesystem), and each keeps its own policy.
+
+`OutputPathGuard` adds the filesystem half. It resolves a destination's parent and **never the
+last component**, because that component is the file being replaced rather than a path being
+traversed. A symbolic link found there is removed instead of followed, so an output tree left
+holding links — what an older version wrote, or what anyone with write access to `_site` can
+plant — repairs itself on the next build rather than leaking the write to the link's target.
+An intermediate directory that resolves outside is refused instead. Directories are created a
+component at a time, because `resolvingSymlinksInPath()` is a no-op on a path that does not
+exist yet, so a single resolution of a chain never sees a link partway along it.
+
+`--clean` empties the output directory rather than removing it: removing it would resolve the
+root when the root is itself a link and delete whatever it points at.
+
+Writes that are not generated output stay out of this path on purpose. `hirundo init` and
+`hirundo new` must land on the literal path the user named, following the user's own symlinks;
+their scaffolders use plain `FileManager` and say why in comments.
 
 ### 5. Development Server (`DevelopmentServer.swift`)
 

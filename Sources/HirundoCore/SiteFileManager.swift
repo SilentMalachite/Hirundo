@@ -1,211 +1,163 @@
 import Foundation
 
-// File system operations separated from SiteGenerator
+/// Every write the generator makes into `_site`, confined to `_site`.
+///
+/// The confinement follows ``OutputPathGuard``: the output root is resolved, a destination's
+/// parent is resolved, and the last component never is — it is the file being replaced, so a
+/// symbolic link found there is taken out rather than followed. That is what makes a `_site` left
+/// holding links from an older layout repair itself on the next build instead of writing through
+/// them to wherever they point.
+///
+/// Writes that are not generated output do not belong here. `ContentScaffolder` and
+/// `SiteScaffolder` deliberately use plain `FileManager` so that `hirundo new` lands on the
+/// literal path the user named, following the user's own symlinks; see their comments.
 public class SiteFileManager {
     private let fileManager: FileManager
     private let config: HirundoConfig
     private let projectPath: String
-    
+
     public init(config: HirundoConfig, projectPath: String, fileManager: FileManager = .default) {
         self.config = config
         self.projectPath = projectPath
         self.fileManager = fileManager
     }
-    
-    // Create output directory structure
-    public func prepareOutputDirectory(at path: String, clean: Bool) throws {
-        let outputURL = URL(fileURLWithPath: path)
-        
-        // Clean output directory if requested
-        if clean && fileManager.fileExists(atPath: outputURL.path) {
-            try removeDirectory(at: outputURL)
+
+    // MARK: - Output root
+
+    /// The configured output directory, as spelled and as resolved.
+    ///
+    /// Recomputed on every call rather than cached at init. Resolving a path that does not exist
+    /// yet is a no-op, so a root resolved before `prepareOutputDirectory` created it would still
+    /// say `/var/…` while every parent resolved later says `/private/var/…`, and every write would
+    /// be refused as escaping. The asset pipeline resolves its destination per write for the same
+    /// reason.
+    private func outputRoots() -> (resolved: URL, raw: URL) {
+        let raw = URL(fileURLWithPath: projectPath)
+            .appendingPathComponent(config.build.outputDirectory)
+        return (raw.resolvingSymlinksInPath(), raw)
+    }
+
+    /// A destination under either spelling of the root, or `nil` when it is under neither.
+    ///
+    /// Both spellings are accepted because a path that resolves under the configured output
+    /// directory is logically inside the output tree even when some ancestor of the project is
+    /// itself a link.
+    private func confinedDestination(for url: URL) -> (OutputPathGuard, OutputPathGuard.Destination)? {
+        let roots = outputRoots()
+        for root in [roots.resolved, roots.raw] {
+            let guardian = OutputPathGuard(root: root, fileManager: fileManager)
+            if let destination = guardian.destination(for: url) {
+                return (guardian, destination)
+            }
         }
-        
-        // Create output directory
-        try createDirectory(at: outputURL)
+        return nil
     }
-    
-    // Create a directory with proper error handling and symlink protection
-    public func createDirectory(at url: URL) throws {
-        // Create directory
-        
-        // Also resolve the target path for consistency
-        let resolvedURL = url.resolvingSymlinksInPath()
-        
-        try fileManager.createDirectory(
-            at: resolvedURL,
-            withIntermediateDirectories: true
-        )
-    }
-    
-    // Remove a directory
-    public func removeDirectory(at url: URL) throws {
-        
-        // Remove directory
-        
-        // Also resolve the target path for consistency
-        let resolvedURL = url.resolvingSymlinksInPath()
-        
-        try fileManager.removeItem(at: resolvedURL)
-    }
-    
-    // Write content to file
-    public func writeFile(content: String, to url: URL) throws {
-        
-        // Create parent directory if needed
-        let parentDir = url.deletingLastPathComponent()
-        if !fileManager.fileExists(atPath: parentDir.path) {
-            try createDirectory(at: parentDir)
-        }
-        
-        // Write file with symlink protection
-        if let data = content.data(using: .utf8) {
-            // Write file
-            
-            // Also resolve the target path for consistency
-            let resolvedURL = url.resolvingSymlinksInPath()
-            #if DEBUG
-            let isTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-            if isTest { print("[SiteFileManager] write \(resolvedURL.path)") }
-            #endif
-            try data.write(to: resolvedURL)
-        }
-    }
-    
-    // Copy a file
-    public func copyFile(from source: URL, to destination: URL) throws {
-        
-        // Create parent directory if needed
-        let parentDir = destination.deletingLastPathComponent()
-        if !fileManager.fileExists(atPath: parentDir.path) {
-            try createDirectory(at: parentDir)
-        }
-        
-        // Copy file
-        
-        // Also resolve the paths for consistency
-        let resolvedSource = source.resolvingSymlinksInPath()
-        let resolvedDestination = destination.resolvingSymlinksInPath()
-        #if DEBUG
-        let isTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-        if isTest { print("[SiteFileManager] copy \(resolvedSource.path) -> \(resolvedDestination.path)") }
-        #endif
-        try fileManager.copyItem(at: resolvedSource, to: resolvedDestination)
-    }
-    
-    // Copy directory recursively
-    public func copyDirectory(from source: URL, to destination: URL) throws {
-        
-        // Create destination directory
-        try createDirectory(at: destination)
-        
-        // Get directory contents
-        let contents = try fileManager.contentsOfDirectory(
-            at: source,
-            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        )
-        
-        for itemURL in contents {
-            let destinationURL = destination.appendingPathComponent(itemURL.lastPathComponent)
-            
+
+    // MARK: - Preparing the output directory
+
+    /// Creates the configured output directory, optionally emptying it first.
+    ///
+    /// `clean` empties the directory; it does not remove it. Removing it would resolve the link
+    /// when the root is one — `_site -> /Volumes/build/site` is a layout the asset pipeline
+    /// already supports — and delete whatever it points at, which for `_site -> $HOME` is exactly
+    /// as bad as it sounds. Emptying keeps the damage inside the output directory, which is what
+    /// `--clean` means.
+    public func prepareOutputDirectory(clean: Bool) throws {
+        let roots = outputRoots()
+        let rawPath = roots.raw.path
+
+        if let attributes = try? fileManager.attributesOfItem(atPath: rawPath) {
+            let type = attributes[.type] as? FileAttributeType
+            let isLink = type == .typeSymbolicLink
+            let target = isLink ? roots.raw.resolvingSymlinksInPath() : roots.raw
             var isDirectory: ObjCBool = false
-            if fileManager.fileExists(atPath: itemURL.path, isDirectory: &isDirectory) {
-                if isDirectory.boolValue {
-                    try copyDirectory(from: itemURL, to: destinationURL)
-                } else {
-                    try copyFile(from: itemURL, to: destinationURL)
+            let exists = fileManager.fileExists(atPath: target.path, isDirectory: &isDirectory)
+
+            guard !exists || isDirectory.boolValue else {
+                throw FileManagerError.outputRootIsNotADirectory(rawPath)
+            }
+            if clean && exists {
+                if isLink {
+                    warn("\(rawPath) is a symbolic link; emptying \(target.path) instead of removing the link")
                 }
+                try emptyDirectory(at: target)
             }
         }
+
+        try fileManager.createDirectory(at: roots.raw, withIntermediateDirectories: true)
     }
-    
-    // List files in directory
-    public func listFiles(
-        in directory: URL,
-        withExtension ext: String? = nil,
-        recursive: Bool = false
-    ) throws -> [URL] {
-        // Basic directory validation
-        
-        var files: [URL] = []
-        
-        if recursive {
-            guard let enumerator = fileManager.enumerator(
-                at: directory,
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            ) else {
-                throw FileManagerError.cannotEnumerateDirectory(directory.path)
-            }
-            
-            for case let fileURL as URL in enumerator {
-                if let ext = ext {
-                    if fileURL.pathExtension == ext {
-                        files.append(fileURL)
-                    }
-                } else {
-                    var isDirectory: ObjCBool = false
-                    if fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory),
-                       !isDirectory.boolValue {
-                        files.append(fileURL)
-                    }
-                }
-            }
-        } else {
-            let contents = try fileManager.contentsOfDirectory(
-                at: directory,
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            )
-            
-            for fileURL in contents {
-                if let ext = ext {
-                    if fileURL.pathExtension == ext {
-                        files.append(fileURL)
-                    }
-                } else {
-                    var isDirectory: ObjCBool = false
-                    if fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory),
-                       !isDirectory.boolValue {
-                        files.append(fileURL)
-                    }
-                }
-            }
+
+    /// Removes everything in `directory`, hidden entries included — `.nojekyll` and friends are
+    /// generated output like anything else.
+    private func emptyDirectory(at directory: URL) throws {
+        let contents = try fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )
+        for entry in contents {
+            try fileManager.removeItem(at: entry)
         }
-        
-        return files
     }
-    
-    // Check if path exists
+
+    // MARK: - Writing
+
+    /// Creates a directory inside the output tree.
+    ///
+    /// A link found at the last component is kept when it stays inside the output tree — the
+    /// asset pipeline's manifest already resolves through those — and taken out when it does not,
+    /// so a stale layout repairs itself.
+    public func createDirectory(at url: URL) throws {
+        guard let (guardian, destination) = confinedDestination(for: url) else {
+            throw FileManagerError.outputPathEscapes(url.path)
+        }
+        if guardian.isSymbolicLink(at: destination.url),
+           !PathBoundary.contains(destination.url.resolvingSymlinksInPath(), in: guardian.root) {
+            try fileManager.removeItem(at: destination.url)
+        }
+        guard try guardian.createDirectories(upTo: destination.url) else {
+            throw FileManagerError.outputPathEscapes(url.path)
+        }
+    }
+
+    /// Writes a generated file into the output tree, atomically.
+    public func writeFile(content: String, to url: URL) throws {
+        guard let (guardian, destination) = confinedDestination(for: url) else {
+            throw FileManagerError.outputPathEscapes(url.path)
+        }
+        guard try guardian.createDirectories(upTo: destination.parent) else {
+            throw FileManagerError.outputPathEscapes(url.path)
+        }
+        try guardian.removeStaleSymlink(at: destination.url)
+        try Data(content.utf8).write(to: destination.url, options: .atomic)
+    }
+
+    // MARK: - Queries
+
+    /// Whether anything exists at `path`.
+    ///
+    /// Deliberately not confined to the output directory: `SiteGenerator` uses it to ask whether
+    /// `static/` is there at all. It reads, it never writes, so there is nothing to confine.
     public func fileExists(at path: String) -> Bool {
         return fileManager.fileExists(atPath: path)
     }
-    
-    // Get file attributes
-    public func fileAttributes(at path: String) throws -> [FileAttributeKey: Any] {
-        // Basic path validation
-        return try fileManager.attributesOfItem(atPath: path)
+
+    private func warn(_ message: String) {
+        try? FileHandle.standardError.write(contentsOf: Data("⚠️  \(message)\n".utf8))
     }
 }
 
-// File manager errors
+/// Failures the confinement raises. Anything the filesystem itself refuses is rethrown as the
+/// `FileManager` error it came with, which carries a reason worth reading.
 public enum FileManagerError: LocalizedError {
-    case cannotEnumerateDirectory(String)
-    case cannotCreateDirectory(String)
-    case cannotWriteFile(String)
-    case cannotCopyFile(String, String)
-    
+    case outputPathEscapes(String)
+    case outputRootIsNotADirectory(String)
+
     public var errorDescription: String? {
         switch self {
-        case .cannotEnumerateDirectory(let path):
-            return "Cannot enumerate directory: \(path)"
-        case .cannotCreateDirectory(let path):
-            return "Cannot create directory: \(path)"
-        case .cannotWriteFile(let path):
-            return "Cannot write file: \(path)"
-        case .cannotCopyFile(let source, let destination):
-            return "Cannot copy file from \(source) to \(destination)"
+        case .outputPathEscapes(let path):
+            return "Output path escapes the output directory: \(path)"
+        case .outputRootIsNotADirectory(let path):
+            return "Output path exists and is not a directory: \(path)"
         }
     }
 }

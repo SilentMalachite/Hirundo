@@ -323,7 +323,7 @@ struct SymlinkFollowingWalk {
             announce("Skipping content symlink outside the project: \(description)")
             return false
         }
-        if excluded.contains(where: { targetPath == $0 || targetPath.hasPrefix($0 + "/") }) {
+        if excluded.contains(where: { PathBoundary.contains(targetPath, in: $0) }) {
             announce("Skipping content symlink into a build directory: \(description)")
             return false
         }

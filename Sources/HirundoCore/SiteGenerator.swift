@@ -77,7 +77,7 @@ public class SiteGenerator {
             .appendingPathComponent(config.build.outputDirectory)
         
         // Prepare output directory
-        try siteFileManager.prepareOutputDirectory(at: outputURL.path, clean: clean)
+        try siteFileManager.prepareOutputDirectory(clean: clean)
         
         // Process content
         let contentURL = URL(fileURLWithPath: projectPath)
@@ -114,16 +114,11 @@ public class SiteGenerator {
         let contentURL = URL(fileURLWithPath: projectPath)
             .appendingPathComponent(config.build.contentDirectory)
         
-        // Clean output directory if needed
-        if clean && FileManager.default.fileExists(atPath: outputURL.path) {
-            try FileManager.default.removeItem(at: outputURL)
-        }
-        
-        // Create output directory
-        try FileManager.default.createDirectory(
-            at: outputURL,
-            withIntermediateDirectories: true
-        )
+        // Prepare output directory. Same path as `build`: `serve` runs its initial build and
+        // every rebuild through here, so the confinement has to apply to both or it applies to
+        // neither. Going through `siteFileManager` also stops this path from ignoring the
+        // injected `FileManager`, which `FileManager.default` did.
+        try siteFileManager.prepareOutputDirectory(clean: clean)
         
         // Process content with error recovery
         let (processedContents, processingErrors) = try await contentProcessor.processDirectoryWithRecovery(
@@ -320,14 +315,14 @@ public class SiteGenerator {
             .appendingPathComponent(config.build.contentDirectory)
 
         let cleanRelativePath: String
-        if let relativePath = Self.pathRelative(content.url.path, to: contentBase.path) {
+        if let relativePath = PathBoundary.relativePath(of: content.url.path, under: contentBase.path) {
             // The walk reports every file it followed a symlink to at its logical path under
             // the content directory as configured, so this is the spelling that keeps a page
             // at the URL its path under `content/` implies.
             cleanRelativePath = relativePath
-        } else if let relativePath = Self.pathRelative(
-            content.url.resolvingSymlinksInPath().path,
-            to: contentBase.resolvingSymlinksInPath().path
+        } else if let relativePath = PathBoundary.relativePath(
+            of: content.url.resolvingSymlinksInPath().path,
+            under: contentBase.resolvingSymlinksInPath().path
         ) {
             // Not a logical path, so it came straight from `FileManager`'s enumerator, which
             // hands out its own spelling of the directory it walked (`/private/var` where the
@@ -335,9 +330,11 @@ public class SiteGenerator {
             // cannot move a page: a file found behind a symlink never reaches this branch.
             cleanRelativePath = relativePath
         } else {
-            // Fallback for a file that is not under the content directory at all.
-            let relativePath = content.url.path.replacingOccurrences(of: contentBase.path, with: "")
-            cleanRelativePath = relativePath.hasPrefix("/") ? String(relativePath.dropFirst()) : relativePath
+            // Fallback for a file that is not under the content directory at all. Anchored
+            // rather than `replacingOccurrences`, which removes every occurrence wherever it
+            // sits — the very thing `PathBoundary` exists to avoid. With no relationship to the
+            // content directory left to express, the file's own name is the honest answer.
+            cleanRelativePath = content.url.lastPathComponent
         }
 
         // Special handling for index.md files - they should become index.html in their directory
@@ -611,25 +608,33 @@ public class SiteGenerator {
         try data.write(to: outputURL.appendingPathComponent("search-index.json"))
     }
 
-    /// Relative path of `path` under `base`, or `nil` when it is not under it.
+    /// The URL a generated file is published under, from the absolute path it was written to.
     ///
-    /// The boundary is a whole path component, never a bare string prefix: `content-extra`,
-    /// `content-posts`, `contents` and `content2` are ordinary sibling names that all start with
-    /// `content` without being anywhere inside it, and a prefix match would publish their pages
-    /// at a URL made of whatever characters were left over.
-    private static func pathRelative(_ path: String, to base: String) -> String? {
-        let base = base.hasSuffix("/") ? String(base.dropLast()) : base
-        guard path != base else { return "" }
-        guard path.hasPrefix(base + "/") else { return nil }
-        return String(path.dropFirst(base.count + 1))
-    }
-
+    /// The path to strip is the output directory, not the project directory: `Page.url` and
+    /// `Post.url` hold `<project>/_site/…`, so stripping only the project left `/_site` in the
+    /// URL of every entry in `search-index.json`. And it is stripped as a whole path component
+    /// from the front — `range(of:)` removed the first occurrence wherever it sat, which for a
+    /// project whose own path repeats further along cut the wrong piece out.
     private func siteRelativePath(forOutput outputPath: String) -> String {
-        var path = outputPath
-        if let range = path.range(of: projectPath) { path.removeSubrange(range) }
-        if path.hasSuffix("/index.html") { path = String(path.dropLast("/index.html".count)) + "/" }
-        if !path.hasPrefix("/") { path = "/" + path }
-        return path
+        let outputRoot = URL(fileURLWithPath: projectPath)
+            .appendingPathComponent(config.build.outputDirectory).path
+
+        // Same two-step as the content side: the configured spelling first, then both sides
+        // resolved, which folds `/var` and `/private/var` together without moving anything.
+        var path = PathBoundary.relativePath(of: outputPath, under: outputRoot)
+            ?? PathBoundary.relativePath(
+                of: URL(fileURLWithPath: outputPath).resolvingSymlinksInPath().path,
+                under: URL(fileURLWithPath: outputRoot).resolvingSymlinksInPath().path
+            )
+            ?? URL(fileURLWithPath: outputPath).lastPathComponent
+
+        // `a/index.html` is published at `/a/`, and the output root's own index at `/`.
+        if path == "index.html" {
+            path = ""
+        } else if path.hasSuffix("/index.html") {
+            path = String(path.dropLast("index.html".count))
+        }
+        return "/" + path
     }
 
     private func escapeXML(_ string: String) -> String {
