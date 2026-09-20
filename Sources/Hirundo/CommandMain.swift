@@ -11,7 +11,7 @@ struct HirundoCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "hirundo",
         abstract: "A modern, fast, and secure static site generator built with Swift",
-        version: "1.0.3",
+        version: "3.0.0",
         subcommands: [
             InitCommand.self,
             BuildCommand.self,
